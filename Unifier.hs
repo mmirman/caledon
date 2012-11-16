@@ -256,7 +256,6 @@ solve judge@(context :|- r) = rightUnfocused judge <|> (F.msum $ useSingle (\f c
 ----------------------------------------------------------------------
 ----------------------- LOGIC ENGINE ---------------------------------
 ----------------------------------------------------------------------
-
 freeVariables (Forall a t) = S.delete a $ freeVariables t
 freeVariables (Exists a t) = S.delete a $ freeVariables t
 freeVariables (t1 :->: t2) = freeVariables t1 `S.union` freeVariables t2
@@ -333,8 +332,7 @@ checkType env base t = runRWST (checkTp base t) env 0 >> return ()
             v1 <- Var <$> getNewVar            
             checkTp' $ subst (n |-> v1) t -- TODO
           t1 :->: t2 -> checkTp "atom" t1 >> checkTp' t2
-          t1 :*: t2 -> checkTp' t1 >> checkTp' t2
-          t1 :+: t2 -> checkTp' t1 >> checkTp' t2
+          _ -> checkTp' (ty1 t) >> checkTp' (ty2 t)
 
 typeCheckPredicate :: Environment -> Predicate -> Maybe ()
 typeCheckPredicate env pred = do
