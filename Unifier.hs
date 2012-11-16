@@ -326,8 +326,12 @@ checkType env base t = runRWST (checkTp base t) env 0 >> return ()
   where checkTp base = checkTp'
         checkTp' t = case t of
           Atom k t -> checkTerm t $ Atom k $ Cons base
-          Exists n t -> undefined -- TODO
-          Forall n t -> undefined -- TODO
+          Exists n t -> do
+            v1 <- Var <$> getNewVar            
+            checkTp' $ subst (n |-> v1) t -- TODO
+          Forall n t -> do
+            v1 <- Var <$> getNewVar            
+            checkTp' $ subst (n |-> v1) t -- TODO
           t1 :->: t2 -> checkTp "atom" t1 >> checkTp' t2
           t1 :*: t2 -> checkTp' t1 >> checkTp' t2
           t1 :+: t2 -> checkTp' t1 >> checkTp' t2
