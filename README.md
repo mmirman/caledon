@@ -1,0 +1,2 @@
+I was bored and decided to try to implement some black magic focusing for logic programming with a breadth first search monad
+I like to call Choice. I was also curious how higher order unification worked.  Now there is a language.  Who knew?
