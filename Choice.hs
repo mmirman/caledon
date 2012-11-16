@@ -4,6 +4,8 @@ module Choice where
 import Control.Monad
 import Data.Functor
 import Control.Applicative
+import Control.Monad.Error (ErrorT, runErrorT)
+import Control.Monad.Identity (Identity, runIdentity)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Maybe
 
@@ -30,9 +32,12 @@ instance MonadPlus (Choice) where
   mzero = Fail
   mplus = (:<|>:)
   
-  
 class RunChoice m where  
   runChoice :: m a -> Maybe a
+  runError :: m a -> Either String a
+  runError m  = case runChoice m of 
+    Nothing -> Left "error"
+    Just a -> Right a
   
 instance RunChoice Choice where
   runChoice chs = case dropWhile notSuccess lst of
@@ -47,3 +52,9 @@ instance RunChoice Choice where
           notSuccess (Success a) = False
           notSuccess _ = True
 instance RunChoice Maybe where runChoice = id
+  
+instance RunChoice (ErrorT String Identity) where 
+  runChoice m = case runIdentity $ runErrorT m of
+    Left e -> Nothing
+    Right l -> Just l
+  runError = runIdentity . runErrorT
