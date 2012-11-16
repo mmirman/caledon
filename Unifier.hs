@@ -6,13 +6,13 @@ import Control.Applicative ((<|>), empty)
 import Control.Monad.Error (ErrorT, throwError, runErrorT, lift, unless)
 import Control.Monad.State (StateT, get, put, runStateT, modify)
 import Control.Monad.State.Class
-import Control.Monad.RWS (RWST, RWS, get, put, tell, runRWST, ask)
+import Control.Monad.RWS (RWST, RWS, get, put, tell, runRWST, runRWS, ask)
 import Control.Monad.Identity (Identity, runIdentity)
 import Control.Monad.Trans.Class
 import Data.Maybe
 import Data.Monoid
 import Data.Functor
-import Data.Foldable as F
+import Data.Foldable as F (msum, forM_)
 import qualified Data.Map as M
 import qualified Data.Set as S
 
@@ -43,6 +43,14 @@ data Tp = Atom Bool Tm
 
 infixl 1 :|- 
 data Judgement = (:|-) { antecedent :: [Tp] , succedent :: Tp }
+
+tpToTm :: Tp -> Tm
+tpToTm (Atom _ t) = t
+tpToTm (Forall n t) = Cons "|A" .+. Abstract n (tpToTm t)
+tpToTm (Exists n t) = Cons "|E" .+. Abstract n (tpToTm t)
+tpToTm (a :->: b) = Cons "->" .+. tpToTm a .+. tpToTm b
+tpToTm (a :*: b) = Cons "*" .+. tpToTm a .+. tpToTm b
+tpToTm (a :+: b) = Cons "+" .+. tpToTm a .+. tpToTm b
 
 --------------------------------------------------------------------
 ----------------------- PRETTY PRINT -------------------------------
@@ -292,17 +300,13 @@ main = do
 -----------------------------------------------------------------
 ----------------------- Type Checker ----------------------------    
 -----------------------------------------------------------------
+data Predicate = Predicate { predName::Name
+                           , predType::Tp 
+                           , predConstructors::[(Name, Tp)]
+                           } deriving (Show, Eq)
     
 type Environment = M.Map Name Tp
-type TypeChecker = RWS Environment [Constraint Tm] Integer 
-
-tpToTm :: Tp -> Tm
-tpToTm (Atom _ t) = t
-tpToTm (Forall n t) = Cons "|A" .+. Abstract n (tpToTm t)
-tpToTm (Exists n t) = Cons "|E" .+. Abstract n (tpToTm t)
-tpToTm (a :->: b) = Cons "->" .+. tpToTm a .+. tpToTm b
-tpToTm (a :*: b) = Cons "*" .+. tpToTm a .+. tpToTm b
-tpToTm (a :+: b) = Cons "+" .+. tpToTm a .+. tpToTm b
+type TypeChecker = RWST Environment [Constraint Tm] Integer Maybe
 
 checkTerm :: Tm -> Tp -> TypeChecker ()
 checkTerm (Cons nm) t = do
@@ -317,21 +321,27 @@ checkTerm (App a b) t = do
   checkTerm a $ v1 :->: v2
   checkTerm b $ v1
   
+checkType :: Environment -> Name -> Tp -> Maybe ()
+checkType env base t = runRWST (checkTp base t) env 0 >> return ()
+  where checkTp base = checkTp'
+        checkTp' t = case t of
+          Atom k t -> checkTerm t $ Atom k $ Cons base
+          Exists n t -> undefined -- TODO
+          Forall n t -> undefined -- TODO
+          t1 :->: t2 -> checkTp "atom" t1 >> checkTp' t2
+          t1 :*: t2 -> checkTp' t1 >> checkTp' t2
+          t1 :+: t2 -> checkTp' t1 >> checkTp' t2
 
-data Predicate = Predicate { predName::Name
-                           , predType::Tp 
-                           , predConstructors::[(Name, Tp)]
-                           } deriving (Show, Eq)
-
-typeChecker :: [Predicate] -> Maybe ()
-typeChecker preds   = undefined
-  where assumptions = undefined
-
-wellFormedPredicate :: Predicate -> Maybe ()
-wellFormedPredicate pred = undefined
+typeCheckPredicate :: Environment -> Predicate -> Maybe ()
+typeCheckPredicate env pred = do
+  checkType env "atom" (predType pred)
+  mapM_ (checkType env (predName pred) . snd) $ predConstructors pred
+  
+typeCheckAll :: [Predicate] -> Maybe ()
+typeCheckAll preds = mapM_ (typeCheckPredicate assumptions) preds
+  where assumptions = M.fromList $ concatMap (\st -> (predName st, predType st):predConstructors st) preds
 
 {-
-
 -------------------
   List A : atom
 
