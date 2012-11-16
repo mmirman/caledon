@@ -1,11 +1,12 @@
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFunctor, FlexibleContexts, ScopedTypeVariables #-}
 module Unifier where
 
 import Choice
 import Control.Applicative ((<|>), empty)
 import Control.Monad.Error (ErrorT, throwError, runErrorT, lift, unless)
 import Control.Monad.State (StateT, get, put, runStateT, modify)
-import Control.Monad.RWS (RWST, get, put, tell, runRWST)
+import Control.Monad.State.Class
+import Control.Monad.RWS (RWST, RWS, get, put, tell, runRWST, ask)
 import Control.Monad.Identity (Identity, runIdentity)
 import Control.Monad.Trans.Class
 import Data.Maybe
@@ -20,8 +21,12 @@ import qualified Data.Set as S
 --------------------------------------------------------------------
 type Name = String
 
+infixl 1 .+.
+(.+.) = App
+              
 data Tm = Var Name 
         | Cons Name
+        | Abstract Name Tm
         | App Tm Tm
         deriving (Eq, Ord)
 
@@ -46,7 +51,7 @@ instance Show Tm where
   show (App a b) = "("++show a++" "++show b++")"
   show (Cons n) = "#"++n
   show (Var n) = ">"++n
-
+  
 instance Show Tp where
   show (t :+: t') = "("++show t ++" + "++ show t'++")"
   show (t :->: t') = "("++show t ++" -> "++ show t'++")"
@@ -97,8 +102,12 @@ data St = St { substitution :: Substitution
              , variable :: Integer 
              } 
 
-type Unify a = StateT St Maybe a
-
+type Unify a = StateT St (ErrorT String Identity) a
+instance RunChoice (ErrorT String Identity) where 
+  runChoice m = case runIdentity $ runErrorT m of
+    Left e -> Nothing
+    Right l -> Just l
+    
 nextConstraint :: ((Substitution, Constraint Tm) -> Unify ()) -> Unify ()
 nextConstraint m = do
   st <- get
@@ -129,12 +138,18 @@ unify = nextConstraint $ \(t, constraint@(a :=: b)) -> case (a :=: b) of
         Var v' | v == v' -> unify
         _ -> v +|-> b >> unify
       Just s -> putConstraints [s :=: b] >> unify
+    Abstract n t :=: Abstract n' t' -> do  
+      nm' <- getNew
+      putConstraints [ subst (n |-> Cons nm') t :=: subst (n' |-> Cons nm') t' ] 
+      unify      
     Cons nm :=: Cons nm' -> unless (nm == nm') $ empty
+    
     App a b :=: App a' b' -> do
       putConstraints [a :=: a', b :=: b']
       unify
     _ :=: _ -> empty
 
+unifyEngine l i = runChoice $ snd <$> runStateT unify (St nil l i)
 
 --------------------------------------------------------------------
 ----------------------- REIFICATION --------------------------------
@@ -142,7 +157,7 @@ unify = nextConstraint $ \(t, constraint@(a :=: b)) -> case (a :=: b) of
 type Reifier = RWST () Substitution Integer Choice
 type Reification = Reifier Substitution                                      
 
-getNewVar :: Reifier String
+getNewVar :: MonadState Integer m => m String
 getNewVar = do
   i <- get
   put (i+1)
@@ -157,7 +172,7 @@ unifier cons t = do
   let isAtom (Atom _ _) = True
       isAtom _ = False
   F.msum $ flip map (filter isAtom cons) $ \(Atom _ con) -> 
-    case runChoice $ snd <$> runStateT unify (St nil [con :=: t'] i) of
+    case unifyEngine [con :=: t'] i of
       Nothing -> empty
       Just s -> do
         put $ variable s
@@ -254,8 +269,7 @@ solver axioms t = case runChoice $ runRWST (solve $ axioms :|- t) () 0 of
 -------------------------- MAIN ---------------------------------------
 -----------------------------------------------------------------------
 main = do
-  let infixl 1 .+.
-      (.+.) = App
+  let 
       var = Var
       cons = Cons
       
@@ -278,6 +292,32 @@ main = do
 -----------------------------------------------------------------
 ----------------------- Type Checker ----------------------------    
 -----------------------------------------------------------------
+    
+type Environment = M.Map Name Tp
+type TypeChecker = RWS Environment [Constraint Tm] Integer 
+
+tpToTm :: Tp -> Tm
+tpToTm (Atom _ t) = t
+tpToTm (Forall n t) = Cons "|A" .+. Abstract n (tpToTm t)
+tpToTm (Exists n t) = Cons "|E" .+. Abstract n (tpToTm t)
+tpToTm (a :->: b) = Cons "->" .+. tpToTm a .+. tpToTm b
+tpToTm (a :*: b) = Cons "*" .+. tpToTm a .+. tpToTm b
+tpToTm (a :+: b) = Cons "+" .+. tpToTm a .+. tpToTm b
+
+checkTerm :: Tm -> Tp -> TypeChecker ()
+checkTerm (Cons nm) t = do
+  tenv <- (M.! nm) <$> ask
+  tell [tpToTm tenv :=: tpToTm t]
+checkTerm v@(Var nm) t = do
+  tell [ v :=: tpToTm t ] -- maybe? this might get weird. (nvm, necessary)
+checkTerm (App a b) t = do
+  v1 <- Atom True <$> Var <$> getNewVar
+  v2 <- Atom True <$> Var <$> getNewVar
+  tell [ tpToTm t :=: tpToTm v2]
+  checkTerm a $ v1 :->: v2
+  checkTerm b $ v1
+  
+
 data Predicate = Predicate { predName::Name
                            , predType::Tp 
                            , predConstructors::[(Name, Tp)]
@@ -291,7 +331,10 @@ wellFormedPredicate :: Predicate -> Maybe ()
 wellFormedPredicate pred = undefined
 
 {-
-module Welcome where
+
+-------------------
+  List A : atom
+
 
 defn List : atom -> atom
   is nil  = [A] List A
