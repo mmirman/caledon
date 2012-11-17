@@ -4,7 +4,7 @@ module Unifier where
 import Choice
 import Control.Monad (void)
 import Control.Applicative ((<|>), empty)
-import Control.Monad.Error (ErrorT, throwError, runErrorT, lift, unless)
+import Control.Monad.Error (ErrorT, throwError, runErrorT, lift, unless, when)
 import Control.Monad.State (StateT, get, put, runStateT, modify)
 import Control.Monad.State.Class
 import Control.Monad.RWS (RWST, RWS, get, put, tell, runRWST, runRWS, ask)
@@ -22,7 +22,7 @@ import qualified Data.Set as S
 --------------------------------------------------------------------
 type Name = String
 
-infixl 1 .+.
+infixl 6 .+.
 (.+.) = App
               
 data Tm = Var Name 
@@ -34,41 +34,31 @@ data Tm = Var Name
 data Constraint a = a :=: a 
                   deriving (Eq, Ord, Functor, Show)
 
+infixr 5 :->:
 data Tp = Atom Bool Tm
-        | Exists Name Tp
-        | Forall Name Tp
-        | (:->:) { ty1 :: Tp, ty2 :: Tp}
-        | (:*:)  { ty1 :: Tp, ty2 :: Tp}
-        | (:+:)  { ty1 :: Tp, ty2 :: Tp}
+        | Exists Name Tp Tp
+        | Forall Name Tp Tp
+        | Tp :->: Tp
         deriving (Eq, Ord)
 
 infixl 1 :|- 
 data Judgement = (:|-) { antecedent :: [Tp] , succedent :: Tp }
-
-tpToTm :: Tp -> Tm
-tpToTm (Atom _ t) = t
-tpToTm (Forall n t) = Cons "|A" .+. Abstract n (tpToTm t)
-tpToTm (Exists n t) = Cons "|E" .+. Abstract n (tpToTm t)
-tpToTm (a :->: b) = Cons "->" .+. tpToTm a .+. tpToTm b
-tpToTm (a :*: b) = Cons "*" .+. tpToTm a .+. tpToTm b
-tpToTm (a :+: b) = Cons "+" .+. tpToTm a .+. tpToTm b
 
 --------------------------------------------------------------------
 ----------------------- PRETTY PRINT -------------------------------
 --------------------------------------------------------------------
 instance Show Tm where
   show (App (App (Cons "->") a) b) = "("++show a++" -> "++show b++")"
+  show (Abstract nm t) = "\\"++nm++"."++show t
   show (App a b) = "("++show a++" "++show b++")"
   show (Cons n) = n
   show (Var n) = "'"++n
   
 instance Show Tp where
-  show (t :+: t') = "("++show t ++" + "++ show t'++")"
   show (t :->: t') = "("++show t ++" -> "++ show t'++")"
-  show (t :*: t') = "("++show t ++" * "++ show t'++")"
   show (Atom _ t) = show t
-  show (Forall nm t) = "A|"++nm++". "++show t
-  show (Exists nm t) = "E|"++nm++". "++show t
+  show (Forall nm ty t) = "["++nm++" : "++show ty++"] "++show t
+  show (Exists nm ty t) = "{"++nm++" : "++show ty++"} "++show t
   
 instance Show Judgement where 
   show (a :|- b) =  removeHdTl (show a) ++" |- "++ show b
@@ -98,9 +88,9 @@ instance Subst Tm where
 instance Subst Tp where
   subst s t = case t of
     Atom m t -> Atom m $ subst s t
-    Forall nm t -> Forall nm $ subst (M.insert nm (Var nm) s) t
-    Exists nm t -> Exists nm $ subst (M.insert nm (Var nm) s) t
-    _ -> t { ty1 = subst s $ ty1 t, ty2 = subst s $ ty2 t}
+    Forall nm ty t -> Forall nm (subst s ty) $ subst (M.insert nm (Var nm) s) t
+    Exists nm ty t -> Exists nm (subst s ty) $ subst (M.insert nm (Var nm) s) t
+    ty1 :->: ty2 -> subst s ty1 :->: subst s ty2
 instance Subst Judgement where 
   subst foo (c :|- s) = subst foo c :|- subst foo s
                                       
@@ -112,7 +102,7 @@ data St = St { substitution :: Substitution
              , variable :: Integer 
              } 
 
-type Unify a = StateT St (ErrorT String Identity) a
+type Unify a = StateT St Error a
     
 nextConstraint :: ((Substitution, Constraint Tm) -> Unify ()) -> Unify ()
 nextConstraint m = do
@@ -188,7 +178,7 @@ unifier cons t = do
 isPos t = case t of 
   _ :->: _ -> False
   Atom t _ -> t
-  Forall _ _ -> False
+  Forall _ _ _ -> False
   _ -> True 
 
 blurL judge@(f:_ :|- _) soln  = if isPos f then solve judge else soln
@@ -201,10 +191,19 @@ leftFocused :: Judgement -> Reification
 leftFocused judge@(f:context :|- r) = blurL judge soln
   where soln = case f of
           Atom False _ -> unifier [f] r
-          Forall nm t1 -> do
+          Forall nm _ t1 -> do
             nm' <- getNewVar
             s <- leftFocused $ subst (nm |-> Var nm') t1:f:context :|- r
             return $ M.delete nm' s
+            
+          (c :->: d) :->: b -> do  -- Sketchy
+            s  <- rightFocused $ (d:->:b):c:context :|- d
+            s' <- leftFocused $ subst s $ b:context :|- r
+            return $ s *** s'
+          p@(Atom _ l) :->: b -> do  -- Sketchy
+            s  <- leftFocused $ b:context :|- r
+            s' <- rightFocused $ subst s $ context :|- p
+            return $ s *** s'
           t1 :->: t2 -> do
             s  <- rightFocused $ f:context :|- t1 -- could use GIpi but the BFS seems to be good enough.
             s' <- leftFocused $ subst s $ t2:context :|- r
@@ -214,33 +213,26 @@ leftFocused judge@(f:context :|- r) = blurL judge soln
 leftUnfocused :: Judgement -> Reification
 leftUnfocused judge@(f:context :|- r) = focusL judge soln
   where soln = case f of
-          t1 :*: t2 -> solve $ t1:t2:context :|- r
-          Exists nm t2 -> do
+          Exists nm _ t2 -> do
             nm' <- getNewVar
             solve $ (subst (nm |-> Cons nm') t2):context :|- r
-          t1 :+: t2 -> solve (t1:context :|- r) <|> solve (t2:context :|- r)
           _ -> empty
           
 rightFocused :: Judgement -> Reification
 rightFocused judge@(context :|- r) = blurR judge soln
   where soln = case r of
           Atom True _ -> unifier context r
-          Exists nm t1 -> do
+          Exists nm _ t1 -> do
             nm' <- getNewVar
             s <- rightFocused $ context :|- subst (nm |-> Var nm') t1
             return $ M.delete nm' s
-          t1 :*: t2 -> do
-            s <- rightFocused $ context :|- t1
-            s' <- rightFocused $ subst s $ context :|- t2
-            return $ s *** s'
-          t1 :+: t2 -> rightFocused (context :|- t1) <|> rightFocused (context :|- t2)
           _ -> empty
           
 rightUnfocused :: Judgement -> Reification
 rightUnfocused judge@(context :|- r) = focusR judge soln
   where soln = case r of
           t1 :->: t2 -> solve $ t1:context :|- t2
-          Forall nm t2 -> do
+          Forall nm _ t2 -> do
             nm' <- getNewVar
             solve $ context :|- subst (nm |-> Cons nm') t2
           _ -> empty
@@ -254,11 +246,9 @@ solve judge@(context :|- r) = rightUnfocused judge <|> (F.msum $ useSingle (\f c
 ----------------------------------------------------------------------
 ----------------------- LOGIC ENGINE ---------------------------------
 ----------------------------------------------------------------------
-freeVariables (Forall a t) = S.delete a $ freeVariables t
-freeVariables (Exists a t) = S.delete a $ freeVariables t
+freeVariables (Forall a ty t) = (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
+freeVariables (Exists a ty t) = (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
 freeVariables (t1 :->: t2) = freeVariables t1 `S.union` freeVariables t2
-freeVariables (t1 :*: t2) = freeVariables t1 `S.union` freeVariables t2
-freeVariables (t1 :+: t2) = freeVariables t1 `S.union` freeVariables t2
 freeVariables (Atom _ a) = fV a
   where fV (App a b) = fV a `S.union` fV b
         fV (Var a) = S.singleton a
@@ -281,7 +271,7 @@ data Predicate = Predicate { predName::Name
                | Query { predType::Tp }
                deriving (Eq)
 type Environment = M.Map Name Tp
-type TypeChecker = RWST Environment [Constraint Tm] Integer Maybe
+type TypeChecker = RWST Environment [Constraint Tm] Integer Error
 
 instance Show Predicate where
   show (Predicate nm ty (a:cons)) = 
@@ -291,47 +281,98 @@ instance Show Predicate where
         where showSingle (nm,ty) = nm++" = "++show ty
   show (Query ty) = "query : "++show ty
 
+tpToTm :: Tp -> TypeChecker Tm
+tpToTm (Atom _ t) = return t
+tpToTm (Forall n ty t) = do
+  n' <- getNewVar
+  tm <- tpToTm ty
+  tell [ Var n' :=: tm]
+  tr <- tpToTm $ subst (n |-> Var n') t
+  return $ Cons "->" .+. Var n' .+. tr
+tpToTm (Exists n ty t) = do
+  n' <- getNewVar
+  tm <- tpToTm ty
+  tell [ Var n' :=: tm]
+  tr <- tpToTm $ subst (n |-> Var n') t
+  return $ Cons "->" .+. Var n' .+. tr
+tpToTm (a :->: b) = do
+  ta <- tpToTm a
+  tb <- tpToTm b
+  return $ Cons "->" .+. ta .+. tb
+
 checkTerm :: Tm -> Tp -> TypeChecker ()
 checkTerm (Cons nm) t' = do
   maybe_tenv <- (! nm) <$> ask
   case maybe_tenv of 
     Nothing -> error $ nm++" was not found in the environment"
-    Just t -> tell [tpToTm t :=: tpToTm t']
+    Just t -> do
+      tm <- tpToTm t
+      tm' <- tpToTm t'
+      tell [tm :=: tm']
 checkTerm v@(Var nm) t = do
-  tell [ v :=: tpToTm t ] -- maybe? this might get weird. (nvm, necessary)
+  tm <- tpToTm t
+  tell [ v :=: tm ] -- maybe? this might get weird. (nvm, necessary)
 checkTerm (App a b) t = do
   v1 <- Atom True <$> Var <$> getNewVar
-  v2 <- Atom True <$> Var <$> getNewVar
-  tell [ tpToTm t :=: tpToTm v2]
-  checkTerm a $ v1 :->: v2
+  v2 <- Var <$> getNewVar
+  tm <- tpToTm t
+  tell [v2 :=: tm]
+  checkTerm a $ v1 :->: (Atom True v2)
   checkTerm b $ v1
   
-checkType :: Environment -> Name -> Name -> Tp -> Maybe ()
-checkType env nm base t = case runRWST (checkTp base t) env 0 of
-  Nothing -> Nothing
-  Just ((),i,constraints) -> case runError $ unifyEngine constraints i of
-    Left e -> error $ "UNIFY FAILED: " ++ e ++ " \nin "++nm++" = "++show t
-    Right _ -> Just ()
-        
-checkTp base = checkTp'
-  where checkTp' t = case t of
-          Atom k t -> checkTerm t $ Atom k $ Cons base
-          Exists n t -> do
-            v1 <- Var <$> getNewVar            
-            checkTp' $ subst (n |-> v1) t -- TODO
-          Forall n t -> do
-            v1 <- Var <$> getNewVar            
-            checkTp' $ subst (n |-> v1) t -- TODO
-          t1 :->: t2 -> checkTp "atom" t1 >> checkTp' t2
-          _ -> checkTp' (ty1 t) >> checkTp' (ty2 t)
+  {- 
+something like this possibly!
+checkTerm (TyApp a b) t = do  
+  v1 <- getNewVar
+  v2 <- getNewVar
+  checkTerm a $ Atom True $ Var v1
+  checkTerm b $ Atom True $ Var v2
+  tell [ tpToTm t :=: TyApp v1 (Cons v2) ]
+  -}
 
-typeCheckPredicate :: Environment -> Predicate -> Maybe ()
-typeCheckPredicate env (Query ty) = checkType env "query" "atom" ty
-typeCheckPredicate env pred = do
-  checkType env (predName pred) "atom" (predType pred)
-  mapM_ (\(nm,ty) -> checkType env nm (predName pred) ty) $ predConstructors pred
+
+getCons tm = case tm of
+  Cons t -> return t
+  App t1 t2 -> getCons t1
+  _ -> throwError $ "can't place a non constructor term here: "++ show tm
   
-typeCheckAll :: [Predicate] -> Maybe ()
+checkType :: Environment -> Name -> Tp -> Error ()
+checkType env base ty = do
+  let checkTp rms t = case t of
+          Atom k t -> do 
+            when rms $ do
+              c <- getCons t
+              unless (null base || c == base) $ throwError $ "non local name "++c++" expecting "++base
+            checkTerm t $ Atom k $ Cons "atom"
+          Exists n ty t -> do
+            v1 <- Var <$> getNewVar
+            checkTp False ty
+            ty_tm <- tpToTm ty
+            tell [ ty_tm :=: v1 ]
+            checkTp rms $ subst (n |-> v1) t -- TODO
+          Forall n ty t -> do
+            v1 <- Var <$> getNewVar
+            checkTp False ty
+            ty_tm <- tpToTm ty
+            tell [ ty_tm :=: v1 ]
+            checkTp rms $ subst (n |-> v1) t -- TODO
+          t1 :->: t2 -> do 
+            checkTp False t1
+            checkTp rms t2
+  ((),i,constraints) <- runRWST (checkTp True ty) env 0
+  case runError $ unifyEngine constraints i of
+    Left e  -> throwError $ "UNIFY FAILED: " ++ e
+    Right _ -> return ()
+
+typeCheckPredicate :: Environment -> Predicate -> Error ()
+typeCheckPredicate env (Query ty) = appendErr ("in query : "++ show ty) $ checkType env "" ty
+typeCheckPredicate env pred = appendErr ("in\n"++show pred) $ do
+  appendErr ("in name: "++ predName pred ++" = "++show (predType pred)) $
+    checkType env "atom" (predType pred)
+  forM_ (predConstructors pred) $ \(nm,ty) -> 
+    appendErr ("in case: " ++nm ++ " = "++show ty) $ checkType env (predName pred) ty
+  
+typeCheckAll :: [Predicate] -> Error ()
 typeCheckAll preds = forM_ preds $ typeCheckPredicate assumptions
   where assumptions = M.fromList $ ("atom", Atom True $ Cons "atom"): -- atom : atom is a given.
                       concatMap (\st -> case st of
@@ -345,34 +386,56 @@ main = do
   let var = Var
       cons = Cons
       
-      atom = Atom False $ Cons "atom"
-      nat = Atom False $ Cons "nat"
+      tp = Atom False
       
-      addRes a b c = Atom False $ cons "add" .+. a .+. b .+. c
+      atom = tp $ Cons "atom"
+      nat = tp $ Cons "nat"
+      
+      addRes a b c = tp $ cons "add" .+. a .+. b .+. c
       zero = cons "zero"
       succ a = cons "succ" .+. a
       
-      infixr 0 |:
-      (|:) a b = (a,b)
-      predicates = [ Predicate "nat" atom 
-                     [ "zero" |: nat
-                     , "succ" |: nat :->: nat
-                     ]   
-                   , Predicate "add" (nat :->: nat :->: nat :->: atom) 
-                     [ "add-z" |: Forall "result" $ addRes zero (var "result") (var "result")
-                     , "add-s" |: Forall "m" $ Forall "n" $ Forall "res" $ addRes (var "n") (var "m") (var "res") :->: addRes (succ $ var "n") (var "m") (succ $ var "res")
-                     ]
+      infixr 5 $
+      f $ i = f i
+      infixr 4 =:
+      (=:) a b = (a,b)
+      infixl 3 |:
+      (|:) foo a = foo a []
+      infixl 2 <|
+      foo <| a = foo { predConstructors = a:predConstructors foo }
+      
+      vr v = tp $ var v      
+      lst v = tp $ cons "list" .+. var v
+
+      predicates = [ Predicate "nat" |: atom
+                     <| "zero" =: nat
+                     <| "succ" =: nat :->: nat
+                   , Predicate "add" |: nat :->: nat :->: nat :->: atom
+                     <| "add-z" =: Forall "result" nat $ addRes zero (var "result") (var "result")
+                     <| "add-s" =: Forall "m" nat $ Forall "n" nat $ Forall "res" nat $ addRes (var "n") (var "m") (var "res") :->: addRes (succ $ var "n") (var "m") (succ $ var "res")
+                   , Predicate "list" |: atom :->: atom
+                     <| "nil" =: Forall "a" atom $ lst "a"
+                     <| "cons" =: Forall "a" atom $ vr "a" :->: lst "a" :->: lst "a"
+                   , let cat v a b c = tp $ cons "concat" .+. var v .+. a .+. b .+. c
+                         nil v = cons "nil" .+. var v
+                         con v a b = cons "cons" .+. var v .+. a .+. b
+                     in 
+                     Predicate "concat" |: Forall "a" atom $ lst "a" :->: lst "a" :->: lst "a" :->: atom
+                     <| "concat-nil" =: Forall "a" atom $ Forall "N" (lst "a") $ cat "a" (nil "a") (var "N") (var "N")
+                     <| "concat-suc" =: Forall "a" atom $ Forall "V" (vr "a") $ Forall "N" (lst "a") $ Forall "M" (lst "a") $ Forall "R" (lst "a") $ 
+                          cat "a" (var "N") (var "M") (var "R") 
+                          :->: cat "a" (con "a" (var "V") (var "N")) (var "M") (con "a" (var "V") (var "R"))
                    ]
       
       target = Query $ addRes (succ $ succ $ zero) (var "what") (succ $ succ $ succ $ zero) 
 
   putStrLn $ "AXIOMS: "
-  forM_ (target:predicates)  $ \s -> putStrLn $ show s
+  forM_ (target:predicates)  $ \s -> putStrLn $ show s++"\n"
       
   putStrLn "\nTYPE CHECKING: "
-  case typeCheckAll $ predicates of
-    Nothing -> error "What happened? I really should have written errors into this"
-    Just () -> putStrLn "Type checking success!"
+  case runError $ typeCheckAll $ target:predicates of
+    Left e -> error e
+    Right () -> putStrLn "Type checking success!"
 
   putStrLn $ "\nTARGET:\n\t"++show target
 

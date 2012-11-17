@@ -1,10 +1,11 @@
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFunctor, FlexibleContexts #-}
 
 module Choice where
 import Control.Monad
 import Data.Functor
 import Control.Applicative
 import Control.Monad.Error (ErrorT, runErrorT)
+import Control.Monad.Error.Class (catchError, throwError, MonadError)
 import Control.Monad.Identity (Identity, runIdentity)
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Maybe
@@ -52,9 +53,15 @@ instance RunChoice Choice where
           notSuccess (Success a) = False
           notSuccess _ = True
 instance RunChoice Maybe where runChoice = id
-  
-instance RunChoice (ErrorT String Identity) where 
+
+type Error = ErrorT String Identity
+
+instance RunChoice Error where 
   runChoice m = case runIdentity $ runErrorT m of
     Left e -> Nothing
     Right l -> Just l
   runError = runIdentity . runErrorT
+  
+appendErr :: (MonadError String m) => String -> m a -> m a
+appendErr s m = catchError m $ \s' -> throwError $ s' ++ "\n" ++ s
+  
