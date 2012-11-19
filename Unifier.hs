@@ -41,6 +41,14 @@ data Tp = Atom Bool Tm
         | Tp :->: Tp
         deriving (Eq, Ord)
 
+data Predicate = Predicate { predName::Name
+                           , predType::Tp 
+                           , predConstructors::[(Name, Tp)]
+                           } 
+               | Query { predName :: Name, predType::Tp }
+               deriving (Eq)
+
+
 infixl 1 :|- 
 data Judgement = (:|-) { antecedent :: [Tp] , succedent :: Tp }
 
@@ -64,6 +72,14 @@ instance Show Judgement where
   show (a :|- b) =  removeHdTl (show a) ++" |- "++ show b
     where removeHdTl = reverse . tail . reverse . tail    
 
+
+instance Show Predicate where
+  show (Predicate nm ty (a:cons)) = 
+      ""++"defn "++nm++" : "++show ty++"\n"
+      ++  "  as "++showSingle a++concatMap (\x->
+        "\n   | "++showSingle x) cons++";"
+        where showSingle (nm,ty) = nm++" = "++show ty
+  show (Query nm ty) = "query "++nm++" = "++show ty
 
 --------------------------------------------------------------------
 ----------------------- SUBSTITUTION -------------------------------
@@ -264,22 +280,9 @@ solver axioms t = case runChoice $ runRWST (solve $ axioms :|- t) () 0 of
 -----------------------------------------------------------------
 ----------------------- Type Checker ----------------------------    
 -----------------------------------------------------------------
-data Predicate = Predicate { predName::Name
-                           , predType::Tp 
-                           , predConstructors::[(Name, Tp)]
-                           } 
-               | Query { predType::Tp }
-               deriving (Eq)
+                       
 type Environment = M.Map Name Tp
 type TypeChecker = RWST Environment [Constraint Tm] Integer Error
-
-instance Show Predicate where
-  show (Predicate nm ty (a:cons)) = 
-      ""++"defn "++nm++" : "++show ty++"\n"
-      ++  "  as "++showSingle a++concatMap (\x->
-        "\n   | "++showSingle x) cons++";"
-        where showSingle (nm,ty) = nm++" = "++show ty
-  show (Query ty) = "query : "++show ty
 
 tpToTm :: Tp -> TypeChecker Tm
 tpToTm (Atom _ t) = return t
@@ -365,7 +368,7 @@ checkType env base ty = do
     Right _ -> return ()
 
 typeCheckPredicate :: Environment -> Predicate -> Error ()
-typeCheckPredicate env (Query ty) = appendErr ("in query : "++ show ty) $ checkType env "" ty
+typeCheckPredicate env (Query _ ty) = appendErr ("in query : "++ show ty) $ checkType env "" ty
 typeCheckPredicate env pred = appendErr ("in\n"++show pred) $ do
   appendErr ("in name: "++ predName pred ++" = "++show (predType pred)) $
     checkType env "atom" (predType pred)
@@ -376,143 +379,5 @@ typeCheckAll :: [Predicate] -> Error ()
 typeCheckAll preds = forM_ preds $ typeCheckPredicate assumptions
   where assumptions = M.fromList $ ("atom", Atom True $ Cons "atom"): -- atom : atom is a given.
                       concatMap (\st -> case st of
-                                    Query _ -> []
+                                    Query _ _ -> []
                                     _ -> (predName st, predType st):predConstructors st) preds
-
------------------------------------------------------------------------
--------------------------- MAIN ---------------------------------------
------------------------------------------------------------------------
-main = do
-  let var = Var
-      cons = Cons
-      
-      tp = Atom False
-      
-      atom = tp $ Cons "atom"
-      nat = tp $ Cons "nat"
-      
-      addRes a b c = tp $ cons "add" .+. a .+. b .+. c
-      zero = cons "zero"
-      succ a = cons "succ" .+. a
-      
-      infixr 5 $
-      f $ i = f i
-      infixr 4 =:
-      (=:) a b = (a,b)
-      infixl 3 |:
-      (|:) foo a = foo a []
-      infixl 2 <|
-      foo <| a = foo { predConstructors = a:predConstructors foo }
-      
-      vr v = tp $ var v      
-      lst v = tp $ cons "list" .+. var v
-
-      predicates = [ Predicate "nat" |: atom
-                     <| "zero" =: nat
-                     <| "succ" =: nat :->: nat
-                   , Predicate "add" |: nat :->: nat :->: nat :->: atom
-                     <| "add-z" =: Forall "result" nat $ addRes zero (var "result") (var "result")
-                     <| "add-s" =: Forall "m" nat $ Forall "n" nat $ Forall "res" nat $ addRes (var "n") (var "m") (var "res") :->: addRes (succ $ var "n") (var "m") (succ $ var "res")
-                   , Predicate "list" |: atom :->: atom
-                     <| "nil" =: Forall "a" atom $ lst "a"
-                     <| "cons" =: Forall "a" atom $ vr "a" :->: lst "a" :->: lst "a"
-                   , let cat v a b c = tp $ cons "concat" .+. var v .+. a .+. b .+. c
-                         nil v = cons "nil" .+. var v
-                         con v a b = cons "cons" .+. var v .+. a .+. b
-                     in 
-                     Predicate "concat" |: Forall "a" atom $ lst "a" :->: lst "a" :->: lst "a" :->: atom
-                     <| "concat-nil" =: Forall "a" atom $ Forall "N" (lst "a") $ cat "a" (nil "a") (var "N") (var "N")
-                     <| "concat-suc" =: Forall "a" atom $ Forall "V" (vr "a") $ Forall "N" (lst "a") $ Forall "M" (lst "a") $ Forall "R" (lst "a") $ 
-                          cat "a" (var "N") (var "M") (var "R") 
-                          :->: cat "a" (con "a" (var "V") (var "N")) (var "M") (con "a" (var "V") (var "R"))
-                   ]
-      
-      target = Query $ addRes (succ $ succ $ zero) (var "what") (succ $ succ $ succ $ zero) 
-
-  putStrLn $ "AXIOMS: "
-  forM_ (target:predicates)  $ \s -> putStrLn $ show s++"\n"
-      
-  putStrLn "\nTYPE CHECKING: "
-  case runError $ typeCheckAll $ target:predicates of
-    Left e -> error e
-    Right () -> putStrLn "Type checking success!"
-
-  putStrLn $ "\nTARGET:\n\t"++show target
-
-  case solver (snd <$> concatMap predConstructors predicates) (predType target) of
-    Left e -> putStrLn $ "ERROR: "++e
-    Right sub -> putStrLn $ "SOLVED WITH: "++(show $ sub)
-
-{-
--------------------
-  List A : atom
-
-
-defn List : atom -> atom
-  is nil  = [A] List A
-   | succ = [A] A -> List A -> List A;
-
-defn Nu : (atom -> atom) -> atom
-  is Nu = [f : pred -> pred] f (Nu f) -> Nu f;
-  
-defn num : atom
-  is zero = num
-   | succ = num -> num;
-
-defn accepts : (num -> atom) -> atom
-  is Nu = [f : pred -> pred] f (Nu f) -> Nu f;
-
-defn add : num -> num -> num -> atom
-  is add-z = [N] N : nat -> add zero N N
-   | add-s = [N][M][R] add N M R -> add (succ N) M $ succ R;
-
-defn frikenKolio : num -> IO () -> atom
-  is buildZero = frikenKolio N $ do putStrLn $ "hai" ++ show N;
-                    
-_$_ : [A][B] (A -> B) -> A -> B
-f $ a = f a;
-
-fooBar : IO ()
-fooBar = do {
-  let s = query[a] add (succ zero) (succ zero) a;
-  putStrLn $ show s; 
-}
-
- (OO)
-  ##xxxxxxxxxxxxx------------------------
-  ##xxxxxxxxxxxxx------------------------
-  ##xxxxxxxxxxxxx------------------------
-  ##xxxxxxxxxxxxx----AMERCA F**K YEAH ---
-  ##xxxxxxxxxxxxx------------------------
-  ##-------------------------------------
-  ##-------------------------------------
-  ##-------------------------------------
-  ##-------------------------------------
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##  \o__
-  ##   |
-  ##  / \  .|.  /./ .  \.  .  \   
-````````````````````````````````
-:::::::;;;;;;;;;;;:;;;;;:;;:;;;;
-
--}
-
