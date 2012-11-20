@@ -124,8 +124,8 @@ main = do
     Left e -> error $ show e
     Right l -> return l
   uncurry checkAndRun $ flip partition decs $ \x -> case x of 
-                                   Predicate _ _ _ -> False
-                                   _ -> True
+                                   Predicate _ _ _ -> True
+                                   _ -> False
                                    
 {-
  (OO)
