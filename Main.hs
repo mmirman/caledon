@@ -58,7 +58,9 @@ trm = parens trm
           return $ foldl App t tl
    <?> "term"
 
-table = [ [binary "->" (:->:) AssocRight] ]
+table = [ [binary "->" (:->:) AssocRight] 
+        , [binary "<-" (flip (:->:)) AssocLeft] 
+        ]
   where  binary  name fun assoc = Infix (reservedOp name >> return fun) assoc
          
 namedTipe c = do nm <- identifier
