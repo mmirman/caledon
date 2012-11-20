@@ -15,8 +15,8 @@ import Text.ParserCombinators.Parsec.Char
 import Text.Parsec.Expr
 import qualified Text.Parsec.Token as P
 import qualified Data.Set as S
+import Data.List (partition)
 
-import Debug.Trace
 -----------------------------------------------------------------------
 -------------------------- PARSER -------------------------------------
 -----------------------------------------------------------------------
@@ -121,11 +121,10 @@ main = do
   decs   <- case mError of
     Left e -> error $ show e
     Right l -> return l
-  uncurry checkAndRun $ split decs $ \x -> case x of 
+  uncurry checkAndRun $ flip partition decs $ \x -> case x of 
                                    Predicate _ _ _ -> False
                                    _ -> True
                                    
-split lst foo = (filter (not . foo) lst, filter foo lst)
 {-
  (OO)
   ##xxxxxxxxxxxxx------------------------
