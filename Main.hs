@@ -22,14 +22,14 @@ import Debug.Trace
 -----------------------------------------------------------------------
 decls = do
   whiteSpace
-  lst <-many (query <|> defn <?> "not a thing")
+  lst <- many (query <|> defn <?> "declaration")
   eof
   return lst
 
 query = do 
   reserved "query" 
   (nm,ty) <- namedTipe "="
-  semi
+  optional semi
   return $ Query nm ty
 
 defn =  do
@@ -37,11 +37,11 @@ defn =  do
   (nm,ty) <- namedTipe ":"
   let more =  do reserved "is"
                  lst <- flip sepBy1 (reserved "|") $ namedTipe "="
-                 semi
+                 optional semi
                  return $ Predicate nm ty lst
-      none = do semi
+      none = do optional semi
                 return $ Predicate nm ty []
-  none <|> more             
+  more <|> none <?> "definition"
   
 
 atom =  do c <- oneOf "\'"
@@ -87,9 +87,6 @@ tipe =  parens topTipe
 
     <?> "type"
            
-           
-
-
 P.TokenParser{..} = P.makeTokenParser $ haskellDef 
  { P.identStart = letter
  , P.identLetter = alphaNum <|> oneOf "_'-/"
@@ -124,62 +121,11 @@ main = do
   decs   <- case mError of
     Left e -> error $ show e
     Right l -> return l
-  uncurry checkAndRun $ break (\x -> case x of 
+  uncurry checkAndRun $ split decs $ \x -> case x of 
                                    Predicate _ _ _ -> False
-                                   _ -> True) decs
------------------------------------------------------------------------
--------------------------- TEST ---------------------------------------
------------------------------------------------------------------------  
-test = do  
-  let var = Var
-      cons = Cons
-      
-      tp = Atom False
-      
-      atom = tp $ Cons "atom"
-      nat = tp $ Cons "nat"
-      
-      addRes a b c = tp $ cons "add" .+. a .+. b .+. c
-      zero = cons "zero"
-      succ a = cons "succ" .+. a
-      
-      infixr 5 $
-      f $ i = f i
-      infixr 4 =:
-      (=:) a b = (a,b)
-      infixl 3 |:
-      (|:) foo a = foo a []
-      infixl 2 <|
-      foo <| a = foo { predConstructors = a:predConstructors foo }
-      
-      vr v = tp $ var v      
-      lst v = tp $ cons "list" .+. var v
-
-      predicates = [ Predicate "nat" |: atom
-                     <| "zero" =: nat
-                     <| "succ" =: nat :->: nat
-                   , Predicate "add" |: nat :->: nat :->: nat :->: atom
-                     <| "add-z" =: Forall "result" nat $ addRes zero (var "result") (var "result")
-                     <| "add-s" =: Forall "m" nat $ Forall "n" nat $ Forall "res" nat $ addRes (var "n") (var "m") (var "res") :->: addRes (succ $ var "n") (var "m") (succ $ var "res")
-                   , Predicate "list" |: atom :->: atom
-                     <| "nil" =: Forall "a" atom $ lst "a"
-                     <| "cons" =: Forall "a" atom $ vr "a" :->: lst "a" :->: lst "a"
-                   , let cat v a b c = tp $ cons "concat" .+. var v .+. a .+. b .+. c
-                         nil v = cons "nil" .+. var v
-                         con v a b = cons "cons" .+. var v .+. a .+. b
-                     in 
-                     Predicate "concat" |: Forall "a" atom $ lst "a" :->: lst "a" :->: lst "a" :->: atom
-                     <| "concat-nil" =: Forall "a" atom $ Forall "N" (lst "a") $ cat "a" (nil "a") (var "N") (var "N")
-                     <| "concat-suc" =: Forall "a" atom $ Forall "V" (vr "a") $ Forall "N" (lst "a") $ Forall "M" (lst "a") $ Forall "R" (lst "a") $ 
-                          cat "a" (var "N") (var "M") (var "R") 
-                          :->: cat "a" (con "a" (var "V") (var "N")) (var "M") (con "a" (var "V") (var "R"))
-                   ]
-      
-      target = Query "result" $ addRes (succ $ succ $ zero) (var "what") (succ $ succ $ succ $ zero) 
-
-  checkAndRun predicates [target]
-
-
+                                   _ -> True
+                                   
+split lst foo = (filter (not . foo) lst, filter foo lst)
 {-
  (OO)
   ##xxxxxxxxxxxxx------------------------
