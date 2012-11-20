@@ -20,6 +20,7 @@ import Data.List (partition)
 -----------------------------------------------------------------------
 -------------------------- PARSER -------------------------------------
 -----------------------------------------------------------------------
+
 decls = do
   whiteSpace
   lst <- many (query <|> defn <?> "declaration")
@@ -50,9 +51,10 @@ atom =  do c <- oneOf "\'"
     <|> do r <- identifier
            mp <- getState 
            return $ (if S.member r mp then Var else Cons) r
+    <|> (tipeToTerm <$> parens tipe)
     <?> "atom"
 
-trm = parens trm 
+trm =  parens trm 
    <|> do t <- atom
           tl <- many (atom <|> parens trm)
           return $ foldl App t tl
@@ -65,7 +67,7 @@ table = [ [binary "->" (:->:) AssocRight]
          
 namedTipe c = do nm <- identifier
                  reserved c
-                 ty <- topTipe
+                 ty <- tipe
                  return (nm, ty)
                
 tmpState nm m = do
@@ -76,25 +78,23 @@ tmpState nm m = do
   unless b $ modifyState (S.delete nm)
   return r
 
-topTipe = buildExpressionParser table tipe
-
-tipe =  parens topTipe
+tipe = buildExpressionParser table ( 
+        parens tipe
     <|> (Atom False <$> trm)
     <|> do (nm,tp) <- brackets $ namedTipe ":"
-           tp' <- tmpState nm topTipe
+           tp' <- tmpState nm tipe
            return $ Forall nm tp tp'
     <|> do (nm,tp) <- braces $ namedTipe ":"
-           tp' <- tmpState nm topTipe
+           tp' <- tmpState nm tipe
            return $ Exists nm tp tp'
-
-    <?> "type"
+    <?> "type")
            
 P.TokenParser{..} = P.makeTokenParser $ haskellDef 
  { P.identStart = letter
  , P.identLetter = alphaNum <|> oneOf "_'-/"
- , P.reservedNames = ["defn", "is", "query", "=", ":", "|"]
+ , P.reservedNames = ["defn", "is", "query", "=", ":", "|", "forall", "exists"]
  , P.caseSensitive = True
- , P.reservedOpNames = ["->"]
+ , P.reservedOpNames = ["->", "<-"]
  }
 
 -----------------------------------------------------------------------

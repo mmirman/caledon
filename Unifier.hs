@@ -27,7 +27,7 @@ infixl 6 .+.
               
 data Tm = Var Name 
         | Cons Name
-        | Abstract Name Tm
+        | Abstract Name Tp Tm
         | App Tm Tm
         deriving (Eq, Ord)
 
@@ -57,7 +57,7 @@ data Judgement = (:|-) { antecedent :: [Tp] , succedent :: Tp }
 --------------------------------------------------------------------
 instance Show Tm where
   show (App (App (Cons "->") a) b) = "("++show a++" -> "++show b++")"
-  show (Abstract nm t) = "\\"++nm++"."++show t
+  show (Abstract nm ty t) = "\\"++nm++":" ++show ty++"."++show t
   show (App a b) = "("++show a++" "++show b++")"
   show (Cons n) = n
   show (Var n) = "'"++n
@@ -152,7 +152,8 @@ unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let
         Var v' | v == v' -> unify
         _ -> v +|-> b >> unify
       Just s -> putConstraints [s :=: b] >> unify
-    Abstract n t :=: Abstract n' t' -> do  
+    Abstract n ty t :=: Abstract n' ty' t' -> do  
+      putConstraints [ tipeToTerm ty :=: tipeToTerm ty' ]
       nm' <- getNew
       putConstraints [ subst (n |-> Cons nm') t :=: subst (n' |-> Cons nm') t' ] 
       unify      
@@ -303,6 +304,11 @@ tpToTm (a :->: b) = do
   tb <- tpToTm b
   return $ Cons "->" .+. ta .+. tb
 
+tipeToTerm (Forall n ty t) = Cons "forall" .+. Abstract n ty (tipeToTerm t)
+tipeToTerm (Exists n ty t) = Cons "exists" .+. Abstract n ty (tipeToTerm t)
+tipeToTerm (Atom _ tm) = tm
+tipeToTerm (t1 :->: t2) = Cons "->" .+. tipeToTerm t1 .+. tipeToTerm t2
+
 checkTerm :: Tm -> Tp -> TypeChecker ()
 checkTerm (Cons nm) t' = do
   maybe_tenv <- (! nm) <$> ask
@@ -322,17 +328,15 @@ checkTerm (App a b) t = do
   tell [v2 :=: tm]
   checkTerm a $ v1 :->: (Atom True v2)
   checkTerm b $ v1
-  
-  {- 
-something like this possibly!
-checkTerm (TyApp a b) t = do  
-  v1 <- getNewVar
-  v2 <- getNewVar
-  checkTerm a $ Atom True $ Var v1
-  checkTerm b $ Atom True $ Var v2
-  tell [ tpToTm t :=: TyApp v1 (Cons v2) ]
-  -}
-
+checkTerm (Abstract nm ty tm) t = do
+  v1 <- Var <$> getNewVar
+  v2 <- Atom True <$> Var <$> getNewVar
+  ty1 <- tpToTm ty
+  tell [v1 :=: ty1]
+  checkTerm (subst (nm |-> v1) tm) v2
+  tym <- tpToTm t
+  tym' <- tpToTm $ Atom True v1 :->: v2 
+  tell [tym' :=: tym]
 
 getCons tm = case tm of
   Cons t -> return t
@@ -377,7 +381,11 @@ typeCheckPredicate env pred = appendErr ("in\n"++show pred) $ do
   
 typeCheckAll :: [Predicate] -> Error ()
 typeCheckAll preds = forM_ preds $ typeCheckPredicate assumptions
-  where assumptions = M.fromList $ ("atom", Atom True $ Cons "atom"): -- atom : atom is a given.
+  where atom = Atom True $ Cons "atom"
+        assumptions = M.fromList $ ("atom", atom): -- atom : atom is a given.
+                                   ("->", atom :->: atom :->: atom): -- atom : atom is a given.
+                                   ("forall", (atom :->: atom) :->: atom): -- atom : atom is a given.
+                                   ("exists", (atom :->: atom) :->: atom): -- atom : atom is a given.
                       concatMap (\st -> case st of
                                     Query _ _ -> []
                                     _ -> (predName st, predType st):predConstructors st) preds

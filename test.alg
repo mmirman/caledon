@@ -24,5 +24,6 @@ defn red : Term -> Term -> atom
    | red-app2 = [V1 : Term][V2' : Term][V2 : Term] 
                 red (app V1 V2) (app V1 V2') <- red V2 V2'
 
-
+defn silly : atom -> atom
+  is sill  = silly (([N : atom] N -> num) num);
 
