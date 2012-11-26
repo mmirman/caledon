@@ -16,11 +16,9 @@ import Text.Parsec.Expr
 import qualified Text.Parsec.Token as P
 import qualified Data.Set as S
 import Data.List (partition)
-
 -----------------------------------------------------------------------
 -------------------------- PARSER -------------------------------------
 -----------------------------------------------------------------------
-
 decls = do
   whiteSpace
   lst <- many (query <|> defn <?> "declaration")
@@ -43,7 +41,6 @@ defn =  do
       none = do optional semi
                 return $ Predicate nm ty []
   more <|> none <?> "definition"
-  
 
 atom =  do c <- oneOf "\'"
            r <- identifier
@@ -53,11 +50,11 @@ atom =  do c <- oneOf "\'"
            return $ (if S.member r mp then Var else Cons) r
     <|> (tipeToTerm <$> parens tipe)
     <?> "atom"
-
+  
 trm =  parens trm 
    <|> do t <- atom
-          tl <- many (atom <|> parens trm)
-          return $ foldl App t tl
+          tl <- many $ (flip TyApp <$> braces tipe) <|> (flip App <$> (atom <|> parens trm))
+          return $ foldl (flip ($)) t tl 
    <?> "term"
 
 table = [ [binary "->" (:->:) AssocRight] 
