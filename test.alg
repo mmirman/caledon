@@ -45,4 +45,3 @@ defn MaybeBind : [a : atom][b : atom] Maybe a -> (a -> Maybe b) -> Maybe b -> at
 
 defn MaybeMonad : Monad Maybe -> atom
   as maybeMonad = MaybeMonad (ReturnBind {Maybe} MaybeReturn MaybeBind)
-
