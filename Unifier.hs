@@ -1,4 +1,9 @@
-{-# LANGUAGE DeriveFunctor, FlexibleContexts, ScopedTypeVariables #-}
+{-# LANGUAGE 
+ DeriveFunctor, 
+ FlexibleContexts,  
+ FlexibleInstances,
+ ScopedTypeVariables 
+ #-}
 module Unifier where
 
 import Choice
