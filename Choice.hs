@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveFunctor, FlexibleContexts #-}
+{-# LANGUAGE DeriveFunctor, FlexibleContexts, TypeSynonymInstances, FlexibleInstances #-}
 
 module Choice where
 import Control.Monad
