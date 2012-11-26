@@ -168,9 +168,6 @@ nextConstraint m = do
     a:l -> do
       put $ st { constraints = l }
       m (substitution st,a)
-      unify
-      
-
 
 (+|->) :: Name -> Tm -> Unify ()
 nm +|-> tm = modify $ \st -> st { substitution = M.insert nm tm $ subst (nm |-> tm) $ substitution st }
@@ -324,22 +321,7 @@ type Environment = M.Map Name Tp
 type TypeChecker = RWST Environment [Constraint Tm] Integer Error
 
 tpToTm :: (ConstraintGen m, MonadState a m, HasVar a) => Tp -> m Tm
-tpToTm (Atom _ t) = return t
-tpToTm (Forall n ty t) = do
-  n' <- getNew
-  tpToTm ty
-  tr <- tpToTm $ subst (n |-> Var n') t
-  return $ Cons "->" .+. Var n' .+. tr
-tpToTm (Exists n ty t) = do
-  n' <- getNew
-  tm <- tpToTm ty
-  putConstraints [ Var n' :=: tm]
-  tr <- tpToTm $ subst (n |-> Var n') t
-  return $ Cons "->" .+. Var n' .+. tr
-tpToTm (a :->: b) = do
-  ta <- tpToTm a
-  tb <- tpToTm b
-  return $ Cons "->" .+. ta .+. tb
+tpToTm t = return $ tipeToTerm t
 
 tipeToTerm (Forall n ty t) = Cons "forall" .+. Abstract n ty (tipeToTerm t)
 tipeToTerm (Exists n ty t) = Cons "exists" .+. Abstract n ty (tipeToTerm t)
@@ -355,9 +337,7 @@ checkTerm (Cons nm) t' = do
       tm <- tpToTm t
       tm' <- tpToTm t'
       tell [tm :=: tm']
-checkTerm v@(Var nm) t = do
-  tpToTm t
-  return ()
+checkTerm v@(Var nm) t = return ()
 checkTerm (TyApp a ty1) ty2 = do
   nm <- getNew
   v1 <- Atom True <$> Var <$> getNew
@@ -366,7 +346,7 @@ checkTerm (TyApp a ty1) ty2 = do
   tm2 <- tpToTm ty2
   checkTerm a $ Forall nm v1 (Atom True v2)
   checkTerm tm1 v1  
-  tell [Var nm :=: tm1]
+  tell [Var nm :=: tm1]  
   tell [v2 :=: tm2]
   
 checkTerm (App a b) t = do
