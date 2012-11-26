@@ -186,10 +186,12 @@ unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let
       Just s -> putConstraints [s :=: b] >> unify
     Abstract n ty t :=: Abstract n' ty' t' -> do  
       putConstraints [ tipeToTerm ty :=: tipeToTerm ty' ]
-      nm' <- getNew
-      putConstraints [ subst (n |-> Cons nm') t :=: subst (n' |-> Cons nm') t' ] 
-      unify      
-    Cons nm :=: Cons nm' -> unless (nm == nm') badConstraint 
+      nm <- getNew
+      putConstraints [ subst (n |-> Var nm) t :=: subst (n' |-> Var nm) t' ]
+      unify
+    Cons nm :=: Cons nm' -> do
+      unless (nm == nm') badConstraint 
+      unify
     App a b :=: App a' b' -> do
       putConstraints [a :=: a', b :=: b']
       unify
@@ -197,7 +199,7 @@ unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let
       tm <- tpToTm t
       tm' <- tpToTm t'
       putConstraints [tm :=: tm' , a :=: a']
-      unify      
+      unify
     _ :=: _ -> badConstraint
 
 unifyEngine consts i = snd <$> runStateT unify (St nil consts i)
@@ -338,15 +340,15 @@ checkTerm (Cons nm) t' = do
       tm' <- tpToTm t'
       tell [tm :=: tm']
 checkTerm v@(Var nm) t = return ()
-checkTerm (TyApp a ty1) ty2 = do
+checkTerm (TyApp a b) ty2 = do
   nm <- getNew
   v1 <- Atom True <$> Var <$> getNew
   v2 <- Var <$> getNew
-  tm1 <- tpToTm ty1
   tm2 <- tpToTm ty2
+  tmB <- tpToTm b
   checkTerm a $ Forall nm v1 (Atom True v2)
-  checkTerm tm1 v1  
-  tell [Var nm :=: tm1]  
+  checkTerm tmB v1  
+  tell [Var nm :=: tmB]  
   tell [v2 :=: tm2]
   
 checkTerm (App a b) t = do
