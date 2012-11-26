@@ -34,7 +34,7 @@ query = do
 defn =  do
   reserved "defn" 
   (nm,ty) <- namedTipe ":"
-  let more =  do reserved "is"
+  let more =  do reserved "as"
                  lst <- flip sepBy1 (reserved "|") $ namedTipe "="
                  optional semi
                  return $ Predicate nm ty lst
@@ -89,7 +89,7 @@ tipe = buildExpressionParser table (
 P.TokenParser{..} = P.makeTokenParser $ haskellDef 
  { P.identStart = letter
  , P.identLetter = alphaNum <|> oneOf "_'-/"
- , P.reservedNames = ["defn", "is", "query", "=", ":", "|", "forall", "exists"]
+ , P.reservedNames = ["defn", "as", "query", "=", ":", "|", "forall", "exists"]
  , P.caseSensitive = True
  , P.reservedOpNames = ["->", "<-"]
  }
