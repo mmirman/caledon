@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 module Main where
 
+import AST
 import Unifier 
 import Choice
 import Parser
