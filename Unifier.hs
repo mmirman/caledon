@@ -77,6 +77,7 @@ instance Show Tm where
 instance Show Tp where
   show (t :->: t') = "("++show t ++" -> "++ show t'++")"
   show (Atom _ t) = show t
+  show (Forall "" t t') = "("++show t ++" -> "++ show t'++")"
   show (Forall nm ty t) = "[ '"++nm++" : "++show ty++" ] "++show t
   show (Exists nm ty t) = "{ '"++nm++" : "++show ty++" } "++show t
   
@@ -109,9 +110,11 @@ class Subst a where
 instance (Functor f , Subst a) => Subst (f a) where
   subst foo t = subst foo <$> t
 instance Subst Tm where
-  subst foo t = case t of
-    Var nm -> fromMaybe t $! foo ! nm
-    App t1 t2 -> App (subst foo t1) (subst foo t2)
+  subst s t = case t of
+    Var nm -> fromMaybe t $! s ! nm
+    App t1 t2 -> App (subst s t1) (subst s t2)
+    TyApp t1 t2 -> TyApp (subst s t1) (subst s t2)
+    Abstract nm ty t -> Abstract nm (subst s ty) $ subst (M.insert nm (Var nm) s) t
     _ -> t
 instance Subst Tp where
   subst s t = case t of
@@ -121,7 +124,7 @@ instance Subst Tp where
     ty1 :->: ty2 -> subst s ty1 :->: subst s ty2
 instance Subst Judgement where 
   subst foo (c :|- s) = subst foo c :|- subst foo s
-                                      
+
 --------------------------------------------------------------------
 ----------------------- UNIFICATION --------------------------------
 --------------------------------------------------------------------
@@ -157,6 +160,20 @@ getNew = do
   return $! show n
                
                
+
+
+(+|->) :: Name -> Tm -> Unify ()
+nm +|-> tm = modify $ \st -> st { substitution = M.insert nm tm $ subst (nm |-> tm) $ substitution st }
+
+
+isValue :: Tm -> Bool
+isValue (App (Abstract _ _ _) _) = False
+isValue (App t1 t2) = isValue t1 && isValue t2
+isValue (TyApp (Abstract _ _ _) _) = False
+isValue (TyApp t1 tp) = isValue t1
+isValue _ = True
+
+
 nextConstraint :: ((Substitution, Constraint Tm) -> Unify ()) -> Unify ()
 nextConstraint m = do
   st <- get
@@ -165,11 +182,7 @@ nextConstraint m = do
     a:l -> do
       put $ st { constraints = l }
       m (substitution st,a)
-
-(+|->) :: Name -> Tm -> Unify ()
-nm +|-> tm = modify $ \st -> st { substitution = M.insert nm tm $ subst (nm |-> tm) $ substitution st }
-
-
+      
 unify :: Unify ()
 unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let
   badConstraint = throwError $ show constraint 
