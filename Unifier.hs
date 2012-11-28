@@ -68,8 +68,8 @@ data Judgement = (:|-) { antecedent :: [Tp] , succedent :: Tp }
   
 instance Show Tm where
   show (App (App (Cons "->") a) b) = "("++show a++" -> "++show b++")"
-  show (Abstract nm ty t) = "\\"++nm++":" ++show ty++"."++show t
   show (App a b) = "("++show a++" "++show b++")"
+  show (Abstract nm ty t) = "\\"++nm++":" ++show ty++"."++show t
   show (TyApp a b) = "("++show a++" {"++show b++"} )"
   show (Cons n) = n
   show (Var n) = '\'':n

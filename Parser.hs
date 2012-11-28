@@ -52,14 +52,12 @@ atom =  do c <- oneOf "\'"
   
 trm =  parens trm 
    <|> do t <- atom
---          tl <- many $ (flip TyApp <$> braces tipe) <|> (flip App <$> (atom <|> parens trm))
---          return $ foldl (flip ($)) t tl 
-          tl <- many $ (flip TyApp <$> (Atom True <$> (atom <|> parens trm) <|> parens tipe))
-          return $ foldl (flip ($)) t tl
+          tl <- many $ (flip TyApp <$> braces tipe) <|> (flip App <$> (atom <|> parens trm))
+          return $ foldl (flip ($)) t tl 
    <?> "term"
 
-table = [ [binary "->" (Forall "") AssocRight] 
-        , [binary "<-" (flip (Forall "")) AssocLeft] 
+table = [ [binary "->" (:->:) AssocRight] 
+        , [binary "<-" (flip (:->:)) AssocLeft] 
         ]
   where  binary  name fun assoc = Infix (reservedOp name >> return fun) assoc
          
