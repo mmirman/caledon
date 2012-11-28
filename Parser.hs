@@ -47,7 +47,7 @@ atom =  do c <- oneOf "\'"
     <|> do r <- identifier
            mp <- getState 
            return $ (if S.member r mp then Var else Cons) r
-    <|> (tipeToTerm <$> parens tipe)
+    <|> (tpToTm <$> parens tipe)
     <?> "atom"
   
 trm =  parens trm 

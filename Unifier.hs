@@ -65,9 +65,6 @@ data Judgement = (:|-) { antecedent :: [Tp] , succedent :: Tp }
 --------------------------------------------------------------------
 ----------------------- PRETTY PRINT -------------------------------
 --------------------------------------------------------------------
-
-
-  
   
 instance Show Tm where
   show (App (App (Cons "->") a) b) = "("++show a++" -> "++show b++")"
@@ -140,7 +137,7 @@ instance Monad m => ConstraintGen (StateT St m) where
 instance MonadWriter [Constraint Tm] m => ConstraintGen m where  
   putConstraints = tell
 
-type Unify a = StateT St Error a
+type Unify a = StateT St Choice a
 
 class HasVar a where
   getV :: a -> Integer
@@ -173,7 +170,6 @@ nextConstraint m = do
 nm +|-> tm = modify $ \st -> st { substitution = M.insert nm tm $ subst (nm |-> tm) $ substitution st }
 
 
-
 unify :: Unify ()
 unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let
   badConstraint = throwError $ show constraint 
@@ -185,7 +181,7 @@ unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let
         _ -> v +|-> b >> unify
       Just s -> putConstraints [s :=: b] >> unify
     Abstract n ty t :=: Abstract n' ty' t' -> do  
-      putConstraints [ tipeToTerm ty :=: tipeToTerm ty' ]
+      putConstraints [ tpToTm ty :=: tpToTm ty' ]
       nm <- getNew
       putConstraints [ subst (n |-> Var nm) t :=: subst (n' |-> Var nm) t' ]
       unify
@@ -196,9 +192,7 @@ unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let
       putConstraints [a :=: a', b :=: b']
       unify
     TyApp a t :=: TyApp a' t' -> do
-      tm <- tpToTm t
-      tm' <- tpToTm t'
-      putConstraints [tm :=: tm' , a :=: a']
+      putConstraints [tpToTm t :=: tpToTm t' , a :=: a']
       unify
     _ :=: _ -> badConstraint
 
@@ -209,8 +203,6 @@ unifyEngine consts i = snd <$> runStateT unify (St nil consts i)
 type Reifier = RWST () Substitution Integer Choice
 type Reification = Reifier Substitution                                      
 
-
-
 unifier :: [Tp] -> Tp -> Reification 
 unifier cons t = do
   t' <- case t of
@@ -219,13 +211,11 @@ unifier cons t = do
   i <- get
   let isAtom (Atom _ _) = True
       isAtom _ = False
-  F.msum $ flip map (filter isAtom cons) $ \(Atom _ con) -> 
-    case runChoice $ unifyEngine [con :=: t'] i of
-      Nothing -> empty
-      Just s -> do
-        put $ variable s
-        tell $ substitution s
-        return $ substitution s
+  F.msum $ flip map (filter isAtom cons) $ \(Atom _ con) -> do
+    s <- lift $ unifyEngine [con :=: t'] i
+    put $ variable s
+    tell $ substitution s
+    return $ substitution s
 
 isPos t = case t of 
   _ :->: _ -> False
@@ -309,11 +299,10 @@ freeVariables (Atom _ a) = fV a
         fV (Cons _) = mempty
 
 solver :: [Tp] -> Tp -> Either String [(Name, Tm)]
-solver axioms t = case runChoice $ runRWST (solve $ axioms :|- t) () 0 of
-  Nothing -> Left "reification not possible"
-  Just (_,_,s) -> Right $ recSubst $ map (\a -> (a,Var a)) $ S.toList $ freeVariables t
+solver axioms t = case runError $ runRWST (solve $ axioms :|- t) () 0 of
+  Right (_,_,s) -> Right $ recSubst $ map (\a -> (a,Var a)) $ S.toList $ freeVariables t
     where recSubst f = fst $ head $ dropWhile (not . uncurry (==)) $ iterate (\(a,b) -> (b,subst s b)) (f,subst s f)
-
+  Left s -> Left $ "reification not possible: "++s
 
 -----------------------------------------------------------------
 ----------------------- Type Checker ----------------------------    
@@ -322,30 +311,24 @@ solver axioms t = case runChoice $ runRWST (solve $ axioms :|- t) () 0 of
 type Environment = M.Map Name Tp
 type TypeChecker = RWST Environment [Constraint Tm] Integer Error
 
-tpToTm :: (ConstraintGen m, MonadState a m, HasVar a) => Tp -> m Tm
-tpToTm t = return $ tipeToTerm t
-
-tipeToTerm (Forall n ty t) = Cons "forall" .+. Abstract n ty (tipeToTerm t)
-tipeToTerm (Exists n ty t) = Cons "exists" .+. Abstract n ty (tipeToTerm t)
-tipeToTerm (Atom _ tm) = tm
-tipeToTerm (t1 :->: t2) = Cons "->" .+. tipeToTerm t1 .+. tipeToTerm t2
+tpToTm (Forall n ty t) = Cons "forall" .+. Abstract n ty (tpToTm t)
+tpToTm (Exists n ty t) = Cons "exists" .+. Abstract n ty (tpToTm t)
+tpToTm (Atom _ tm) = tm
+tpToTm (t1 :->: t2) = Cons "->" .+. tpToTm t1 .+. tpToTm t2
 
 checkTerm :: Tm -> Tp -> TypeChecker ()
 checkTerm (Cons nm) t' = do
   maybe_tenv <- (! nm) <$> ask
   case maybe_tenv of 
     Nothing -> error $ nm++" was not found in the environment"
-    Just t -> do
-      tm <- tpToTm t
-      tm' <- tpToTm t'
-      tell [tm :=: tm']
+    Just t -> tell [tpToTm t :=: tpToTm t']
 checkTerm v@(Var nm) t = return ()
 checkTerm (TyApp a b) ty2 = do
   nm <- getNew
   v1 <- Atom True <$> Var <$> getNew
   v2 <- Var <$> getNew
-  tm2 <- tpToTm ty2
-  tmB <- tpToTm b
+  let tm2 = tpToTm ty2
+      tmB = tpToTm b
   checkTerm a $ Forall nm v1 (Atom True v2)
   checkTerm tmB v1  
   tell [Var nm :=: tmB]  
@@ -354,19 +337,15 @@ checkTerm (TyApp a b) ty2 = do
 checkTerm (App a b) t = do
   v1 <- Atom True <$> Var <$> getNew
   v2 <- Var <$> getNew
-  tm <- tpToTm t
-  tell [v2 :=: tm]
+  tell [v2 :=: tpToTm t]
   checkTerm a $ v1 :->: (Atom True v2)
   checkTerm b $ v1
 checkTerm (Abstract nm ty tm) t = do
   v1 <- Var <$> getNew
   v2 <- Atom True <$> Var <$> getNew
-  ty1 <- tpToTm ty
-  tell [v1 :=: ty1]
+  tell [v1 :=: tpToTm ty]
   checkTerm (subst (nm |-> v1) tm) v2
-  tym <- tpToTm t
-  tym' <- tpToTm $ Atom True v1 :->: v2 
-  tell [tym' :=: tym]
+  tell [tpToTm t :=: tpToTm (Atom True v1 :->: v2 )]
 
 getCons tm = case tm of
   Cons t -> return t
@@ -385,14 +364,12 @@ checkType env base ty = do
           Exists n ty t -> do
             v1 <- Var <$> getNew
             checkTp False ty
-            ty_tm <- tpToTm ty
-            tell [ ty_tm :=: v1 ]
+            tell [ tpToTm ty :=: v1 ]
             checkTp rms $ subst (n |-> v1) t -- TODO
           Forall n ty t -> do
             v1 <- Var <$> getNew
             checkTp False ty
-            ty_tm <- tpToTm ty
-            tell [ ty_tm :=: v1 ]
+            tell [ tpToTm ty :=: v1 ]
             checkTp rms $ subst (n |-> v1) t -- TODO
           t1 :->: t2 -> do 
             checkTp False t1

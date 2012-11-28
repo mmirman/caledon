@@ -39,7 +39,7 @@ main = do
   uncurry checkAndRun $ flip partition decs $ \x -> case x of 
                                    Predicate _ _ _ -> True
                                    _ -> False
-                                   
+
 {-
  (OO)
   ##xxxxxxxxxxxxx------------------------
