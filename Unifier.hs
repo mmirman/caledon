@@ -147,9 +147,11 @@ leftFocused :: Judgement -> Reification
 leftFocused judge@(f:context :|- r) = blurL judge soln
   where soln = case f of
           Atom False _ -> unifier [f] r
-          Forall nm _ t1 -> do
+          Forall "" t1 t2 -> do
+            leftFocused $ (t1 :->: t2):f:context:|- r
+          Forall nm t1 t2 -> do
             nm' <- getNew
-            s <- leftFocused $ subst (nm |-> Var nm') t1:f:context :|- r
+            s <- leftFocused $ (t1 :->: subst (nm |-> Var nm') t2):f:context :|- r
             return $ M.delete nm' s
             
           (c :->: d) :->: b -> do  -- Sketchy
@@ -188,9 +190,10 @@ rightUnfocused :: Judgement -> Reification
 rightUnfocused judge@(context :|- r) = focusR judge soln
   where soln = case r of
           t1 :->: t2 -> solve $ t1:context :|- t2
-          Forall nm _ t2 -> do
+          Forall "" t1 t2 -> solve $ t1:context :|- t2
+          Forall nm t1 t2 -> do
             nm' <- getNew
-            solve $ context :|- subst (nm |-> Cons nm') t2
+            solve $ t1:context :|- subst (nm |-> Cons nm') t2
           _ -> empty
 
 solve :: Judgement -> Reification
@@ -202,20 +205,10 @@ solve judge@(context :|- r) = rightUnfocused judge <|> (F.msum $ useSingle (\f c
 ----------------------------------------------------------------------
 ----------------------- LOGIC ENGINE ---------------------------------
 ----------------------------------------------------------------------
-freeVariables (Forall a ty t) = (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
-freeVariables (Exists a ty t) = (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
-freeVariables (t1 :->: t2) = freeVariables t1 `S.union` freeVariables t2
-freeVariables (Atom _ a) = fV a
-  where fV (App a b) = fV a `S.union` fV b
-        fV (TyApp a b) = fV a `S.union` freeVariables b
-        fV (Abstract nm a b) = (S.delete nm $ fV b) `S.union` freeVariables a
-        fV (Var a) = S.singleton a
-        fV (Cons _) = mempty
-
-solver :: [Tp] -> Tp -> Either String [(Name, Tm)]
+solver :: [(Name,Tp)] -> Tp -> Either String [(Name, Tm)]
 solver axioms t = case runError $ runRWST (solve $ axioms :|- t) () 0 of
   Right (_,_,s) -> Right $ recSubst $ map (\a -> (a,Var a)) $ S.toList $ freeVariables t
-    where recSubst f = fst $ head $ dropWhile (not . uncurry (==)) $ iterate (\(a,b) -> (b,subst s b)) (f,subst s f)
+    where recSubst f = fst $ head $ dropWhile (not . uncurry (==)) $ iterate (\(_,b) -> (b,subst s b)) (f,subst s f)
   Left s -> Left $ "reification not possible: "++s
 
 -----------------------------------------------------------------

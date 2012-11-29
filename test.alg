@@ -2,46 +2,43 @@ defn num  : atom
   as zero = num
    | succ = num -> num
 
-defn List : atom -> atom
-  as nil  = [A : atom] List A
-   | cons = [A : atom] A -> List A -> List A
-
 defn add   : num -> num -> num -> atom
   as add-z = [N : num] add zero N N
-   | add-s = [N : num][M : num][R : num] add (succ N) M (succ R) <- add N M R
+   | add-s = [N : num][M : num][R : num] add N M R -> add (succ N) M (succ R)
 
 query sum-1 = add (succ (succ zero)) 'v (succ (succ (succ zero)))
 query sum-2 = add (succ (succ zero)) (succ (succ (succ zero))) 'v
+query sum-3 = add (succ zero) zero 'v
 
-defn Term : atom
-  as lam = (Term -> Term) -> Term
-   | app = Term -> Term -> Term
 
-defn red : Term -> Term -> atom
-  as red-lam  = [V : Term][F : Term -> Term] red (app (lam F) V) (F V)
-   | red-app1 = [V1 : Term][V1' : Term][V2 : Term] 
-                red (app V1 V2) (app V1' V2) <- red V1 V1'
-   | red-app2 = [V1 : Term][V2' : Term][V2 : Term] 
-                red (app V1 V2) (app V1 V2') <- red V2 V2'
+{-
 
-defn Monad : (atom -> atom) -> atom
-  as ReturnBind = [M : atom -> atom] 
-                  ([a : atom] a -> M a -> atom) 
-               -> ([a : atom][b : atom] M a -> (a -> M b) -> M b -> atom) 
-               -> Monad M
+1 -> z                                                     3 -> zero
+2 -> z                                                     6 -> zero
+`v -> succ 3                                               4 -> add-z 6
+                                                           ------------------------------------------------------
+0 -> add-s 1 2 3 4                                         add-z 6 : add zero 6 6 |- 4 : add zero zero 3 
+------------------------------------------                 ------------------------------------------------------
+add-s 1 2 3 4 : add (succ 1) 2 (succ 3)                    add-z : [N : Num] add zero N N |- 4 : add zero zero 3 
+add-z : [N : Num] add zero N N                             ------------------------------------------------------
+ |- 0 : add (succ zero) zero 'v                             add-z : [N : Num] add zero N N |- 4 : add 1 2 3 
+------------------------------------------------------------------------------------------------------------
+add-s 1 2 3 : add 1 2 3 -> add (succ 1) 2 (succ 3)
+add-z : [N : Num] add zero N N
+ |- 0 : add (succ zero) zero 'v                               
+--------------------------------------------------------------
+add-s 1 2 : [R : Num] add 1 2 R -> add (succ 1) 2 (succ R)
+add-z : [N : Num] add zero N N
+ |- 0 : add (succ zero) zero 'v                                    
+-------------------------------------------------------------------
+add-s 1 : [M : Num][R : Num] add 1 M R -> add (succ 1) M (succ R)
+add-z : [N : Num] add zero N N
+ |- 0 : add (succ zero) zero 'v                                    
+-------------------------------------------------------------------
+add-s : [N : Num][M : Num][R : Num] add N M R -> add (succ N) M (succ R)
+add-z : [N : Num] add zero N N
+ |- 0 : add (succ zero) zero 'v
 
-defn Maybe   : atom -> atom
-  as Just    = [a : atom] a -> Maybe a
-   | Nothing = [a : atom] Maybe a
-
-defn MaybeReturn : [a : atom] a -> Maybe a -> atom 
-  as justReturn = [a : atom][V : a] MaybeReturn {a} V (Just{a} V)
-
-defn MaybeBind : [a : atom][b : atom] Maybe a -> (a -> Maybe b) -> Maybe b -> atom 
-  as justBind = [a : atom][b : atom][v : a][f : a -> Maybe b] 
-                MaybeBind {a} {b} (Just{a} v) f (f v)
-   | nothingBind = [a : atom][b : atom][f : a -> Maybe b] 
-                   MaybeBind{a}{b} (Nothing{a}) f (Nothing{b})
-
-defn MaybeMonad : Monad Maybe -> atom
-  as maybeMonad = MaybeMonad (ReturnBind {Maybe} MaybeReturn MaybeBind)
+0  |-> add-s zero zero zero (add-z zero)
+`v |-> succ zero
+-}

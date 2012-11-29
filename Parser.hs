@@ -27,24 +27,23 @@ decls = do
 
 query = do 
   reserved "query" 
-  (nm,ty) <- namedTipe "="
+  (nm,ty) <- named dec_pred
   optional semi
   return $ Query nm ty
 
 defn =  do
   reserved "defn" 
-  (nm,ty) <- namedTipe ":"
+  (nm,ty) <- named dec_tipe
   let more =  do reserved "as"
-                 lst <- flip sepBy1 (reserved "|") $ namedTipe "="
+                 lst <- flip sepBy1 (reservedOp "|") $ named dec_pred
                  optional semi
                  return $ Predicate nm ty lst
       none = do optional semi
                 return $ Predicate nm ty []
   more <|> none <?> "definition"
 
-atom =  do c <- oneOf "\'"
-           r <- identifier
-           return $ Var $ c:r
+atom =  do r <- id_var
+           return $ Var r
     <|> do r <- identifier
            mp <- getState 
            return $ (if S.member r mp then Var else Cons) r
@@ -53,19 +52,29 @@ atom =  do c <- oneOf "\'"
   
 trm =  parens trm 
    <|> do t <- atom
-          tl <- many $ (flip TyApp <$> braces tipe) <|> (flip App <$> (atom <|> parens trm))
+--          tl <- many $ (flip TyApp <$> braces tipe) <|> (flip App <$> (atom <|> parens trm))
+          tl <- many $ (flip TyApp <$> parens tipe) <|> (flip TyApp <$> Atom True <$> atom)
           return $ foldl (flip ($)) t tl 
    <?> "term"
 
-table = [ [binary "->" (:->:) AssocRight] 
-        , [binary "<-" (flip (:->:)) AssocLeft] 
+imp = Forall ""
+
+table = [ [binary "->" imp {- (:->:) -} AssocRight] 
+        , [binary "<-" (flip imp {- (:->:) -}) AssocLeft] 
         ]
   where  binary  name fun assoc = Infix (reservedOp name >> return fun) assoc
          
-namedTipe c = do nm <- identifier
-                 reserved c
-                 ty <- tipe
-                 return (nm, ty)
+ 
+dec_tipe = (getId lower, ":")
+dec_pred = (getId lower, "=")
+id_var = getId $ upper <|> char '\''
+dec_anon = (getId $ letter <|> char '\'' , ":")
+
+named (ident, sep) = do
+  nm <- ident
+  reservedOp sep
+  ty <- tipe
+  return (nm, ty)
                
 tmpState nm m = do
   s <- getState
@@ -78,18 +87,20 @@ tmpState nm m = do
 tipe = buildExpressionParser table ( 
         parens tipe
     <|> (Atom False <$> trm)
-    <|> do (nm,tp) <- brackets $ namedTipe ":"
+    <|> do (nm,tp) <- brackets $ named dec_anon
            tp' <- tmpState nm tipe
            return $ Forall nm tp tp'
-    <|> do (nm,tp) <- braces $ namedTipe ":"
+    <|> do (nm,tp) <- braces $ named dec_anon
            tp' <- tmpState nm tipe
            return $ Exists nm tp tp'
     <?> "type")
            
-P.TokenParser{..} = P.makeTokenParser $ haskellDef 
- { P.identStart = letter
+P.TokenParser{..} = P.makeTokenParser $ mydef
+mydef = haskellDef 
+ { P.identStart = lower
  , P.identLetter = alphaNum <|> oneOf "_'-/"
- , P.reservedNames = ["defn", "as", "query", "=", ":", "|", "forall", "exists"]
+ , P.reservedNames = ["defn", "as", "query", "forall", "exists"]
  , P.caseSensitive = True
- , P.reservedOpNames = ["->", "<-"]
+ , P.reservedOpNames = ["->", "<-", ":", "|"]
  }
+getId start = P.identifier $ P.makeTokenParser $ mydef { P.identStart = start }

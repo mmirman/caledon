@@ -4,6 +4,7 @@
  #-}
 module AST where
 
+import Data.Monoid
 import Data.Maybe
 import Data.Functor
 import qualified Data.Map as M
@@ -52,13 +53,15 @@ instance Show Tm where
   show (App (App (Cons "->") a) b) = "("++show a++" -> "++show b++")"
   show (App a b) = "("++show a++" "++show b++")"
   show (Abstract nm ty t) = "\\"++nm++":" ++show ty++"."++show t
-  show (TyApp a b) = "("++show a++" {"++show b++"} )"
+--  show (TyApp a b) = "("++show a++" {"++show b++"} )"
+  show (TyApp a b) = "("++show a++" "++show b++")"
   show (Cons n) = n
   show (Var n) = n
   
 instance Show Tp where
   show (t :->: t') = "("++show t ++" -> "++ show t'++")"
   show (Atom _ t) = show t
+  show (Forall "" t t') = "("++show t ++" -> "++ show t'++")"
   show (Forall nm ty t) = "[ "++nm++" : "++show ty++" ] "++show t
   show (Exists nm ty t) = "{ "++nm++" : "++show ty++" } "++show t
   
@@ -106,3 +109,20 @@ instance Subst Tp where
     ty1 :->: ty2 -> subst s ty1 :->: subst s ty2
 instance Subst Judgement where 
   subst foo (c :|- s) = subst foo c :|- subst foo s
+
+--------------------------------------------------------------------
+----------------------- FREE VARIABLES -----------------------------
+--------------------------------------------------------------------
+class FV a where         
+  freeVariables :: a -> S.Set Name
+instance FV Tp where                
+  freeVariables (Forall a ty t) = (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
+  freeVariables (Exists a ty t) = (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
+  freeVariables (t1 :->: t2) = freeVariables t1 `S.union` freeVariables t2
+  freeVariables (Atom _ a) = freeVariables a
+instance FV Tm where
+  freeVariables (App a b) = freeVariables a `S.union` freeVariables b
+  freeVariables (TyApp a b) = freeVariables a `S.union` freeVariables b
+  freeVariables (Abstract nm a b) = (S.delete nm $ freeVariables b) `S.union` freeVariables a
+  freeVariables (Var a) = S.singleton a
+  freeVariables (Cons _) = mempty
