@@ -52,11 +52,11 @@ instance RunChoice Choice where
       _ -> error "this result makes no sense"
     (Success a):_ -> Right a
     _ -> error "this result makes no sense"
-    where lst = chs:to lst 1
+    where lst = chs:queue lst 1
           
-          to l 0 = []
-          to ((a :<|>: b):l) q = a:b:to l (q + 1)
-          to (_:l) q = to l (q - 1)
+          queue l 0 = []
+          queue ((a :<|>: b):l) q = a:b:queue l (q + 1)
+          queue (_:l) q = queue l (q - 1)
           
           notFail (Fail a) = False
           notFail _ = True
@@ -77,3 +77,8 @@ instance MonadError String Choice where
   catchError try1 foo_try2 = case runError try1 of
     Left s -> foo_try2 "no error given"
     Right a -> Success a
+    
+    
+fibs = 1:1:zipWith (+) fibs (tail fibs)
+
+

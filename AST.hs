@@ -28,8 +28,7 @@ data Constraint a = a :=: a
                   deriving (Eq, Ord, Functor, Show)
 
 infixr 5 :->:
-data Tp = Atom Bool Tm
-        | Exists Name Tp Tp
+data Tp = Atom Tm
         | Forall Name Tp Tp
         | Tp :->: Tp
         deriving (Eq, Ord)
@@ -41,9 +40,8 @@ data Predicate = Predicate { predName::Name
                | Query { predName :: Name, predType::Tp }
                deriving (Eq)
 
-
 infixl 1 :|- 
-data Judgement = (:|-) { antecedent :: [Tp] , succedent :: Tp }
+data Judgement = (:|-) { antecedent :: [(Name,Tp)] , succedent :: Tp }
 
 --------------------------------------------------------------------
 ----------------------- PRETTY PRINT -------------------------------
@@ -60,10 +58,9 @@ instance Show Tm where
   
 instance Show Tp where
   show (t :->: t') = "("++show t ++" -> "++ show t'++")"
-  show (Atom _ t) = show t
+  show (Atom t) = show t
   show (Forall "" t t') = "("++show t ++" -> "++ show t'++")"
   show (Forall nm ty t) = "[ "++nm++" : "++show ty++" ] "++show t
-  show (Exists nm ty t) = "{ "++nm++" : "++show ty++" } "++show t
   
 instance Show Judgement where 
   show (a :|- b) =  removeHdTl (show a) ++" |- "++ show b
@@ -78,7 +75,6 @@ instance Show Predicate where
         where showSingle (nm,ty) = nm++" = "++show ty
   show (Query nm ty) = "query "++nm++" = "++show ty
 
-
 --------------------------------------------------------------------
 ----------------------- SUBSTITUTION -------------------------------
 --------------------------------------------------------------------
@@ -92,6 +88,7 @@ nil = M.empty
 
 class Subst a where
   subst :: Substitution -> a -> a
+  
 instance (Functor f , Subst a) => Subst (f a) where
   subst foo t = subst foo <$> t
 instance Subst Tm where
@@ -103,9 +100,8 @@ instance Subst Tm where
     _ -> t
 instance Subst Tp where
   subst s t = case t of
-    Atom m t -> Atom m $ subst s t
+    Atom t -> Atom $ subst s t
     Forall nm ty t -> Forall nm (subst s ty) $ subst (M.insert nm (Var nm) s) t
-    Exists nm ty t -> Exists nm (subst s ty) $ subst (M.insert nm (Var nm) s) t
     ty1 :->: ty2 -> subst s ty1 :->: subst s ty2
 instance Subst Judgement where 
   subst foo (c :|- s) = subst foo c :|- subst foo s
@@ -117,12 +113,14 @@ class FV a where
   freeVariables :: a -> S.Set Name
 instance FV Tp where                
   freeVariables (Forall a ty t) = (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
-  freeVariables (Exists a ty t) = (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
   freeVariables (t1 :->: t2) = freeVariables t1 `S.union` freeVariables t2
-  freeVariables (Atom _ a) = freeVariables a
+  freeVariables (Atom a) = freeVariables a
 instance FV Tm where
   freeVariables (App a b) = freeVariables a `S.union` freeVariables b
   freeVariables (TyApp a b) = freeVariables a `S.union` freeVariables b
   freeVariables (Abstract nm a b) = (S.delete nm $ freeVariables b) `S.union` freeVariables a
   freeVariables (Var a) = S.singleton a
   freeVariables (Cons _) = mempty
+                           
+instance (FV a,FV b) => FV (a,b) where 
+  freeVariables (a,b) = freeVariables a `S.union` freeVariables b

@@ -53,7 +53,7 @@ atom =  do r <- id_var
 trm =  parens trm 
    <|> do t <- atom
 --          tl <- many $ (flip TyApp <$> braces tipe) <|> (flip App <$> (atom <|> parens trm))
-          tl <- many $ (flip TyApp <$> parens tipe) <|> (flip TyApp <$> Atom True <$> atom)
+          tl <- many $ (flip TyApp <$> parens tipe) <|> (flip TyApp <$> Atom <$> atom)
           return $ foldl (flip ($)) t tl 
    <?> "term"
 
@@ -86,13 +86,11 @@ tmpState nm m = do
 
 tipe = buildExpressionParser table ( 
         parens tipe
-    <|> (Atom False <$> trm)
+    <|> (Atom <$> trm)
     <|> do (nm,tp) <- brackets $ named dec_anon
+           optional $ reservedOp "->"
            tp' <- tmpState nm tipe
            return $ Forall nm tp tp'
-    <|> do (nm,tp) <- braces $ named dec_anon
-           tp' <- tmpState nm tipe
-           return $ Exists nm tp tp'
     <?> "type")
            
 P.TokenParser{..} = P.makeTokenParser $ mydef

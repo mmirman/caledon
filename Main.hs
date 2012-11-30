@@ -27,7 +27,8 @@ checkAndRun predicates targets = do
     Left e -> error e
     Right () -> putStrLn "Type checking success!"
 
-  forM_ targets $ \target -> case solver (snd <$> concatMap predConstructors predicates) (predType target) of
+  let allTypes c = (predName c, predType c):predConstructors c
+  forM_ targets $ \target -> case solver (concatMap allTypes predicates) (predType target) of
     Left e -> putStrLn $ "ERROR: "++e
     Right sub -> putStrLn $ "\nTARGET: \n"++show target++"\n\nSOLVED WITH:\n"++concatMap (\(a,b) -> a++" => "++show b++"\n") sub
 
@@ -41,43 +42,3 @@ main = do
   uncurry checkAndRun $ flip partition decs $ \x -> case x of 
                                    Predicate _ _ _ -> True
                                    _ -> False
-
-{-
- (OO)
-  ##xxxxxxxxxxxxx------------------------
-  ##xxxxxxxxxxxxx------------------------
-  ##xxxxxxxxxxxxx------------------------
-  ##xxxxxxxxxxxxx----AMERCA F**K YEAH ---
-  ##xxxxxxxxxxxxx------------------------
-  ##-------------------------------------
-  ##-------------------------------------
-  ##-------------------------------------
-  ##-------------------------------------
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##
-  ##  \o__
-  ##   |
-  ##  / \  .|.  /./ .  \.  .  \   
-````````````````````````````````
-:::::::;;;;;;;;;;;:;;;;;:;;:;;;;
-
--}
-
