@@ -75,7 +75,7 @@ appendErr s m = catchError m $ \s' -> throwError $ s' ++ "\n" ++ s
 instance MonadError String Choice where
   throwError a = Fail a
   catchError try1 foo_try2 = case runError try1 of
-    Left s -> foo_try2 "no error given"
+    Left s -> foo_try2 s
     Right a -> Success a
     
     

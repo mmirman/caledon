@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards, TupleSections #-}
 module Parser where
 
 import AST
@@ -13,6 +13,7 @@ import Data.Monoid
 import Control.Monad (unless)
 import Text.Parsec.Language (haskellDef)
 import Text.Parsec.Expr
+import Data.Maybe
 import qualified Text.Parsec.Token as P
 import qualified Data.Set as S
 
@@ -42,7 +43,9 @@ defn =  do
                 return $ Predicate nm ty []
   more <|> none <?> "definition"
 
-atom =  do r <- id_var
+atom =  do reserved "_"
+           return Hole
+    <|> do r <- id_var
            return $ Var r
     <|> do r <- identifier
            mp <- getState 
@@ -75,7 +78,13 @@ named (ident, sep) = do
   reservedOp sep
   ty <- tipe
   return (nm, ty)
-               
+
+anonNamed = do
+  let (ident,sep) = dec_anon 
+  nm <- ident
+  ty <- optionMaybe $ reservedOp sep >> tipe
+  return (nm,fromMaybe (Atom Hole) ty)
+
 tmpState nm m = do
   s <- getState
   let b = S.member nm s
@@ -87,7 +96,7 @@ tmpState nm m = do
 tipe = buildExpressionParser table ( 
         parens tipe
     <|> (Atom <$> trm)
-    <|> do (nm,tp) <- brackets $ named dec_anon
+    <|> do (nm,tp) <- brackets anonNamed
            optional $ reservedOp "->"
            tp' <- tmpState nm tipe
            return $ Forall nm tp tp'
@@ -97,7 +106,7 @@ P.TokenParser{..} = P.makeTokenParser $ mydef
 mydef = haskellDef 
  { P.identStart = lower
  , P.identLetter = alphaNum <|> oneOf "_'-/"
- , P.reservedNames = ["defn", "as", "query", "forall", "exists"]
+ , P.reservedNames = ["defn", "as", "query", "forall", "exists", "_"]
  , P.caseSensitive = True
  , P.reservedOpNames = ["->", "<-", ":", "|"]
  }

@@ -15,22 +15,31 @@ import Data.Monoid
 -----------------------------------------------------------------------
 -------------------------- MAIN ---------------------------------------
 -----------------------------------------------------------------------
-checkAndRun predicates targets = do
-  putStrLn $ "AXIOMS: "
+checkAndRun decs = do
+  
+  putStrLn "\nTYPE CHECKING: "
+  decs <- case runError $ typeCheckAll $ decs of
+    Left e -> error e
+    Right e -> do putStrLn "Type checking success!" >> return e
+  let (predicates, targets) = flip partition decs $ \x -> case x of 
+        Predicate _ _ _ -> True
+        _ -> False
+
+  
+  putStrLn $ "\nAXIOMS: "
   forM_ predicates  $ \s -> putStrLn $ show s++"\n"
   
   putStrLn $ "\nTARGETS: "
   forM_ targets  $ \s -> putStrLn $ show s++"\n"
-  
-  putStrLn "\nTYPE CHECKING: "
-  case runError $ typeCheckAll $ targets++predicates of
-    Left e -> error e
-    Right () -> putStrLn "Type checking success!"
 
   let allTypes c = (predName c, predType c):predConstructors c
-  forM_ targets $ \target -> case solver (concatMap allTypes predicates) (predType target) of
-    Left e -> putStrLn $ "ERROR: "++e
-    Right sub -> putStrLn $ "\nTARGET: \n"++show target++"\n\nSOLVED WITH:\n"++concatMap (\(a,b) -> a++" => "++show b++"\n") sub
+  forM_ targets $ \target -> 
+    case solver (concatMap allTypes predicates) $ predType target of
+      Left e -> putStrLn $ "ERROR: "++e
+      Right sub -> putStrLn $ 
+                   "\nTARGET: \n"++show target
+                   ++"\n\nSOLVED WITH:\n"
+                   ++concatMap (\(a,b) -> a++" => "++show b++"\n") sub
 
 main = do
   [fname] <- getArgs
@@ -39,6 +48,4 @@ main = do
   decs   <- case mError of
     Left e -> error $ show e
     Right l -> return l
-  uncurry checkAndRun $ flip partition decs $ \x -> case x of 
-                                   Predicate _ _ _ -> True
-                                   _ -> False
+  checkAndRun decs 

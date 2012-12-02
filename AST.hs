@@ -3,7 +3,7 @@
  FlexibleInstances
  #-}
 module AST where
-
+import qualified Data.Foldable as F
 import Data.Monoid
 import Data.Maybe
 import Data.Functor
@@ -17,7 +17,8 @@ type Name = String
 infixl 6 .+.
 (.+.) = App
               
-data Tm = Var Name 
+data Tm = Hole
+        | Var Name 
         | Cons Name
         | Abstract Name Tp Tm
         | App Tm Tm
@@ -40,7 +41,7 @@ data Predicate = Predicate { predName::Name
                | Query { predName :: Name, predType::Tp }
                deriving (Eq)
 
-infixl 1 :|- 
+infixl 1 :|-
 data Judgement = (:|-) { antecedent :: [(Name,Tp)] , succedent :: Tp }
 
 --------------------------------------------------------------------
@@ -51,16 +52,18 @@ instance Show Tm where
   show (App (App (Cons "->") a) b) = "("++show a++" -> "++show b++")"
   show (App a b) = "("++show a++" "++show b++")"
   show (Abstract nm ty t) = "\\"++nm++":" ++show ty++"."++show t
---  show (TyApp a b) = "("++show a++" {"++show b++"} )"
   show (TyApp a b) = "("++show a++" "++show b++")"
   show (Cons n) = n
+  show Hole = "_"                
   show (Var n) = n
   
 instance Show Tp where
   show (t :->: t') = "("++show t ++" -> "++ show t'++")"
   show (Atom t) = show t
-  show (Forall "" t t') = "("++show t ++" -> "++ show t'++")"
+  show (Forall "" t t') = "("++show t ++" -> "++ show t'++")"  
+  show (Forall nm t t') | not $ S.member nm (freeVariables t') = "("++show t ++" -> "++ show t'++") "
   show (Forall nm ty t) = "[ "++nm++" : "++show ty++" ] "++show t
+
   
 instance Show Judgement where 
   show (a :|- b) =  removeHdTl (show a) ++" |- "++ show b
@@ -111,7 +114,12 @@ instance Subst Judgement where
 --------------------------------------------------------------------
 class FV a where         
   freeVariables :: a -> S.Set Name
-instance FV Tp where                
+  
+instance FV a => FV (Maybe a) where
+  freeVariables (Just f) = freeVariables f
+  freeVariables Nothing = mempty
+  
+instance FV Tp where
   freeVariables (Forall a ty t) = (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
   freeVariables (t1 :->: t2) = freeVariables t1 `S.union` freeVariables t2
   freeVariables (Atom a) = freeVariables a
@@ -120,7 +128,6 @@ instance FV Tm where
   freeVariables (TyApp a b) = freeVariables a `S.union` freeVariables b
   freeVariables (Abstract nm a b) = (S.delete nm $ freeVariables b) `S.union` freeVariables a
   freeVariables (Var a) = S.singleton a
-  freeVariables (Cons _) = mempty
-                           
+  freeVariables _ = mempty
 instance (FV a,FV b) => FV (a,b) where 
   freeVariables (a,b) = freeVariables a `S.union` freeVariables b
