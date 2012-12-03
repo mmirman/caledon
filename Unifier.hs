@@ -246,11 +246,7 @@ checkTerm env v t = case v of
 
 showSub sub = concatMap (\t -> "\n\t"++show t) $ M.toList sub
     
-getCons tm = case tm of
-  Cons t -> return t
-  App t1 t2 -> getCons t1
-  TyApp t1 t2 -> getCons t1
-  _ -> throwError $ "can't place a non constructor term here: "++ show tm
+
 
 addVarsTm t = case t of
   App t1 t2 -> do
@@ -277,37 +273,27 @@ addVars t = case t of
     t2' <- addVars t2
     return $ t1' :->: t2'
 
-{- 
-maybe_FSUM_just = [ A : atom ] [ B : atom ] [ F : (A -> A) ] [ C : A ] 
-maybeFSUM {32} {B} F (just {32}  C) (just {B} (F C));
--}
-
+getCons tm = case tm of
+  Cons t -> return t
+  App t1 t2 -> getCons t1
+  TyApp t1 t2 -> getCons t1
+  _ -> throwError $ "can't place a non constructor term here: "++ show tm
+getPred tp = case tp of
+  Atom t -> getCons t
+  Forall _ _ t -> getPred t
+  t1 :->: t2 -> getPred t2
+  
 -- need to do a topological sort of types and predicates.
 -- such that types get minimal correct bindings
 checkType :: Environment -> Name -> Tp -> Choice Tp
-checkType env base ty = (fst . fst) <$> runStateT (checkTp env True =<< addVars ty) 0
-  where checkTp :: Environment -> Bool -> Tp -> StateT Integer Choice (Tp, Substitution)
-        checkTp env rms t = case t of
-          Atom t -> do 
-            when rms $ do
-              c <- getCons t
-              unless (null base || c == base) 
-                $ throwError $ "non local name "++c++" expecting "++base
-                
-            (_,constraints) <- runWriterT $ checkTerm env t $ Atom $ Cons "atom"
-            s <- genUnifyEngine constraints
-            return $ (Atom $ subst s t, s)
-          Forall n ty t -> do
-            v1 <- (++('@':n)) <$> getNew
-            (ty', s) <- checkTp env False ty
-            (t', so') <- checkTp (M.insert v1 ty' $ subst s env) rms $ subst s $ subst (n |-> Var v1) t
-            let s' = M.delete v1 so'
-            return $ (Forall n (subst s' ty') (subst (v1 |-> Var n) t'), s *** s')
-          t1 :->: t2 -> do 
-            (t1', s ) <- checkTp env False t1
-            (t2', s') <- checkTp (subst s env) rms (subst s t2)
-            return $ (subst s' t1' :->: t2', s *** s')
-  
+checkType env base ty = fmap fst $ flip runStateT 0 $ do
+  ty <- addVars ty
+  cons <- getPred ty
+  unless (null base || cons == base) 
+    $ throwError $ "non local name "++cons++" expecting "++base
+  (_,constraints) <- runWriterT $ checkTerm env (tpToTm ty) $ Atom $ Cons "atom"
+  s <- genUnifyEngine constraints
+  return $ subst s ty
 
 typeCheckPredicate :: Environment -> Predicate -> Choice Predicate
 typeCheckPredicate env (Query nm ty) = appendErr ("in query : "++show ty) $ Query nm <$> checkType env "" ty
