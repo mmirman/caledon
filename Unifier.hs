@@ -81,13 +81,14 @@ unify :: Unify ()
 unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let
   badConstraint = throwError $ show constraint 
   in case (a :=: b) of
-    Hole :=: _ -> return () -- its a hole, what can we say?
     _ :=: _ | a > b -> putConstraints [b :=: a]
+    Hole :=: _ -> return () -- its a hole, what can we say?
     Var v :=: _ -> case t ! v of 
       Nothing -> case b of
         Var v' | v == v' -> return ()
+        _ | S.member v (freeVariables b) -> badConstraint
         _ -> v +|-> b
-      Just s | S.member v (freeVariables s) -> badConstraint
+      Just s | S.member v (freeVariables b) -> badConstraint
       Just s -> putConstraints [s :=: b]
     Abstract n ty t :=: Abstract n' ty' t' -> do  
       putConstraints [ tpToTm ty :=: tpToTm ty' ]
@@ -244,11 +245,10 @@ checkTerm env v t = case v of
     nm <- getNew
     tv1 <- Atom <$> Var <$> getNew
     tv2 <- Var <$> getNew
-    let t2 = tpToTm t
-        tmB = tpToTm b
+    tell [tv2 :=: tpToTm t]
     checkTerm env a $ Forall nm tv1 (Atom tv2)
-    checkTerm env tmB tv1  
-    tell [tv2 :=: t2]
+    checkTerm env (tpToTm b) tv1  
+
   App a b -> do
     v1 <- Atom <$> Var <$> getNew
     v2 <- Var <$> getNew
@@ -285,8 +285,8 @@ addVarsTm t = case t of
 addVars t = case t of
   Atom t -> Atom <$> addVarsTm t
   Forall n t1 t2 -> do
-    v <- addVars t1
-    Forall n v <$> addVars t2
+    t1' <- addVars t1
+    Forall n t1' <$> addVars t2
   t1 :->: t2 -> do
     t1' <- addVars t1 
     t2' <- addVars t2
@@ -317,7 +317,7 @@ checkType env base ty = do
                                  ) () 0
   case runError $ unifyEngine constraints i of
     Left e  -> Fail $ "UNIFY FAILED: " ++ e
-    Right s -> return $ subst (substitution s) tp'
+    Right s -> trace (show $ substitution s) $ return $ subst (substitution s) tp'
 
 typeCheckPredicate :: Environment -> Predicate -> Choice Predicate
 typeCheckPredicate env (Query nm ty) = appendErr ("in query : "++show ty) $ Query nm <$> checkType env "" ty
