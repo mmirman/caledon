@@ -52,7 +52,7 @@ instance Show Tm where
   show (App (App (Cons "->") a) b) = "("++show a++" -> "++show b++")"
   show (App a b) = "("++show a++" "++show b++")"
   show (Abstract nm ty t) = "\\"++nm++":" ++show ty++"."++show t
-  show (TyApp a b) = "("++show a++" "++show b++")"
+  show (TyApp a b) = "("++show a++" {"++show b++"} )"
   show (Cons n) = n
   show Hole = "_"                
   show (Var n) = n
@@ -60,7 +60,6 @@ instance Show Tm where
 instance Show Tp where
   show (t :->: t') = "("++show t ++" -> "++ show t'++")"
   show (Atom t) = show t
-  show (Forall "" t t') = "("++show t ++" -> "++ show t'++")"  
   show (Forall nm t t') | not $ S.member nm (freeVariables t') = "("++show t ++" -> "++ show t'++") "
   show (Forall nm ty t) = "[ "++nm++" : "++show ty++" ] "++show t
 

@@ -16,6 +16,7 @@ import Control.Applicative ((<|>), empty)
 import Control.Monad.Error (ErrorT, throwError, runErrorT, lift, unless, when)
 import Control.Monad.State (StateT, get, put, runStateT, modify)
 import Control.Monad.State.Class
+import Control.Monad.Writer (WriterT, runWriterT)
 import Control.Monad.Writer.Class
 import Control.Monad.RWS (RWST, RWS, get, put, tell, runRWST, runRWS, ask)
 import Control.Monad.Identity (Identity, runIdentity)
@@ -108,10 +109,16 @@ unifyEngine consts i = do
       sub = M.fromList $ recSubst sub' (M.toList sub')  
   return $ s { substitution = sub }
 
+genUnifyEngine consts = do
+  i <- getV <$> get
+  s <- lift $ unifyEngine consts i
+  i' <- get 
+  put $ setV i' $ getV s
+  return $ substitution s
 --------------------------------------------------------------------
 ----------------------- REIFICATION --------------------------------
 --------------------------------------------------------------------
-type Reifier = RWST () Substitution Integer Choice
+type Reifier = StateT Integer Choice
 type Reification = Reifier (Tm,Substitution)
 type Deduction = Reifier Substitution
 
@@ -124,16 +131,12 @@ unifier cons t = do
   let isAtom (Atom _) = True
       isAtom _ = False
   msum $ flip map (filter (isAtom . snd) cons) $ \(x,Atom con) -> do
-    s <- lift $ unifyEngine [con :=: t'] i
-    put $ variable s
-
-    tell $ substitution s
-    return $ (Var x,substitution s) 
+    s <- genUnifyEngine [con :=: t']
+    return $ (Var x,s) 
 
 left :: Judgement -> Reification
 left judge@((x,f):context :|- r) = case f of
   Atom _ -> unifier [(x,f)] r
-  Forall "" t1 t2 -> left $ (x,t1 :->: t2):context  :|- r
   Forall nm t1 t2 -> do
     nm' <- getNew
     y <- getNew
@@ -144,7 +147,6 @@ left judge@((x,f):context :|- r) = case f of
         s = seq n $ M.delete nm' so
     s' <- natural (subst s $ (x,f):context) $ subst s (n,t1)
     return (subst s' $ subst (y |-> TyApp (Var x) (Atom n)) m, s *** s')
-
   p@(Atom _) :->: b -> do
     y <- getNew
     (m,s) <- left $ (y,b):context :|- r
@@ -163,10 +165,6 @@ right judge@(context :|- r) = case r of
     nm <- getNew
     (m,s) <- solve $ (nm,t1):context :|- t2
     return $ (Abstract nm t1 m, s)
-  Forall "" t1 t2 -> do
-    nm <- getNew
-    (m,s) <- solve $ (nm, t1):context :|- t2
-    return $ (Abstract nm t1 m, s)
   Forall nm t1 t2 -> do
     nm' <- getNew
     (v,s) <- solve $ (nm', t1):context :|- subst (nm |-> Cons nm') t2
@@ -181,22 +179,9 @@ solve judge@(context :|- r) = right judge <|> (msum $ useSingle (\f ctx -> left 
 natural :: [(Name, Tp)] -> (Tm,Tp) -> Deduction
 natural cont (tm,ty) = do
   let env = M.fromList cont
-  io <- get    
-  ((), i, constraints) <- lift $ runRWST (checkTerm env tm ty) () io
-  s <- lift $ unifyEngine constraints i
-  put $ variable s
-  let sub = substitution s
-  tell $ sub
-  return $ sub 
-
-sequent :: Environment -> Tp -> TypeChecker Tm
-sequent env t = do
-  i <- get 
-  ((v,_),i',_) <- lift $ runRWST (solve $ M.toList env :|- t) () i
-  put i'
-  return v
-
-
+  (_, constraints) <- runWriterT $ checkTerm env tm ty
+  genUnifyEngine constraints
+  
 ----------------------------------------------------------------------
 ----------------------- LOGIC ENGINE ---------------------------------
 ----------------------------------------------------------------------
@@ -204,8 +189,8 @@ recSubst :: (Eq b, Subst b) => Substitution -> b -> b
 recSubst s f = fst $ head $ dropWhile (not . uncurry (==)) $ iterate (\(_,b) -> (b,subst s b)) (f,subst s f)  
 
 solver :: [(Name,Tp)] -> Tp -> Either String [(Name, Tm)]
-solver axioms t = case runError $ runRWST (solve $ axioms :|- t) () 0 of
-  Right ((tm,_),_,s) -> Right $ ("query" , varsToCons tm):(recSubst s $ map (\a -> (a,Var a)) $ S.toList $ freeVariables t)
+solver axioms t = case runError $ runStateT (solve $ axioms :|- t) 0 of
+  Right ((tm,s),_) -> Right $ ("query" , varsToCons tm):(recSubst s $ map (\a -> (a,Var a)) $ S.toList $ freeVariables t)
     where varsToCons = subst $ M.fromList $ map (\(a,_) -> (a,Cons a)) axioms
   Left s -> Left $ "reification not possible: "++s
   
@@ -213,7 +198,6 @@ solver axioms t = case runError $ runRWST (solve $ axioms :|- t) () 0 of
 ----------------------- Type Checker ----------------------------    
 -----------------------------------------------------------------
 type Environment = M.Map Name Tp
-type TypeChecker = RWST () [Constraint Tm] Integer Choice
 
 class ToTm t where
   tpToTm :: t -> Tm
@@ -225,30 +209,29 @@ instance (ToTm t) => ToTm (Maybe t) where
   tpToTm (Just t) = tpToTm t
   tpToTm Nothing = Hole
 
-checkTerm :: Environment -> Tm -> Tp -> TypeChecker ()
+checkTerm :: Environment -> Tm -> Tp -> WriterT [Constraint Tm] (StateT Integer Choice) ()
 checkTerm env v t = case v of
-  Hole -> void $ sequent env t
   Cons nm -> case env ! nm of
-    Nothing -> error $ nm++" was not found in the environment"
-    Just t' -> 
+    Nothing -> error $ nm++" was not found in the environment in "++show v
+    Just t' -> do
       -- suppose t' has implicit arguments-  t' = c1 => t
       -- we then do a proof search for c1 and add it as an argument.
       tell [tpToTm t' :=: tpToTm t]
-  Var nm -> case env ! nm of
+  Var nm -> trace ("var "++show v++" : "++show t) $ case env ! nm of
     Nothing -> do 
-      t'' <- sequent env t
-      tell [t'' :=: v]
-               -- in the mean time, assume there is only one use of each unbound variable
-               -- error $ nm++" was not found in the environment"
-    Just t' -> tell [tpToTm t' :=: tpToTm t]
+      (t'',s) <- lift $ solve $ M.toList env :|- t
+      tell [t'' :=: v]  
+      -- I'm not sure this makes sense at all.
+      -- in the mean time, assume there is only one use of each unbound variable
+    Just t' -> trace ("\tis "++show t') $ do
+      tell [tpToTm t' :=: tpToTm t]
   TyApp a b -> do
     nm <- getNew
     tv1 <- Atom <$> Var <$> getNew
     tv2 <- Var <$> getNew
     tell [tv2 :=: tpToTm t]
-    checkTerm env a $ Forall nm tv1 (Atom tv2)
+    checkTerm env a $ Forall nm tv1 $ Atom tv2
     checkTerm env (tpToTm b) tv1  
-
   App a b -> do
     v1 <- Atom <$> Var <$> getNew
     v2 <- Var <$> getNew
@@ -261,6 +244,8 @@ checkTerm env v t = case v of
     checkTerm (M.insert v1 ty env) (subst (nm |-> Var v1) tm) v2
     tell [tpToTm t :=: tpToTm (Atom (Var v1) :->: v2 )]
 
+showSub sub = concatMap (\t -> "\n\t"++show t) $ M.toList sub
+    
 getCons tm = case tm of
   Cons t -> return t
   App t1 t2 -> getCons t1
@@ -292,32 +277,37 @@ addVars t = case t of
     t2' <- addVars t2
     return $ t1' :->: t2'
 
+{- 
+maybe_FSUM_just = [ A : atom ] [ B : atom ] [ F : (A -> A) ] [ C : A ] 
+maybeFSUM {32} {B} F (just {32}  C) (just {B} (F C));
+-}
+
 -- need to do a topological sort of types and predicates.
 -- such that types get minimal correct bindings
 checkType :: Environment -> Name -> Tp -> Choice Tp
-checkType env base ty = do
-  let checkTp env rms t = case t of
+checkType env base ty = (fst . fst) <$> runStateT (checkTp env True =<< addVars ty) 0
+  where checkTp :: Environment -> Bool -> Tp -> StateT Integer Choice (Tp, Substitution)
+        checkTp env rms t = case t of
           Atom t -> do 
             when rms $ do
               c <- getCons t
               unless (null base || c == base) 
                 $ throwError $ "non local name "++c++" expecting "++base
-            checkTerm env t $ Atom $ Cons "atom"
+                
+            (_,constraints) <- runWriterT $ checkTerm env t $ Atom $ Cons "atom"
+            s <- genUnifyEngine constraints
+            return $ (Atom $ subst s t, s)
           Forall n ty t -> do
-            v1 <- getNew
-            checkTp env False ty
-            checkTp (M.insert v1 ty env) rms $ subst (n |-> Cons v1) t
+            v1 <- (++('@':n)) <$> getNew
+            (ty', s) <- checkTp env False ty
+            (t', so') <- checkTp (M.insert v1 ty' $ subst s env) rms $ subst s $ subst (n |-> Var v1) t
+            let s' = M.delete v1 so'
+            return $ (Forall n (subst s' ty') (subst (v1 |-> Var n) t'), s *** s')
           t1 :->: t2 -> do 
-            checkTp env False t1
-            checkTp env rms t2
+            (t1', s ) <- checkTp env False t1
+            (t2', s') <- checkTp (subst s env) rms (subst s t2)
+            return $ (subst s' t1' :->: t2', s *** s')
   
-  (tp',i,constraints) <- runRWST (do tp' <- addVars ty
-                                     checkTp env True tp'
-                                     return tp'
-                                 ) () 0
-  case runError $ unifyEngine constraints i of
-    Left e  -> Fail $ "UNIFY FAILED: " ++ e
-    Right s -> trace (show $ substitution s) $ return $ subst (substitution s) tp'
 
 typeCheckPredicate :: Environment -> Predicate -> Choice Predicate
 typeCheckPredicate env (Query nm ty) = appendErr ("in query : "++show ty) $ Query nm <$> checkType env "" ty
