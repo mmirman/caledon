@@ -16,7 +16,7 @@ import Control.Applicative ((<|>), empty)
 import Control.Monad.Error (ErrorT, throwError, runErrorT, lift, unless, when)
 import Control.Monad.State (StateT, get, put, runStateT, modify)
 import Control.Monad.State.Class
-import Control.Monad.Writer (WriterT, runWriterT)
+import Control.Monad.Writer (WriterT, runWriterT, listens)
 import Control.Monad.Writer.Class
 import Control.Monad.RWS (RWST, RWS, get, put, tell, runRWST, runRWS, ask)
 import Control.Monad.Identity (Identity, runIdentity)
@@ -84,13 +84,13 @@ unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let
   in case (a :=: b) of
     _ :=: _ | a > b -> putConstraints [b :=: a]
     Hole :=: _ -> return () -- its a hole, what can we say?
-    Var v :=: _ -> case t ! v of 
-      Nothing -> case b of
-        Var v' | v == v' -> return ()
-        _ | S.member v (freeVariables b) -> badConstraint
-        _ -> v +|-> b
-      Just s | S.member v (freeVariables b) -> badConstraint
-      Just s -> putConstraints [s :=: b]
+    _ :=: Hole -> return () -- its a hole, what can we say?
+    Var v :=: _ -> case b of
+      Var v' | v == v' -> return ()
+      _ | S.member v (freeVariables b) -> throwError $ "occurs: " ++ show constraint      
+      _ -> case t ! v of 
+        Nothing -> v +|-> b
+        Just s -> putConstraints [s :=: b]
     Abstract n ty t :=: Abstract n' ty' t' -> do  
       putConstraints [ tpToTm ty :=: tpToTm ty' ]
       nm <- getNew
@@ -149,7 +149,7 @@ left judge@((x,f):context :|- r) = case f of
     return (subst s' $ subst (y |-> TyApp (Var x) (Atom n)) m, s *** s')
   p@(Atom _) :->: b -> do
     y <- getNew
-    (m,s) <- left $ (y,b):context :|- r
+    (m,s)  <- left $ (y,b):context :|- r
     (n,s') <- solve $ subst s $ context :|- p
     return (subst s' $ subst (y |-> App (Var x) n) m, s *** s')
   t1 :->: t2 -> do
@@ -214,9 +214,7 @@ checkTerm env v t = case v of
   Cons nm -> case env ! nm of
     Nothing -> error $ nm++" was not found in the environment in "++show v
     Just t' -> do
-      -- suppose t' has implicit arguments-  t' = c1 => t
-      -- we then do a proof search for c1 and add it as an argument.
-      tell [tpToTm t' :=: tpToTm t]
+        tell [tpToTm t' :=: tpToTm t]
   Var nm -> trace ("var "++show v++" : "++show t) $ case env ! nm of
     Nothing -> do 
       (t'',s) <- lift $ solve $ M.toList env :|- t
@@ -228,25 +226,25 @@ checkTerm env v t = case v of
   TyApp a b -> do
     nm <- getNew
     tv1 <- Atom <$> Var <$> getNew
-    tv2 <- Var <$> getNew
-    tell [tv2 :=: tpToTm t]
-    checkTerm env a $ Forall nm tv1 $ Atom tv2
-    checkTerm env (tpToTm b) tv1  
+    tv2 <- Atom <$> Var <$> getNew
+    tell [ tpToTm tv1 :=: tpToTm (Forall nm tv2 t)]    
+    checkTerm env a          tv1
+    checkTerm env (tpToTm b) tv2  
   App a b -> do
     v1 <- Atom <$> Var <$> getNew
-    v2 <- Var <$> getNew
-    tell [v2 :=: tpToTm t]
-    checkTerm env a $ v1 :->: (Atom v2)
-    checkTerm env b $ v1
+    v2 <- Atom <$> Var <$> getNew
+    tell [tpToTm v2 :=: tpToTm (v1 :->: t)]    
+    checkTerm env a v2
+    checkTerm env b v1
   Abstract nm ty tm -> do
-    v1 <- getNew
-    v2 <- Atom <$> Var <$> getNew  -- why aren't we adding anything to the environment?
-    checkTerm (M.insert v1 ty env) (subst (nm |-> Var v1) tm) v2
-    tell [tpToTm t :=: tpToTm (Atom (Var v1) :->: v2 )]
-
-showSub sub = concatMap (\t -> "\n\t"++show t) $ M.toList sub
-    
-
+    v1 <- (++'@':nm) <$> getNew
+    v2 <- Atom <$> Var <$> getNew
+    tell [tpToTm t :=: tpToTm (Atom (Var v1) :->: v2 )]    
+    (_,newconstraints) <- listens id $ checkTerm (M.insert v1 ty env) (subst (nm |-> Var v1) tm) v2
+    s <- lift $ genUnifyEngine newconstraints
+    let s' = M.delete v1 s
+    tell $ map (\(s,i) -> Var s :=: i) $ M.toList s'
+    return ()
 
 addVarsTm t = case t of
   App t1 t2 -> do
@@ -272,7 +270,6 @@ addVars t = case t of
     t1' <- addVars t1 
     t2' <- addVars t2
     return $ t1' :->: t2'
-
 getCons tm = case tm of
   Cons t -> return t
   App t1 t2 -> getCons t1
