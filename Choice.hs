@@ -78,7 +78,3 @@ instance MonadError String Choice where
     Left s -> foo_try2 s
     Right a -> Success a
     
-    
-fibs = 1:1:zipWith (+) fibs (tail fibs)
-
-
