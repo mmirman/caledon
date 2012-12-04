@@ -6,7 +6,6 @@ module AST where
 
 import qualified Data.Foldable as F
 import Data.Monoid
-import Data.Maybe
 import Data.Functor
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -24,7 +23,13 @@ data Tm = Tipe Tp
                 , constructor :: Variable
                 , apps        :: [Tm] 
                 }
-        deriving (Ord, Eq)
+        deriving (Eq)
+                 
+instance Ord Tm where                 
+  Tipe t <= Tipe t' = t <= t'
+  Tipe _ <= _ = True
+  Spine absA consA appsA <= Spine absB consB appsB = 
+    length absA <= length absB || appsA <= appsB || consA <= consB
                  
 var nm = Spine [] (Var nm) []
 cons nm = Spine [] (Cons nm) []
@@ -93,10 +98,10 @@ nil = M.empty
 (!) = flip M.lookup
 
 
-
 rebuildSpine :: [(Name,Tp)] -> Tm -> [Tm] -> Tm
 rebuildSpine binders = reb
-  where reb (Spine [] c apps) apps' = Spine binders c (apps ++ apps')
+  where reb (Tipe t) apps' = reb (tpToTm t) apps'
+        reb (Spine [] c apps) apps' = Spine binders c (apps ++ apps')
         reb (Spine lst c apps) [] = Spine (binders++lst) c apps
         reb (Spine ((nm,_):l) c apps) (a:apps') = reb (subst (nm |-> a) $ Spine l c apps) apps'
 
@@ -107,7 +112,7 @@ instance (Functor f , Subst a) => Subst (f a) where
   
 instance Subst Tm where
   subst s (Tipe t) = Tipe $ subst s t
-  subst s (Spine ((a,t):l) head apps) = Spine ((a,subst s t):l) head' apps'
+  subst s (Spine ((a,t):l) head apps) = Spine ((a,subst s t):l') head' apps'
     where Spine l' head' apps' = subst (M.delete a s) $ Spine l head apps
   subst s (Spine [] head apps) = let apps' = subst s <$> apps  in
     case head of

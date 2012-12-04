@@ -80,11 +80,23 @@ nextConstraint m = do
       unify
       
 unify :: Unify ()
-unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let
-  badConstraint = throwError $ show constraint 
-  in case (a :=: b) of
-    _ :=: _ | a > b -> putConstraints [b :=: a]
-    
+unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let badConstraint = throwError $ show constraint in case a :=: b of
+  _ :=: _ | a > b -> putConstraints [b :=: a]
+  Tipe t :=: _ -> putConstraints [tpToTm t :=: b]
+  Spine [] (Var a) [] :=: Spine [] (Var a') [] | a == a' -> return () 
+  Spine [] (Var a) [] :=: _ | not $ S.member a $ freeVariables b -> v +|-> b
+  Spine [] (Var a) [] :=: _ -> badConstraint
+  Spine absA consA appsA :=: Spine absB consB appsB -> let 
+    appsALen = length appsA
+    appsBLen = length appsB
+    absALen = length absA
+    absBLen = length absB
+    in case consA :=: consB of
+      Cons c :=: Cons c' | c == c' -> do
+        unless (appsALen == appsBLen && absALen == absBLen) $ badConstraint
+        putConstraints $ zipWith (\a b -> rebuildSpine absA a [] :=: rebuildSpine absB b []) appsA appsB
+      Cons c :=: Cons c' | c /= c' -> badConstraint
+      _ :=: _ -> badConstraint
 {-    Hole :=: _ -> return () -- its a hole, what can we say?
     _ :=: Hole -> return () -- its a hole, what can we say?
     Var v :=: _ -> case b of
@@ -103,7 +115,7 @@ unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let
       putConstraints [a :=: a', b :=: b']
     TyApp a t :=: TyApp a' t' -> do
       putConstraints [tpToTm t :=: tpToTm t' , a :=: a'] -}
-    _ :=: _ -> badConstraint
+
 
 unifyEngine consts i = do
   s <- snd <$> runStateT unify (St nil consts i)
