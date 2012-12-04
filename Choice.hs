@@ -77,8 +77,6 @@ instance MonadError String Choice where
   catchError try1 foo_try2 = case runError try1 of
     Left s -> foo_try2 s
     Right a -> Success a
-    
 
-
-
-
+listSearch :: [Choice a] -> Choice a
+listSearch = foldr (<|>) (Fail "ha")
