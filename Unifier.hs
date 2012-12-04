@@ -64,10 +64,8 @@ getNew = do
   modify (setV n)
   return $! show n
 
-
 (+|->) :: Name -> Tm -> Unify ()
 nm +|-> tm = modify $ \st -> st { substitution = M.insert nm tm $ subst (nm |-> tm) $ substitution st }
-
 
 nextConstraint :: ((Substitution, Constraint Tm) -> Unify ()) -> Unify ()
 nextConstraint m = do
@@ -82,21 +80,11 @@ nextConstraint m = do
 unify :: Unify ()
 unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let badConstraint = throwError $ show constraint in case a :=: b of
   _ :=: _ | a > b -> putConstraints [b :=: a]
-  Tipe t :=: _ -> putConstraints [tpToTm t :=: b]
-  Spine [] (Var a) [] :=: Spine [] (Var a') [] | a == a' -> return () 
-  Spine [] (Var a) [] :=: _ | not $ S.member a $ freeVariables b -> v +|-> b
-  Spine [] (Var a) [] :=: _ -> badConstraint
-  Spine absA consA appsA :=: Spine absB consB appsB -> let 
-    appsALen = length appsA
-    appsBLen = length appsB
-    absALen = length absA
-    absBLen = length absB
-    in case consA :=: consB of
-      Cons c :=: Cons c' | c == c' -> do
-        unless (appsALen == appsBLen && absALen == absBLen) $ badConstraint
-        putConstraints $ zipWith (\a b -> rebuildSpine absA a [] :=: rebuildSpine absB b []) appsA appsB
-      Cons c :=: Cons c' | c /= c' -> badConstraint
-      _ :=: _ -> badConstraint
+  Spine (Var a) [] :=: Spine (Var a') [] | a == a' -> return () 
+  Spine (Var a) [] :=: _ | not $ S.member a $ freeVariables b -> a +|-> b
+  Spine (Var a) [] :=: _ -> badConstraint
+  Spine (Cons c) _ :=: Spine (Cons c') _ -> badConstraint
+  _ :=: _ -> badConstraint
 {-    Hole :=: _ -> return () -- its a hole, what can we say?
     _ :=: Hole -> return () -- its a hole, what can we say?
     Var v :=: _ -> case b of
@@ -218,10 +206,33 @@ solver axioms t = case runError $ runStateT (solve $ axioms :|- t) 0 of
 -----------------------------------------------------------------
 type Environment = M.Map Name Tp
 
-
+checkVariable :: Environment -> Variable -> Tp -> WriterT [Constraint Tm] (StateT Integer Choice) ()
+checkVariable env v t = case v of
+  Cons nm -> case env ! nm of
+    Nothing -> error $ nm++" was not found in the environment in "++show v
+    Just t' -> tell [tpToTm t' :=: tpToTm t]
+  Var nm -> case env ! nm of
+    Nothing -> do 
+      (t'',s) <- lift $ solve $ M.toList env :|- t
+      tell [var nm :=: t'']
+      -- I'm not sure this makes sense at all.
+      -- in the mean time, assume there is only one use of each unbound variable
+    Just t' -> tell [tpToTm t' :=: tpToTm t]
+      
 checkTerm :: Environment -> Tm -> Tp -> WriterT [Constraint Tm] (StateT Integer Choice) ()
 checkTerm env v t = case v of
+  Spine a l -> do
+    nm <- getNew
+    tv1 <- getNew
+    tv2l <- mapM (\b -> (,b) <$> Atom <$> var <$> getNew) l
+    tell [ Spine (Var tv1) (fst <$> tv2l) :=: tpToTm t]  -- maybe?  tpToTm tv1 will have a forall type, which can't be substituted maybe?
+        
+    checkVariable env a $ Atom $ var $ tv1
+    forM_ tv2l $ \(tv2,b) -> 
+      checkTerm env (tpToTm b) $ tv2
+      
   _ -> return ()
+  
 {-  Cons nm -> case env ! nm of
     Nothing -> error $ nm++" was not found in the environment in "++show v
     Just t' -> do
@@ -236,29 +247,32 @@ checkTerm env v t = case v of
       tell [tpToTm t' :=: tpToTm t]
   TyApp a b -> do
     nm <- getNew
-    tv1 <- Atom <$> Var <$> getNew
-    tv2 <- Atom <$> Var <$> getNew
-    tell [ tpToTm tv1 :=: tpToTm (Forall nm tv2 t)]    
-    checkTerm env a          tv1
-    checkTerm env (tpToTm b) tv2  
+    tv1 <- getNew
+    tv2 <- Atom <$> var <$> getNew
+    tell [ Spine (Var tv1) [Tipe tv2] :=: Tipe t]  -- maybe?  tpToTm tv1 will have a forall type, which can't be substituted maybe?
+    checkTerm env a          $ Atom $ var $ tv1
+    checkTerm env (tpToTm b) $ tv2
   App a b -> do
-    v1 <- Atom <$> Var <$> getNew
-    v2 <- Atom <$> Var <$> getNew
+    v1 <- Atom <$> var <$> getNew
+    v2 <- Atom <$> var <$> getNew
     tell [tpToTm v2 :=: tpToTm (v1 :->: t)]    
     checkTerm env a v2
     checkTerm env b v1
   Abstract nm ty tm -> do
     v1 <- (++'@':nm) <$> getNew
-    v2 <- Atom <$> Var <$> getNew
-    tell [tpToTm t :=: tpToTm (Atom (Var v1) :->: v2 )]    
-    (_,newconstraints) <- listens id $ checkTerm (M.insert v1 ty env) (subst (nm |-> Var v1) tm) v2
+    v2 <- Atom <$> var <$> getNew
+    tell [tpToTm t :=: tpToTm (Atom (var v1) :->: v2 )]    
+    (_,newconstraints) <- listens id $ checkTerm (M.insert v1 ty env) (subst (nm |-> var v1) tm) v2
     s <- lift $ genUnifyEngine newconstraints
     let s' = M.delete v1 s
-    tell $ map (\(s,i) -> Var s :=: i) $ M.toList s'
+    tell $ map (\(s,i) -> var s :=: i) $ M.toList s'
     return () -}
 
-getCons (Spine _ (Cons t) _) = return t
-getCons tm = throwError $ "can't place a non constructor term here: "++ show tm
+getCons tm = case tm of
+  Spine (Cons t) _ -> return t
+  Abs _ _ t -> getCons t
+  _ -> throwError $ "can't place a non constructor term here: "++ show tm
+
 getPred tp = case tp of
   Atom t -> getCons t
   Forall _ _ t -> getPred t
