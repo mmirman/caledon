@@ -3,6 +3,7 @@
  FlexibleInstances
  #-}
 module AST where
+
 import qualified Data.Foldable as F
 import Data.Monoid
 import Data.Maybe
@@ -13,20 +14,19 @@ import qualified Data.Set as S
 ----------------------- DATA TYPES ---------------------------------
 --------------------------------------------------------------------
 type Name = String
-
-infixl 6 .+.
-(.+.) = App
               
-data Tm = Hole
-        | Var Name 
-        | Cons Name
-        | Abstract Name Tp Tm
-        | App Tm Tm
-        | TyApp Tm Tp
-        deriving (Eq, Ord)
+data Variable = Var Name 
+              | Cons Name 
+              deriving (Ord, Eq)
+                       
+data Tm = Spine { binders :: [(Name,Tp)]
+                , head    :: Variable
+                , apps    :: [Tm] 
+                }
+        deriving (Ord, Eq)
 
 data Constraint a = a :=: a 
-                  deriving (Eq, Ord, Functor, Show)
+                  deriving (Eq, Ord, Functor)
 
 infixr 5 :->:
 data Tp = Atom Tm
@@ -47,22 +47,21 @@ data Judgement = (:|-) { antecedent :: [(Name,Tp)] , succedent :: Tp }
 --------------------------------------------------------------------
 ----------------------- PRETTY PRINT -------------------------------
 --------------------------------------------------------------------
-  
-instance Show Tm where
-  show (App (App (Cons "->") a) b) = "("++show a++" -> "++show b++")"
-  show (App a b) = "("++show a++" "++show b++")"
-  show (Abstract nm ty t) = "\\"++nm++":" ++show ty++"."++show t
-  show (TyApp a b) = "("++show a++" {"++show b++"} )"
-  show (Cons n) = n
-  show Hole = "_"                
+instance Show Variable where
   show (Var n) = n
-  
+  show (Cons n) = n
+
+instance Show Tm where
+  show (Spine bindings cons apps) = "("++concatMap showQuant bindings
+                                    ++show cons
+                                    ++concatMap (\s -> " "++show s) apps
+                                    ++")"
+    where showQuant (nm,ty) = "\\"++nm++":"++show ty++"."
 instance Show Tp where
   show (t :->: t') = "("++show t ++" -> "++ show t'++")"
   show (Atom t) = show t
   show (Forall nm t t') | not $ S.member nm (freeVariables t') = "("++show t ++" -> "++ show t'++") "
   show (Forall nm ty t) = "[ "++nm++" : "++show ty++" ] "++show t
-
   
 instance Show Judgement where 
   show (a :|- b) =  removeHdTl (show a) ++" |- "++ show b
@@ -88,22 +87,31 @@ nil = M.empty
 (|->) = M.singleton
 (!) = flip M.lookup
 
+var nm = Spine [] (Var nm) []
+
+rebuildSpine :: [(Name,Tp)] -> Tm -> [Tm] -> Tm
+rebuildSpine binders = reb
+  where reb (Spine [] c apps) apps' = Spine binders c (apps ++ apps')
+        reb (Spine lst c apps) [] = Spine (binders++lst) c apps
+        reb (Spine ((nm,_):l) c apps) (a:apps') = reb (subst (nm |-> a) $ Spine l c apps) apps'
+
 class Subst a where
   subst :: Substitution -> a -> a
-  
 instance (Functor f , Subst a) => Subst (f a) where
   subst foo t = subst foo <$> t
+  
+  
 instance Subst Tm where
-  subst s t = case t of
-    Var nm -> fromMaybe t $! s ! nm
-    App t1 t2 -> App (subst s t1) (subst s t2)
-    TyApp t1 t2 -> TyApp (subst s t1) (subst s t2)
-    Abstract nm ty t -> Abstract nm (subst s ty) $ subst (M.insert nm (Var nm) s) t
-    _ -> t
+  subst s (Spine ((a,t):l) head apps) = Spine ((a,subst s t):l) head' apps'
+    where Spine l' head' apps' = subst (M.delete a s) $ Spine l head apps
+  subst s (Spine [] head apps) = let apps' = subst s <$> apps  in
+    case head of
+      Var nm | Just head' <- s ! nm -> rebuildSpine [] head' apps'
+      _ -> Spine [] head apps'
 instance Subst Tp where
   subst s t = case t of
     Atom t -> Atom $ subst s t
-    Forall nm ty t -> Forall nm (subst s ty) $ subst (M.insert nm (Var nm) s) t
+    Forall nm ty t -> Forall nm (subst s ty) $ subst (M.insert nm (var nm) s) t
     ty1 :->: ty2 -> subst s ty1 :->: subst s ty2
 instance Subst Judgement where 
   subst foo (c :|- s) = subst foo c :|- subst foo s
@@ -123,10 +131,6 @@ instance FV Tp where
   freeVariables (t1 :->: t2) = freeVariables t1 `S.union` freeVariables t2
   freeVariables (Atom a) = freeVariables a
 instance FV Tm where
-  freeVariables (App a b) = freeVariables a `S.union` freeVariables b
-  freeVariables (TyApp a b) = freeVariables a `S.union` freeVariables b
-  freeVariables (Abstract nm a b) = (S.delete nm $ freeVariables b) `S.union` freeVariables a
-  freeVariables (Var a) = S.singleton a
-  freeVariables _ = mempty
+  freeVariables (Spine bound _ others) = F.foldr' (S.delete . fst) (mconcat $ freeVariables <$> others) bound 
 instance (FV a,FV b) => FV (a,b) where 
   freeVariables (a,b) = freeVariables a `S.union` freeVariables b
