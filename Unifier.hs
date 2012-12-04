@@ -14,6 +14,7 @@ import Choice
 import Control.Monad (void)
 import Control.Applicative ((<|>), empty)
 import Control.Monad.Error (ErrorT, throwError, runErrorT, lift, unless, when)
+import Control.Monad.Error.Class
 import Control.Monad.State (StateT, get, put, runStateT, modify)
 import Control.Monad.State.Class
 import Control.Monad.Writer (WriterT, runWriterT, listens)
@@ -83,7 +84,8 @@ unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let
   badConstraint = throwError $ show constraint 
   in case (a :=: b) of
     _ :=: _ | a > b -> putConstraints [b :=: a]
-    Hole :=: _ -> return () -- its a hole, what can we say?
+    
+{-    Hole :=: _ -> return () -- its a hole, what can we say?
     _ :=: Hole -> return () -- its a hole, what can we say?
     Var v :=: _ -> case b of
       Var v' | v == v' -> return ()
@@ -100,7 +102,7 @@ unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let
     App a b :=: App a' b' -> do
       putConstraints [a :=: a', b :=: b']
     TyApp a t :=: TyApp a' t' -> do
-      putConstraints [tpToTm t :=: tpToTm t' , a :=: a']
+      putConstraints [tpToTm t :=: tpToTm t' , a :=: a'] -}
     _ :=: _ -> badConstraint
 
 unifyEngine consts i = do
@@ -132,7 +134,7 @@ unifier cons t = do
       isAtom _ = False
   msum $ flip map (filter (isAtom . snd) cons) $ \(x,Atom con) -> do
     s <- genUnifyEngine [con :=: t']
-    return $ (Var x,s) 
+    return $ (var x,s) 
 
 left :: Judgement -> Reification
 left judge@((x,f):context :|- r) = case f of
@@ -140,23 +142,26 @@ left judge@((x,f):context :|- r) = case f of
   Forall nm t1 t2 -> do
     nm' <- getNew
     y <- getNew
-    (m,so) <- left $ (y,subst (nm |-> Var nm') t2):context :|- r
+    (m,so) <- left $ (y,subst (nm |-> var nm') t2):context :|- r
     let n = case M.lookup nm' so of
-          Nothing -> Var nm'
+          Nothing -> var nm'
           Just a -> a
         s = seq n $ M.delete nm' so
     s' <- natural (subst s $ (x,f):context) $ subst s (n,t1)
-    return (subst s' $ subst (y |-> TyApp (Var x) (Atom n)) m, s *** s')
+--    return (subst s' $ subst (y |-> TyApp (Var x) (Atom n)) m, s *** s')
+    undefined
   p@(Atom _) :->: b -> do
     y <- getNew
     (m,s)  <- left $ (y,b):context :|- r
     (n,s') <- solve $ subst s $ context :|- p
-    return (subst s' $ subst (y |-> App (Var x) n) m, s *** s')
+--    return (subst s' $ subst (y |-> App (Var x) n) m, s *** s')
+    undefined
   t1 :->: t2 -> do
     y <- getNew
     (m,s)  <- left $ (y,t2):context :|- r
     (n,s') <- solve $ subst s $ (x,f):context :|- t1
-    return (subst s' $ subst (y |-> App (Var x) n) m, s *** s')
+--    return (subst s' $ subst (y |-> App (Var x) n) m, s *** s')
+    undefined
 
 right :: Judgement -> Reification
 right judge@(context :|- r) = case r of
@@ -164,11 +169,13 @@ right judge@(context :|- r) = case r of
   t1 :->: t2 -> do
     nm <- getNew
     (m,s) <- solve $ (nm,t1):context :|- t2
-    return $ (Abstract nm t1 m, s)
+    --return $ (Abstract nm t1 m, s)
+    undefined
   Forall nm t1 t2 -> do
     nm' <- getNew
-    (v,s) <- solve $ (nm', t1):context :|- subst (nm |-> Cons nm') t2
-    return $ (Cons "forall" .+. Abstract nm' t1 v, s)
+    (v,s) <- solve $ (nm', t1):context :|- subst (nm |-> cons nm') t2
+    --return $ (Cons "forall" .+. Abstract nm' t1 v, s)
+    undefined
 
 solve :: Judgement -> Reification
 solve judge@(context :|- r) = right judge <|> (msum $ useSingle (\f ctx -> left $ f:ctx :|- r) context)
@@ -190,8 +197,8 @@ recSubst s f = fst $ head $ dropWhile (not . uncurry (==)) $ iterate (\(_,b) -> 
 
 solver :: [(Name,Tp)] -> Tp -> Either String [(Name, Tm)]
 solver axioms t = case runError $ runStateT (solve $ axioms :|- t) 0 of
-  Right ((tm,s),_) -> Right $ ("query" , varsToCons tm):(recSubst s $ map (\a -> (a,Var a)) $ S.toList $ freeVariables t)
-    where varsToCons = subst $ M.fromList $ map (\(a,_) -> (a,Cons a)) axioms
+  Right ((tm,s),_) -> Right $ ("query" , varsToCons tm):(recSubst s $ map (\a -> (a,var a)) $ S.toList $ freeVariables t)
+    where varsToCons = subst $ M.fromList $ map (\(a,_) -> (a,cons a)) axioms
   Left s -> Left $ "reification not possible: "++s
   
 -----------------------------------------------------------------
@@ -199,19 +206,11 @@ solver axioms t = case runError $ runStateT (solve $ axioms :|- t) 0 of
 -----------------------------------------------------------------
 type Environment = M.Map Name Tp
 
-class ToTm t where
-  tpToTm :: t -> Tm
-instance ToTm Tp where
-  tpToTm (Forall n ty t) = Cons "forall" .+. Abstract n ty (tpToTm t)
-  tpToTm (Atom tm) = tm
-  tpToTm (t1 :->: t2) = Cons "->" .+. tpToTm t1 .+. tpToTm t2
-instance (ToTm t) => ToTm (Maybe t) where
-  tpToTm (Just t) = tpToTm t
-  tpToTm Nothing = Hole
 
 checkTerm :: Environment -> Tm -> Tp -> WriterT [Constraint Tm] (StateT Integer Choice) ()
 checkTerm env v t = case v of
-  Cons nm -> case env ! nm of
+  _ -> return ()
+{-  Cons nm -> case env ! nm of
     Nothing -> error $ nm++" was not found in the environment in "++show v
     Just t' -> do
         tell [tpToTm t' :=: tpToTm t]
@@ -244,37 +243,10 @@ checkTerm env v t = case v of
     s <- lift $ genUnifyEngine newconstraints
     let s' = M.delete v1 s
     tell $ map (\(s,i) -> Var s :=: i) $ M.toList s'
-    return ()
+    return () -}
 
-addVarsTm t = case t of
-  App t1 t2 -> do
-    t1' <- addVarsTm t1 
-    t2' <- addVarsTm t2
-    return $ App t1' t2'
-  TyApp t1 t2 -> do
-    t1' <- addVarsTm t1 
-    t2' <- addVars t2
-    return $ TyApp t1' t2'
-  Abstract n t1 t2 -> do
-    v <- addVars t1
-    Abstract n v <$> addVarsTm t2
-  Hole -> Var <$> getNew
-  _ -> return t
-  
-addVars t = case t of
-  Atom t -> Atom <$> addVarsTm t
-  Forall n t1 t2 -> do
-    t1' <- addVars t1
-    Forall n t1' <$> addVars t2
-  t1 :->: t2 -> do
-    t1' <- addVars t1 
-    t2' <- addVars t2
-    return $ t1' :->: t2'
-getCons tm = case tm of
-  Cons t -> return t
-  App t1 t2 -> getCons t1
-  TyApp t1 t2 -> getCons t1
-  _ -> throwError $ "can't place a non constructor term here: "++ show tm
+getCons (Spine _ (Cons t) _) = return t
+getCons tm = throwError $ "can't place a non constructor term here: "++ show tm
 getPred tp = case tp of
   Atom t -> getCons t
   Forall _ _ t -> getPred t
@@ -284,11 +256,10 @@ getPred tp = case tp of
 -- such that types get minimal correct bindings
 checkType :: Environment -> Name -> Tp -> Choice Tp
 checkType env base ty = fmap fst $ flip runStateT 0 $ do
-  ty <- addVars ty
-  cons <- getPred ty
-  unless (null base || cons == base) 
-    $ throwError $ "non local name "++cons++" expecting "++base
-  (_,constraints) <- runWriterT $ checkTerm env (tpToTm ty) $ Atom $ Cons "atom"
+  con <- getPred ty
+  unless (null base || con == base) 
+    $ throwError $ "non local name "++con++" expecting "++base
+  (_,constraints) <- runWriterT $ checkTerm env (tpToTm ty) $ Atom $ cons "atom"
   s <- genUnifyEngine constraints
   return $ subst s ty
 
@@ -303,7 +274,7 @@ typeCheckPredicate env pred@(Predicate pnm pty plst) = appendErr ("in\n"++show p
   
 typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = forM preds $ typeCheckPredicate assumptions
-  where atom = Atom $ Cons "atom"
+  where atom = Atom $ cons "atom"
         assumptions = M.fromList $ 
                       ("atom", atom): -- atom : atom is a given.
                       ("->", atom :->: atom :->: atom): -- atom : atom is a given.

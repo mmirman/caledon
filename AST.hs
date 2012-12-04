@@ -19,14 +19,18 @@ data Variable = Var Name
               | Cons Name 
               deriving (Ord, Eq)
                        
-data Tm = Spine { binders :: [(Name,Tp)]
-                , head    :: Variable
-                , apps    :: [Tm] 
+data Tm = Tipe Tp
+        | Spine { binders     :: [(Name,Tp)]
+                , constructor :: Variable
+                , apps        :: [Tm] 
                 }
         deriving (Ord, Eq)
+                 
+var nm = Spine [] (Var nm) []
+cons nm = Spine [] (Cons nm) []
 
 data Constraint a = a :=: a 
-                  deriving (Eq, Ord, Functor)
+                  deriving (Eq, Ord, Functor, Show)
 
 infixr 5 :->:
 data Tp = Atom Tm
@@ -52,6 +56,7 @@ instance Show Variable where
   show (Cons n) = n
 
 instance Show Tm where
+  show (Tipe t) = show t
   show (Spine bindings cons apps) = "("++concatMap showQuant bindings
                                     ++show cons
                                     ++concatMap (\s -> " "++show s) apps
@@ -87,7 +92,7 @@ nil = M.empty
 (|->) = M.singleton
 (!) = flip M.lookup
 
-var nm = Spine [] (Var nm) []
+
 
 rebuildSpine :: [(Name,Tp)] -> Tm -> [Tm] -> Tm
 rebuildSpine binders = reb
@@ -100,8 +105,8 @@ class Subst a where
 instance (Functor f , Subst a) => Subst (f a) where
   subst foo t = subst foo <$> t
   
-  
 instance Subst Tm where
+  subst s (Tipe t) = Tipe $ subst s t
   subst s (Spine ((a,t):l) head apps) = Spine ((a,subst s t):l) head' apps'
     where Spine l' head' apps' = subst (M.delete a s) $ Spine l head apps
   subst s (Spine [] head apps) = let apps' = subst s <$> apps  in
@@ -127,10 +132,22 @@ instance FV a => FV (Maybe a) where
   freeVariables Nothing = mempty
   
 instance FV Tp where
-  freeVariables (Forall a ty t) = (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
-  freeVariables (t1 :->: t2) = freeVariables t1 `S.union` freeVariables t2
-  freeVariables (Atom a) = freeVariables a
+  freeVariables t = case t of
+    Forall a ty t -> (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
+    t1 :->: t2 -> freeVariables t1 `S.union` freeVariables t2
+    Atom a -> freeVariables a
 instance FV Tm where
-  freeVariables (Spine bound _ others) = F.foldr' (S.delete . fst) (mconcat $ freeVariables <$> others) bound 
+  freeVariables t = case t of
+    Tipe t -> freeVariables t
+    Spine bound _ others -> F.foldr' (S.delete . fst) (mconcat $ freeVariables <$> others) bound 
 instance (FV a,FV b) => FV (a,b) where 
   freeVariables (a,b) = freeVariables a `S.union` freeVariables b
+  
+  
+  
+class ToTm t where
+  tpToTm :: t -> Tm
+instance ToTm Tp where
+  tpToTm (Forall n ty t) = Spine [] (Cons "forall") [rebuildSpine [(n,ty)] (tpToTm t) []]
+  tpToTm (Atom tm) = tm
+  tpToTm (t1 :->: t2) = Spine [] (Cons "->") [tpToTm t1 , tpToTm t2]
