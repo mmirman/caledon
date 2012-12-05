@@ -89,7 +89,14 @@ unify env constraint@(a :=: b) =
       badConstraint
     Spine (Cons c) m :=: Spine (Cons c') n | length m == length n -> 
       doUntoBoth m n
-      where 
+      
+    Spine (Var x) n :=: Spine (Cons c) m | not $ S.member x env -> do -- Gvar-Const
+      us <- forM n $ const $ Atom <$> var <$> getNew
+      xs <- forM m $ const $ Var <$> getNew
+      let l = Spine (Cons c) $ (\xi -> Atom $ Spine xi us) <$> xs
+      unify' $ subst (x |-> l) (a :=: b)
+      -- I need to keep track of levels in the environment! 
+      
     _ :=: _ -> badConstraint
   
 {-    Hole :=: _ -> return () -- its a hole, what can we say?
