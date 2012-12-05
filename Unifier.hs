@@ -25,7 +25,7 @@ import Control.Monad.Trans.Class
 import Data.Monoid
 import Data.Functor
 import Data.Traversable (forM)
-import Data.Foldable as F (msum, forM_, fold, Foldable)
+import Data.Foldable as F (msum, forM_, fold, Foldable, foldl')
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Debug.Trace
@@ -59,19 +59,37 @@ unify :: S.Set Name -> Constraint Tm -> VarGen Substitution
 unify env constraint@(a :=: b) = 
   let badConstraint = throwError $ show constraint 
       unify' = unify env
-  in  case a :=: b of
+      
+      doUntoBoth m n = F.foldl' act return (zip m n) mempty
+      act prev (mt,nt) sub = do
+              sub' <- unify env $ subst sub (tpToTm mt :=: tpToTm nt)
+              return $ sub *** sub'
+
+  in case a :=: b of
     _ :=: _ | a > b -> unify env $ b :=: a
-    
-    Spine (Var a) [] :=: Spine (Var a') [] | a == a' -> return mempty
-    Spine (Var a) [] :=: _ | not $ S.member a $ freeVariables b -> return $ a |-> b
-    Spine (Var a) [] :=: _ -> badConstraint
-    
-    Spine (Cons c) _ :=: Spine (Cons c') _ | c /= c' -> badConstraint
     Abs n ty t :=: Abs n' ty' t' -> do  
       s <- unify' $ tpToTm ty :=: tpToTm ty'
       nm <- getNew
-      s' <- unify (S.insert nm env) $ subst (s *** n |-> var nm) t :=: subst (s *** n' |-> var nm) t'
-      return (s *** M.delete nm s')
+      s' <- unify (S.insert nm env) $ subst (M.insert n (var nm) s) t :=: subst (s *** n' |-> var nm) t'
+      return $ s *** M.delete nm s'
+    Abs n ty t :=: _ -> do  
+      nm <- getNew
+      s <- unify (S.insert nm env) $ subst (n |-> var nm) t :=: rebuildSpine b [Atom $ var nm]
+      return $ M.delete nm s
+    
+    Spine (Var a) [] :=: Spine (Var a') [] | a == a' -> 
+      return mempty
+    Spine (Var a) [] :=: _ | not $ S.member a $ freeVariables b -> 
+      return $ a |-> b
+    Spine (Var a) l :=: _ -> badConstraint
+    
+    Spine (Var a) m :=: Spine (Var a') n | a == a' && S.member a env && length m == length n -> 
+      doUntoBoth m n
+    Spine (Cons c) _ :=: Spine (Cons c') _ | c /= c' -> 
+      badConstraint
+    Spine (Cons c) m :=: Spine (Cons c') n | length m == length n -> 
+      doUntoBoth m n
+      where 
     _ :=: _ -> badConstraint
   
 {-    Hole :=: _ -> return () -- its a hole, what can we say?
