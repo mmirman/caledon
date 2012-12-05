@@ -81,9 +81,9 @@ instance Show Predicate where
 --------------------------------------------------------------------
 type Substitution = M.Map Name Tm
 
-infixr 0 |->
+infixr 1 |->
+infixr 0 ***
 m1 *** m2 = M.union m2 (subst m2 <$> m1)
-nil = M.empty
 (|->) = M.singleton
 (!) = flip M.lookup
 
