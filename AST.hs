@@ -93,9 +93,10 @@ rebuildSpine s [] = s
 rebuildSpine (Spine c apps) apps' = Spine c (apps ++ apps')
 rebuildSpine (Abs nm _ rst) (a:apps') = rebuildSpine (subst (nm |-> tpToTm a) $ rst) apps'
 
-
-newName a t = fromJust $ find free $ a:map (\s -> show s ++ "/") [0..]
-  where fv = mappend (M.keysSet t) (freeVariables t)
+newName nm s = (nm',s')
+  where s' = if nm == nm' then s else M.insert nm (var nm') s 
+        nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/") [0..]
+        fv = mappend (M.keysSet s) (freeVariables s)
         free k = not $ S.member k fv
 
 class Subst a where
@@ -104,9 +105,7 @@ instance (Functor f , Subst a) => Subst (f a) where
   subst foo t = subst foo <$> t
 instance Subst Tm where
   subst s (Abs nm t rst) = Abs nm' (subst s t) $ subst s' rst
-    where nm' = newName nm s
-          s' = if nm == nm' then s else M.insert nm (var nm') s
-          
+    where (nm',s') = newName nm s
   subst s (Spine head apps) = let apps' = subst s <$> apps  in
     case head of
       Var nm | Just head' <- s ! nm -> rebuildSpine head' apps'
@@ -115,9 +114,7 @@ instance Subst Tp where
   subst s t = case t of
     Atom t -> Atom $ subst s t
     Forall nm ty t -> Forall nm' (subst s ty) $ subst s' t  -- THIS RULE is unsafe capture!
-        where nm' = newName nm s
-              s' = if nm' == nm then s else M.insert nm (var nm') s
-              
+        where (nm',s') = newName nm s
     ty1 :->: ty2 -> subst s ty1 :->: subst s ty2
 instance Subst Judgement where 
   subst foo (c :|- s) = subst foo c :|- subst foo s

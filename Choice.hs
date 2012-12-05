@@ -12,7 +12,7 @@ import Data.Functor
 import Control.Applicative
 import Control.Monad.Error (ErrorT, runErrorT)
 import Control.Monad.Error.Class (catchError, throwError, MonadError)
-import Control.Monad.Identity (Identity, runIdentity)
+import Control.Monad.State.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Maybe
 import Data.Maybe
@@ -63,11 +63,6 @@ instance RunChoice Choice where
           
           notSuccess (Success a) = False
           notSuccess _ = True
-          
-type Error = ErrorT String Identity
-
-instance RunChoice Error where 
-  runError = runIdentity . runErrorT
   
 appendErr :: (MonadError String m) => String -> m a -> m a
 appendErr s m = catchError m $ \s' -> throwError $ s' ++ "\n" ++ s
@@ -77,4 +72,10 @@ instance MonadError String Choice where
   catchError try1 foo_try2 = case runError try1 of
     Left s -> foo_try2 s
     Right a -> Success a
-    
+
+getNew :: (MonadState Integer m) => m String
+getNew = do 
+  st <- get
+  let n = 1 + st
+  put n
+  return $! show n
