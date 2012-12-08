@@ -1,0 +1,6 @@
+defn trm : atom
+  as lam = (trm -> trm) -> trm
+   | app = trm -> trm -> trm
+
+defn linear : (trm -> trm) -> atom
+  as linearVar = linear ( λ v : trm . v )

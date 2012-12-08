@@ -19,7 +19,7 @@ import Data.Traversable (forM)
 import Data.Foldable as F (msum, forM_, fold, Foldable, foldl', foldr')
 import qualified Data.Map as M
 import qualified Data.Set as S
-
+import Debug.Trace
 --------------------------------------------------------------------
 ----------------------- UNIFICATION --------------------------------
 --------------------------------------------------------------------
@@ -33,14 +33,15 @@ instance HasVar Integer where
   getV = id
   setV a _ = a
       
+unifyAll env [] = return mempty
 unifyAll env (a:l) = do
-  s <- unify env a
+  s <- appendErr ("IN: "++show a) $ unify env a
   s' <- unifyAll env (subst s l)
   return $ s *** s'
 
 unify :: M.Map Name Tp -> Constraint Tm -> VarGen Substitution
 unify env constraint@(a :=: b) = 
-  let badConstraint = throwError $ show constraint 
+  let badConstraint = throwError $ show constraint ++" \nWITH: "++show (M.toList env)
       unify' = unify env
       doUntoBoth m n = F.foldl' act (return mempty) (zip m n)
       act prev (mt,nt) = do
@@ -64,7 +65,6 @@ unify env constraint@(a :=: b) =
       return mempty
     Spine (Var a) [] :=: _ | not $ S.member a $ freeVariables b -> 
       return $ a |-> b
-    Spine (Var a) l :=: _ -> badConstraint
     
     Spine (Var a) m :=: Spine (Var a') n | a == a' && M.member a env && length m == length n ->  -- the var has the same rule whether it is quantified or not.
       doUntoBoth m n
@@ -74,10 +74,11 @@ unify env constraint@(a :=: b) =
       doUntoBoth m n
       
     Spine (Var x) n :=: Spine (Cons c) m | not $ M.member x env -> do -- Gvar-Const
-      us <- forM n $ const $ Atom <$> var <$> getNew
+      us <- forM n $ const $ getNew
+      usty <- forM n $ const $ Atom <$> var <$> getNew
       xs <- forM m $ const $ Var <$> getNew
-      let l = Spine (Cons c) $ (\xi -> Atom $ Spine xi us) <$> xs
-          s = x |-> l
+      let l = Spine (Cons c) $ (\xi -> Atom $ Spine xi $ Atom <$> var <$> us) <$> xs
+          s = x |-> foldr' (\(v,ty) t -> Abs v ty t) l (zip us usty)
       s' <- unify (subst s env) $ subst s (a :=: b)
       return $ (s *** s')
       
@@ -97,6 +98,32 @@ unify env constraint@(a :=: b) =
           f' = foldr' (\v t -> Abs v undefined t) base xs
       return (sub *** a |-> f')
       
+    Spine (Var f) xs :=: Spine (Var g) ys | f /= g -> do -- Gvar-Gvar - diff
+      h <- getNew
+      let act xi next = do
+            sub' <- flip catchError (const $ return Nothing) $ msum $ flip fmap ys $ \yi -> do
+              sub <- unify' (tpToTm xi :=: tpToTm yi)
+              return $ Just (yi,sub)
+            (zs,sub) <- next
+            case sub' of
+              Just (yi,sub') -> return ((xi,yi):zs, sub' *** sub)              
+              Nothing  -> return (zs, sub)
+      (zs,sub) <- foldr' act (return (mempty, mempty)) xs
+      
+      let toVar (Atom (Spine (Var x) [])) = do
+            t <- getNew
+            return (x, Atom $ var t)
+          toVar _ = badConstraint
+      
+      xs' <- mapM toVar xs
+      ys' <- mapM toVar ys
+      
+      let baseF = Spine (Var h) (fst <$> zs)
+          f' = foldr' (\(v,vt) t -> Abs v vt t) baseF xs'
+          
+          baseG = Spine (Var h) (snd <$> zs)
+          g' = foldr' (\(v,vt) t -> Abs v vt t) baseG ys'
+      return (sub *** (f |-> f' *** g |-> g'))
 {-    Spine (Var a) n :=: Spine (Var a') m | a /= a' -> do -- Gvar-Gvar - diff
       h <- getNew
       let act (xi, yi) next = do

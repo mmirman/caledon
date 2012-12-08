@@ -29,7 +29,6 @@ instance Monad Choice where
   (m :<|>: m') >>= f = (m >>= f) :<|>: (m' >>= f)
   Success a >>= f = f a
   
-  
 instance Applicative Choice where  
   pure = Success
   mf <*> ma = mf >>= (<$> ma)

@@ -20,6 +20,17 @@ import qualified Data.Set as S
 -----------------------------------------------------------------------
 -------------------------- PARSER -------------------------------------
 -----------------------------------------------------------------------
+
+data ParseState = ParseState { currentVar :: Integer, currentSet :: S.Set Name }
+
+modifySet f s = s { currentSet = f $ currentSet s }
+modifyVar f s = s { currentVar = f $ currentVar s }
+
+getNextVar = do
+  v <- currentVar <$> getState
+  modifyState $ modifyVar (+1)
+  return $ show v++"@?_?"
+
 decls = do
   whiteSpace
   lst <- many (query <|> defn <?> "declaration")
@@ -43,27 +54,36 @@ defn =  do
                 return $ Predicate nm ty []
   more <|> none <?> "definition"
 
-atom =  do reserved "_"
-           return Hole
-    <|> do r <- id_var
-           return $ Var r
-    <|> do r <- identifier
-           mp <- getState 
-           return $ (if S.member r mp then Var else Cons) r
-    <|> (tpToTm <$> parens tipe)
-    <?> "atom"
+pAtom =  do reserved "_"
+            nm <- getNextVar
+            return $ var nm
+     <|> do r <- id_var
+            return $ var r
+     <|> do r <- identifier
+            mp <- currentSet <$> getState 
+            return $ (if S.member r mp then var else cons) r
+
+     <|> (tpToTm <$> parens tipe)
+     <?> "atom"
   
 trm =  parens trm 
-   <|> do t <- atom
-          tl <- many $ (flip TyApp <$> braces tipe) <|> (flip App <$> (atom <|> parens trm))
---          tl <- many $ (flip TyApp <$> parens tipe) <|> (flip TyApp <$> Atom <$> atom)
-          return $ foldl (flip ($)) t tl 
+   <|> do reservedOp "λ" <|> reservedOp "\\"
+          (nm,tp) <- parens anonNamed <|> anonNamed
+          reservedOp "."
+          tp' <- tmpState nm trm
+          return $ Abs nm tp tp'
+   <|> do t <- pAtom
+          tps <- many $ (parens tipe) <|> (Atom <$> pAtom)
+          return $ rebuildSpine t tps
    <?> "term"
 
 imp = Forall ""
 
-table = [ [binary "->" {- imp -} (:->:) AssocRight] 
-        , [binary "<-" (flip  {- imp -} (:->:)) AssocLeft] 
+table = [ [ binary "->" imp AssocRight
+          , binary "→" imp AssocRight
+          ] 
+        , [binary "<-" (flip  imp) AssocLeft
+          , binary "←" (flip  imp) AssocLeft ] 
         ]
   where  binary  name fun assoc = Infix (reservedOp name >> return fun) assoc
          
@@ -83,23 +103,29 @@ anonNamed = do
   let (ident,sep) = dec_anon 
   nm <- ident
   ty <- optionMaybe $ reservedOp sep >> tipe
-  return (nm,fromMaybe (Atom Hole) ty)
+  nm' <- getNextVar
+  return (nm,fromMaybe (Atom $ var nm') ty)
 
 tmpState nm m = do
-  s <- getState
+  s <- currentSet <$> getState
   let b = S.member nm s
-  putState $ S.insert nm s
+  modifyState $ modifySet (S.insert nm)
   r <- m
-  unless b $ modifyState (S.delete nm)
+  unless b $ modifyState $ modifySet $ S.delete nm
   return r
 
 tipe = buildExpressionParser table ( 
         parens tipe
     <|> (Atom <$> trm)
-    <|> do (nm,tp) <- brackets anonNamed
-           optional $ reservedOp "->"
+    <|> do (nm,tp) <- brackets anonNamed 
            tp' <- tmpState nm tipe
            return $ Forall nm tp tp'
+    <|> do reservedOp "∀" <|> reserved "forall"
+           (nm,tp) <- parens anonNamed <|> anonNamed
+           reservedOp "."
+           tp' <- tmpState nm tipe
+           return $ Forall nm tp tp'
+           
     <?> "type")
            
 P.TokenParser{..} = P.makeTokenParser $ mydef
@@ -108,6 +134,6 @@ mydef = haskellDef
  , P.identLetter = alphaNum <|> oneOf "_'-/"
  , P.reservedNames = ["defn", "as", "query", "forall", "exists", "_"]
  , P.caseSensitive = True
- , P.reservedOpNames = ["->", "<-", ":", "|"]
+ , P.reservedOpNames = ["->", "→", "<-", "←", ":", "|", "\\", "λ", "∀", "."]
  }
 getId start = P.identifier $ P.makeTokenParser $ mydef { P.identStart = start }

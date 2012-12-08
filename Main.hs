@@ -4,6 +4,7 @@ module Main where
 import AST
 import Unifier 
 import Choice
+import Solver
 import Parser
 import System.Environment
 import Data.Foldable as F (msum, forM_)
@@ -44,7 +45,7 @@ checkAndRun decs = do
 main = do
   [fname] <- getArgs
   file <- readFile fname
-  let mError = runP decls mempty fname file
+  let mError = runP decls (ParseState 0 mempty) fname file
   decs   <- case mError of
     Left e -> error $ show e
     Right l -> return l

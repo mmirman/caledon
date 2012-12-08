@@ -27,13 +27,11 @@ data Tm = Abs Name Tp Tm
 var nm = Spine (Var nm) []
 cons nm = Spine (Cons nm) []
 
-data Constraint a = a :=: a 
+data Constraint a = a :=: a
                   deriving (Eq, Ord, Functor, Show)
 
-infixr 5 :->:
 data Tp = Atom Tm
         | Forall Name Tp Tp
-        | Tp :->: Tp
         deriving (Eq, Ord)
 
 data Predicate = Predicate { predName::Name
@@ -46,6 +44,10 @@ data Predicate = Predicate { predName::Name
 infixl 1 :|-
 data Judgement = (:|-) { antecedent :: [(Name,Tp)] , succedent :: Tp }
 
+
+atom = Atom $ cons "atom"
+
+
 --------------------------------------------------------------------
 ----------------------- PRETTY PRINT -------------------------------
 --------------------------------------------------------------------
@@ -54,17 +56,23 @@ instance Show Variable where
   show (Cons n) = n
 
 instance Show Tm where
-  show (Abs nm ty tm) = "\\"++nm++" : "++show ty++" . "++show tm
-  show (Spine cons apps) = show cons
-                           ++concatMap (\s -> " ("++show s++")") apps
+  show (Abs nm ty tm) = "λ "++nm++" : ("++show ty++") . "++show tm
+  show (Spine cons apps) = show cons++concatMap (\s -> " "++showWithParens s) apps
+    where showWithParens t = if (case t of
+            Forall _ _ _ -> True
+            Atom (Spine _ lst) -> not $ null lst
+            Atom (Abs _ _ _) -> True) then "("++show t++")" else show t
 instance Show Tp where
-  show (t :->: t') = "("++show t ++" -> "++ show t'++")"
-  show (Atom t) = show t
-  show (Forall nm t t') | not $ S.member nm (freeVariables t') = "("++show t ++" -> "++ show t'++") "
-  show (Forall nm ty t) = "[ "++nm++" : "++show ty++" ] "++show t
+  show t = case t of
+    Atom t -> show t
+    Forall nm t t' | not (S.member nm (freeVariables t')) -> showWithParens++" → "++ show t'
+      where showWithParens = case t of
+              Forall _ _ _ -> "( " ++ show t ++ ")"
+              _ ->  show t
+    Forall nm ty t -> "∀ "++nm++" : "++show ty++" . "++show t
   
 instance Show Judgement where 
-  show (a :|- b) =  removeHdTl (show a) ++" |- "++ show b
+  show (a :|- b) =  removeHdTl (show a) ++" ⊢ "++ show b
     where removeHdTl = reverse . tail . reverse . tail    
 
 instance Show Predicate where
@@ -115,7 +123,6 @@ instance Subst Tp where
     Atom t -> Atom $ subst s t
     Forall nm ty t -> Forall nm' (subst s ty) $ subst s' t  -- THIS RULE is unsafe capture!
         where (nm',s') = newName nm s
-    ty1 :->: ty2 -> subst s ty1 :->: subst s ty2
 instance Subst Judgement where 
   subst foo (c :|- s) = subst foo c :|- subst foo s
 
@@ -130,7 +137,6 @@ instance (FV a, F.Foldable f) => FV (f a) where
 instance FV Tp where
   freeVariables t = case t of
     Forall a ty t -> (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
-    t1 :->: t2 -> freeVariables t1 `S.union` freeVariables t2
     Atom a -> freeVariables a
 instance FV Tm where
   freeVariables t = case t of
@@ -145,6 +151,6 @@ instance (FV a,FV b) => FV (a,b) where
 class ToTm t where
   tpToTm :: t -> Tm
 instance ToTm Tp where
-  tpToTm (Forall n ty t) = Spine (Cons "forall") [Atom $ Abs n ty $ tpToTm t]
+  tpToTm (Forall n ty t) = Spine (Cons "forall") [Atom $ Abs n ty $ tpToTm t ]
+--  tpToTm (Forall n ty t) = Abs n ty $ tpToTm t
   tpToTm (Atom tm) = tm
-  tpToTm (t1 :->: t2) = Spine (Cons "->") [t1 , t2]

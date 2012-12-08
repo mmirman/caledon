@@ -1,0 +1,6 @@
+defn maybe : atom -> atom
+  as just = ∀ A : atom . A → maybe A
+   | nothing = ∀ A : atom . maybe A
+
+defn maybeFSUM : ∀ b : atom . maybe b → atom
+  as maybe_FSUM_just = ∀ C : atom . ∀ F : atom → maybe C . maybeFSUM C (F C)

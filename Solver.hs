@@ -25,7 +25,7 @@ import Data.Traversable (forM)
 import Data.Foldable as F (msum, forM_, fold, Foldable, foldl')
 import qualified Data.Map as M
 import qualified Data.Set as S
-import Debug.Trace
+import Debug.Trace 
 
 ----------------------------------------------------------------------
 ----------------------- LOGIC ENGINE ---------------------------------
@@ -57,34 +57,16 @@ left judge@((x,f):context :|- r) = case f of
           Just a -> a
         s = seq n $ M.delete nm' so
     s' <- natural (subst s $ (x,f):context) $ subst s (n,t1)
---    return (subst s' $ subst (y |-> TyApp (Var x) (Atom n)) m, s *** s')
-    undefined
-  p@(Atom _) :->: b -> do
-    y <- getNew
-    (m,s)  <- left $ (y,b):context :|- r
-    (n,s') <- solve $ subst s $ context :|- p
---    return (subst s' $ subst (y |-> App (Var x) n) m, s *** s')
-    undefined
-  t1 :->: t2 -> do
-    y <- getNew
-    (m,s)  <- left $ (y,t2):context :|- r
-    (n,s') <- solve $ subst s $ (x,f):context :|- t1
---    return (subst s' $ subst (y |-> App (Var x) n) m, s *** s')
-    undefined
+    return (subst s' $ subst (y |-> Spine (Var x) [Atom n]) m, s *** s')
+
 
 right :: Judgement -> Reification
 right judge@(context :|- r) = case r of
   Atom _ -> unifier context r
-  t1 :->: t2 -> do
-    nm <- getNew
-    (m,s) <- solve $ (nm,t1):context :|- t2
-    --return $ (Abstract nm t1 m, s)
-    undefined
   Forall nm t1 t2 -> do
     nm' <- getNew
     (v,s) <- solve $ (nm', t1):context :|- subst (nm |-> cons nm') t2
-    --return $ (Cons "forall" .+. Abstract nm' t1 v, s)
-    undefined
+    return $ (tpToTm $ Forall nm' t1 (Atom v), s)
 
 solve :: Judgement -> Reification
 solve judge@(context :|- r) = right judge <|> (msum $ useSingle (\f ctx -> left $ f:ctx :|- r) context)
@@ -109,41 +91,54 @@ solver axioms t = case runError $ runStateT (solve $ axioms :|- t) 0 of
 ----------------------- Type Checker ----------------------------    
 -----------------------------------------------------------------
 type Environment = M.Map Name Tp
+type NatDeduct = WriterT [Constraint Tm] (StateT Integer Choice)
 
-checkVariable :: Environment -> Variable -> Tp -> WriterT [Constraint Tm] (StateT Integer Choice) ()
+checkVariable :: Environment -> Variable -> Tp -> NatDeduct ()
 checkVariable env v t = case v of
   Cons nm -> case env ! nm of
     Nothing -> error $ nm++" was not found in the environment in "++show v
-    Just t' -> tell [tpToTm t' :=: tpToTm t]
+    Just t' -> 
+      tell [tpToTm t' :=: tpToTm t]
   Var nm -> case env ! nm of
     Nothing -> do 
       (t'',s) <- lift $ solve $ M.toList env :|- t
+      tell $ map (\(s,t) -> var s :=: t ) $ M.toList s 
       tell [var nm :=: t'']
       -- I'm not sure this makes sense at all.
       -- in the mean time, assume there is only one use of each unbound variable
-    Just t' -> tell [tpToTm t' :=: tpToTm t]
+    Just t' -> 
+      tell [tpToTm t' :=: tpToTm t]
       
-checkTerm :: Environment -> Tm -> Tp -> WriterT [Constraint Tm] (StateT Integer Choice) ()
+checkTerm :: Environment -> Tm -> Tp -> NatDeduct ()
 checkTerm env v t = case v of
   Spine a l -> do
-    nm <- getNew
-    tv1 <- getNew
-    tv2l <- mapM (\b -> (,b) <$> Atom <$> var <$> getNew) l
-    tell [ Spine (Var tv1) (fst <$> tv2l) :=: tpToTm t]  -- maybe?  tpToTm tv1 will have a forall type, which can't be substituted maybe?
-    checkVariable env a $ Atom $ var $ tv1
-    forM_ tv2l $ \(tv2,b) -> 
-      checkTerm env (tpToTm b) $ tv2
-  
-  Abs nm ty tm -> do
-    v1 <- (++'<':nm) <$> getNew
-    v2 <- var <$> (++'>':nm) <$>  getNew
-        
-    tell [ v2 :=: rebuildSpine (tpToTm t) [Atom $ var v1]]
+    nm <- (++'α':show a) <$> getNew
+    tv1 <- (++':':show a) <$> getNew
+    tv2l <- forM l $ \b -> do
+      bty <- getNew
+      nm' <- getNew
+      checkTerm env (tpToTm b) $ Atom $ var bty
+      return (nm',Atom $ var bty)
+    tell [ var tv1 :=: tpToTm (foldr (\(nm,b) tp -> Forall nm b tp) t tv2l ) ]
     
-    (_,newconstraints) <- listens id $ checkTerm (M.insert v1 ty env) (subst (nm |-> var v1) tm) $ Atom v2
-    s <- lift $ genUnifyEngine newconstraints
-    let s' = M.delete v1 s
-    tell $ map (\(s,i) -> var s :=: i) $ M.toList s'
+    checkVariable env a $ Atom $ var $ tv1
+        
+  Abs nm ty tm -> do
+    checkTipe env ty
+    v1 <- (++':':'<':nm) <$> getNew
+    nm' <- (++'@':nm) <$> getNew
+    v2 <- (++':':'>':nm) <$> getNew
+
+    tell [ tpToTm (Forall v1 ty $ Atom $ var v2) :=: tpToTm t ]
+    checkTerm (M.insert nm' ty env) (subst (nm |-> var nm') tm) $ Atom $ var v2
+    
+checkTipe :: Environment -> Tp -> NatDeduct ()
+checkTipe env v = case v of
+  Atom tm -> checkTerm env tm atom
+  Forall nm ty t -> do
+    checkTipe env ty
+    nm' <- (++'η':nm) <$> getNew
+    checkTipe (M.insert nm' ty env) $ subst (nm |-> cons nm') t
 
 getCons tm = case tm of
   Spine (Cons t) _ -> return t
@@ -153,36 +148,36 @@ getCons tm = case tm of
 getPred tp = case tp of
   Atom t -> getCons t
   Forall _ _ t -> getPred t
-  t1 :->: t2 -> getPred t2
-  
+
 -- need to do a topological sort of types and predicates.
 -- such that types get minimal correct bindings
 checkType :: Environment -> Name -> Tp -> Choice Tp
-checkType env base ty = fmap fst $ flip runStateT 0 $ do
+checkType env base ty = fmap fst $ flip runStateT 0 $ appendErr ("FOR: "++show ty) $ do
   con <- getPred ty
   unless (null base || con == base) 
-    $ throwError $ "non local name "++con++" expecting "++base
-  (_,constraints) <- runWriterT $ checkTerm env (tpToTm ty) $ Atom $ cons "atom"
-  s <- genUnifyEngine constraints
+    $ throwError $ "non local name \""++con++"\" expecting "++base
+  (_,constraints) <- runWriterT $ checkTipe env ty
+  
+  s <- appendErr ("CONSTRAINTS: "++show constraints) $ genUnifyEngine constraints
+  
   return $ subst s ty
 
 typeCheckPredicate :: Environment -> Predicate -> Choice Predicate
-typeCheckPredicate env (Query nm ty) = appendErr ("in query : "++show ty) $ Query nm <$> checkType env "" ty
+typeCheckPredicate env (Query nm ty) = appendErr ("in query : "++show ty) $ do
+  ty' <- checkType env "" ty
+  return $ Query nm ty
 typeCheckPredicate env pred@(Predicate pnm pty plst) = appendErr ("in\n"++show pred) $ do
   pty' <- appendErr ("in name: "++ pnm ++" : "++show pty) $
     checkType env "atom" pty
   plst' <- forM plst $ \(nm,ty) -> 
     appendErr ("in case: " ++nm ++ " = "++show ty) $ (nm,) <$> checkType env pnm ty
   return $ Predicate pnm pty' plst'
-  
+
 typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = forM preds $ typeCheckPredicate assumptions
-  where atom = Atom $ cons "atom"
-        assumptions = M.fromList $ 
+  where assumptions = M.fromList $ 
                       ("atom", atom): -- atom : atom is a given.
-                      ("->", atom :->: atom :->: atom): -- atom : atom is a given.
-                      ("forall", (atom :->: atom) :->: atom): -- atom : atom is a given.
-                      ("exists", (atom :->: atom) :->: atom): -- atom : atom is a given.
+                      ("forall", Atom $ Abs "_" (Atom $ Abs "_" atom $ cons "atom") $ cons "atom"): -- atom : atom is a given.
                       concatMap (\st -> case st of
                                     Query _ _ -> []
                                     _ -> (predName st, predType st):predConstructors st) preds
