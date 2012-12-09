@@ -2,8 +2,6 @@
 module Parser where
 
 import AST
-import Unifier 
-import Choice
 
 import Data.Foldable as F (msum, forM_)
 import Data.Functor
@@ -126,21 +124,21 @@ tipe = buildExpressionParser table (
     <|> do (nm,tp) <- brackets anonNamed 
            tp' <- tmpState nm tipe
            return $ Forall nm tp tp'
+    <|> do (nm,tp) <- braces anonNamed 
+           tp' <- tmpState nm tipe
+           return $ ForallImp nm tp tp'           
     <|> do reservedOp "∀" <|> reserved "forall"
            (nm,tp) <- parens anonNamed <|> anonNamed
            reservedOp "."
            tp' <- tmpState nm tipe
            return $ Forall nm tp tp'
-    <|> do (nm,tp) <- braces anonNamed 
-           tp' <- tmpState nm tipe
-           return $ ForallImp nm tp tp'           
     <|> do reservedOp "?∀" <|> reserved "?forall"
            (nm,tp) <- parens anonNamed <|> anonNamed
            reservedOp "."
            tp' <- tmpState nm tipe
-           return $ ForallImp nm tp tp'     
-           
+           return $ ForallImp nm tp tp'           
     <?> "type")
+  
            
 P.TokenParser{..} = P.makeTokenParser $ mydef
 mydef = haskellDef 
@@ -148,6 +146,6 @@ mydef = haskellDef
  , P.identLetter = alphaNum <|> oneOf "_'-/"
  , P.reservedNames = ["defn", "as", "query", "forall", "?forall", "_"]
  , P.caseSensitive = True
- , P.reservedOpNames = ["->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", ":", "|", "\\", "λ","?\\", "?λ", "∀", "?∀", "."]
+ , P.reservedOpNames = ["->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", ":", "|", "\\","?\\", "λ","?λ","∀","?∀", "."]
  }
 getId start = P.identifier $ P.makeTokenParser $ mydef { P.identStart = start }

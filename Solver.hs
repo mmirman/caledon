@@ -5,9 +5,9 @@
  #-}
 module Solver where
 
-import Unifier
 import AST
 import Choice
+
 import Control.Monad (void)
 import Control.Applicative ((<|>), empty)
 import Control.Monad.Error (ErrorT, throwError, runErrorT, lift, unless, when)
@@ -25,7 +25,7 @@ import Data.Traversable (forM)
 import Data.Foldable as F (msum, forM_, foldr', foldl', fold, Foldable, foldl')
 import qualified Data.Map as M
 import qualified Data.Set as S
-
+import Debug.Trace
 
 --------------------------------------------------------------------
 ----------------------- UNIFICATION --------------------------------
@@ -48,7 +48,7 @@ unifyAll envE env (a:l) = do
 
 unify :: M.Map Name Tp -> M.Map Name Tp -> Constraint Tm -> VarGen Substitution
 unify envE env constraint@(a :=: b) = 
-  let badConstraint = throwError $ show constraint ++" \nWITH: "++show (M.toList env)
+  let badConstraint = throwError $ show constraint
       unify'' = unify envE env
       unify' = unify envE
       doUntoBoth m n = F.foldl' act (return mempty) (zip m n)
@@ -60,9 +60,8 @@ unify envE env constraint@(a :=: b) =
   in case a :=: b of
     _ :=: _ | a > b -> unify' env $ b :=: a
     AbsImp n ty t :=: _ -> do
-      undefined
       (v',s) <- solve $ (M.toList envE)++(M.toList env) :|- ty
-      unify' env $ rebuildSpine (subst s $ Abs n ty t) [Atom $ v'] :=: (subst s b)
+      unify' env $ subst s (subst (n |-> v') t) :=: (subst s b)
     Abs n ty t :=: Abs n' ty' t' -> do  
       s <- unify'' $ tpToTm ty :=: tpToTm ty'
       nm <- getNew
@@ -174,6 +173,17 @@ unifier cons t = do
 left :: Judgement -> Reification
 left judge@((x,f):context :|- r) = case f of
   Atom _ -> unifier [(x,f)] r
+  ForallImp nm t1 t2 -> do
+    nm' <- getNew
+    y <- getNew
+    (m,so) <- left $ (y,subst (nm |-> var nm') t2):context :|- r
+    let n = case M.lookup nm' so of
+          Nothing -> var nm'
+          Just a -> a
+        s = seq n $ M.delete nm' so
+    s' <- natural (subst s $ (x,f):context) $ subst s (n,t1)
+    return (subst s' $ subst (y |-> Spine (Var x) []) m, s *** s')
+    
   Forall nm t1 t2 -> do
     nm' <- getNew
     y <- getNew
@@ -189,6 +199,10 @@ left judge@((x,f):context :|- r) = case f of
 right :: Judgement -> Reification
 right judge@(context :|- r) = case r of
   Atom _ -> unifier context r
+  ForallImp nm t1 t2 -> do
+    nm' <- getNew
+    (v,s) <- solve $ (nm', t1):context :|- subst (nm |-> cons nm') t2
+    return $ (tpToTm $ ForallImp nm' t1 (Atom v), s)
   Forall nm t1 t2 -> do
     nm' <- getNew
     (v,s) <- solve $ (nm', t1):context :|- subst (nm |-> cons nm') t2

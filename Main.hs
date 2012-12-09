@@ -2,7 +2,6 @@
 module Main where
 
 import AST
-import Unifier 
 import Choice
 import Solver
 import Parser

@@ -59,7 +59,9 @@ instance Show Variable where
 showWithParens t = if (case t of
                           Forall _ _ _ -> True
                           Atom (Spine _ lst) -> not $ null lst
-                          Atom (Abs _ _ _) -> True) then "("++show t++")" else show t 
+                          Atom (Abs _ _ _) -> True
+                          Atom (AbsImp _ _ _) -> True
+                      ) then "("++show t++")" else show t 
 
 instance Show Tm where
   show (Abs nm ty tm) = "λ "++nm++" : "++showWithParens ty++" . "++show tm
@@ -123,6 +125,8 @@ instance (Functor f , Subst a) => Subst (f a) where
 instance Subst Tm where
   subst s (Abs nm t rst) = Abs nm' (subst s t) $ subst s' rst
     where (nm',s') = newName nm s
+  subst s (AbsImp nm t rst) = AbsImp nm' (subst s t) $ subst s' rst
+    where (nm',s') = newName nm s          
   subst s (Spine head apps) = let apps' = subst s <$> apps  in
     case head of
       Var nm | Just head' <- s ! nm -> rebuildSpine head' apps'
@@ -130,6 +134,8 @@ instance Subst Tm where
 instance Subst Tp where
   subst s t = case t of
     Atom t -> Atom $ subst s t
+    ForallImp nm ty t -> ForallImp nm' (subst s ty) $ subst s' t  -- THIS RULE is unsafe capture!
+        where (nm',s') = newName nm s
     Forall nm ty t -> Forall nm' (subst s ty) $ subst s' t  -- THIS RULE is unsafe capture!
         where (nm',s') = newName nm s
 instance Subst Judgement where 
@@ -146,10 +152,12 @@ instance (FV a, F.Foldable f) => FV (f a) where
 instance FV Tp where
   freeVariables t = case t of
     Forall a ty t -> (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
+    ForallImp a ty t -> (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
     Atom a -> freeVariables a
 instance FV Tm where
   freeVariables t = case t of
     Abs nm t p -> S.delete nm $ freeVariables p
+    AbsImp nm t p -> S.delete nm $ freeVariables p    
     Spine head others -> mappend (freeVariables head) $ mconcat $ freeVariables <$> others
 instance FV Variable where    
   freeVariables (Var a) = S.singleton a
@@ -161,5 +169,5 @@ class ToTm t where
   tpToTm :: t -> Tm
 instance ToTm Tp where
   tpToTm (Forall n ty t) = Spine (Cons "forall") [Atom $ Abs n ty $ tpToTm t ]
-  tpToTm (ForallImp n ty t) = Spine (Cons "forall") [Atom $ AbsImp n ty $ tpToTm t ]
+  tpToTm (ForallImp n ty t) = AbsImp n ty $ tpToTm t
   tpToTm (Atom tm) = tm
