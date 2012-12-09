@@ -3,7 +3,7 @@ version: 0.0
 build-type: Simple
 cabal-version: >= 1.2
 
-executable amerilog
+executable caledon
   main-is: Main.hs
   build-depends: parsec, mtl, base, containers, transformers
   other-modules: Solver, Choice, Parser
