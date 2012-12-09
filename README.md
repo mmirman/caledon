@@ -12,6 +12,15 @@ Background
 
 * This language was inspired by twelf, haskell and agda.  
 
+Goals
+-----
+
+* Make logic programming less repetative
+
+* A logic programming language that is good at defining DSLs
+
+* A language/system for conversing with the machine in a manner less one sided and instructional than regular programming.
+
 Features
 --------
 
@@ -25,7 +34,7 @@ Features
 
 * Closed types:  This is kind of a lie.  HOAS means you can introduce arbitrary types into the context and violate a closed type, and thus totality.  Be carefull when proving totality to yourself.
 
-* Holes:  type can have holes, terms can have holes.  The same proof search that is used in semantics is used in type inference, so you can use the same computational reasoning you use to program to reason about whether the type checker can infer types!  Holes get filled by a proof search on their type and the current context.  Since the entire type checking process is nondeterministic, if they get filled by a wrong term, they can always be filled again.
+* Holes:  types can have holes, terms can have holes.  The same proof search that is used in semantics is used in type inference, so you can use the same computational reasoning you use to program to reason about whether the type checker can infer types!  Holes get filled by a proof search on their type and the current context.  Since the entire type checking process is nondeterministic, if they get filled by a wrong term, they can always be filled again.
 
 * Implicit arguments:  These are arguments that automagically get filled with holes when they need to be.  They form the basis for typeclasses (records to be added), although they are far more general. This is also where the language is most modern and interesting.  I'm curious to see what uses beyond typeclasses there are for these.
 
@@ -38,10 +47,11 @@ Usage
 
 * To run, caledon file.ncc
 
+
 Examples
 --------
 
-* more to come.
+* these are currently a bit random.  I'll add more, or you'll add more!
 
 
 
