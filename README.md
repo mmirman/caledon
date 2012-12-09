@@ -68,7 +68,27 @@ Usage
 Examples
 --------
 
-* these are currently a bit random.  I'll add more, or you'll add more!
+* linearity checking:
 
+``` 
+defn trm : atom
+  as lam = (trm -> trm) -> trm
+   | app = trm -> trm -> trm
 
+defn linear : (trm → trm) → atom
+  as linear_var = linear ( λ v . v )
+   | linear_app1 = {V}{F} linear (λ v . app (F v) V) 
+                        ← linear F
+   | linear_app2 = ?∀ V . ?∀ F . linear (λ v . app F (V v)) 
+                               ← linear V
+```
 
+* Type inference with implicits.  
+
+``` 
+defn functor : (atom → atom) → atom
+  as isFunctor = ∀ F . ({a}{b : _ } (a → b → atom) → F a → F b → atom) → functor F.
+
+defn fsum : {F} functor F => {a}{b} (a → b → atom) → F a → F b → atom
+  as getFsum = [F][FSUM][Foo][Fa][Fb] FSUM Foo Fa Fb -> fsum {isFunctor F FSUM} Foo Fa Fb
+```
