@@ -54,20 +54,20 @@ atom = Atom $ cons "atom"
 instance Show Variable where
   show (Var n)  = n
   show (Cons n) = n
+showWithParens t = if (case t of
+                          Forall _ _ _ -> True
+                          Atom (Spine _ lst) -> not $ null lst
+                          Atom (Abs _ _ _) -> True) then "("++show t++")" else show t 
 
 instance Show Tm where
-  show (Abs nm ty tm) = "λ "++nm++" : ("++show ty++") . "++show tm
+  show (Abs nm ty tm) = "λ "++nm++" : "++showWithParens ty++" . "++show tm
   show (Spine cons apps) = show cons++concatMap (\s -> " "++showWithParens s) apps
-    where showWithParens t = if (case t of
-            Forall _ _ _ -> True
-            Atom (Spine _ lst) -> not $ null lst
-            Atom (Abs _ _ _) -> True) then "("++show t++")" else show t
 instance Show Tp where
   show t = case t of
     Atom t -> show t
     Forall nm t t' | not (S.member nm (freeVariables t')) -> showWithParens++" → "++ show t'
       where showWithParens = case t of
-              Forall _ _ _ -> "( " ++ show t ++ ")"
+              Forall _ _ _ -> "(" ++ show t ++ ")"
               _ ->  show t
     Forall nm ty t -> "∀ "++nm++" : "++show ty++" . "++show t
   

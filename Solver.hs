@@ -25,7 +25,6 @@ import Data.Traversable (forM)
 import Data.Foldable as F (msum, forM_, fold, Foldable, foldl')
 import qualified Data.Map as M
 import qualified Data.Set as S
-import Debug.Trace 
 
 ----------------------------------------------------------------------
 ----------------------- LOGIC ENGINE ---------------------------------
@@ -93,23 +92,25 @@ solver axioms t = case runError $ runStateT (solve $ axioms :|- t) 0 of
 type Environment = M.Map Name Tp
 type NatDeduct = WriterT [Constraint Tm] (StateT Integer Choice)
 
-checkVariable :: Environment -> Variable -> Tp -> NatDeduct ()
+checkVariable :: Environment -> Variable -> Tp -> NatDeduct Tp
 checkVariable env v t = case v of
   Cons nm -> case env ! nm of
     Nothing -> error $ nm++" was not found in the environment in "++show v
-    Just t' -> 
+    Just t' -> do
       tell [tpToTm t' :=: tpToTm t]
+      return t'
   Var nm -> case env ! nm of
     Nothing -> do 
       (t'',s) <- lift $ solve $ M.toList env :|- t
       tell $ map (\(s,t) -> var s :=: t ) $ M.toList s 
       tell [var nm :=: t'']
+      return t
       -- I'm not sure this makes sense at all.
       -- in the mean time, assume there is only one use of each unbound variable
-    Just t' -> 
+    Just t' -> do
       tell [tpToTm t' :=: tpToTm t]
-      
-checkTerm :: Environment -> Tm -> Tp -> NatDeduct ()
+      return t'
+checkTerm :: Environment -> Tm -> Tp -> NatDeduct (Tm,Tp)
 checkTerm env v t = case v of
   Spine a l -> do
     nm <- (++'α':show a) <$> getNew
@@ -117,29 +118,43 @@ checkTerm env v t = case v of
     tv2l <- forM l $ \b -> do
       bty <- getNew
       nm' <- getNew
-      checkTerm env (tpToTm b) $ Atom $ var bty
-      return (nm',Atom $ var bty)
-    tell [ var tv1 :=: tpToTm (foldr (\(nm,b) tp -> Forall nm b tp) t tv2l ) ]
+      t' <- checkTerm env (tpToTm b) $ Atom $ var bty
+      return (nm',t')
+      
+    tv1' <- checkVariable env a $ Atom $ var $ tv1
     
-    checkVariable env a $ Atom $ var $ tv1
+    tell [ tpToTm tv1' :=: tpToTm (foldr (\(nm,b) tp -> Forall nm (snd b) tp) t tv2l ) ]
+    return $ (Spine a $ map (Atom . fst . snd) tv2l, t)
         
   Abs nm ty tm -> do
-    checkTipe env ty
+    ty' <- checkTipe env ty
     v1 <- (++':':'<':nm) <$> getNew
     nm' <- (++'@':nm) <$> getNew
     v2 <- (++':':'>':nm) <$> getNew
 
     tell [ tpToTm (Forall v1 ty $ Atom $ var v2) :=: tpToTm t ]
-    checkTerm (M.insert nm' ty env) (subst (nm |-> var nm') tm) $ Atom $ var v2
     
-checkTipe :: Environment -> Tp -> NatDeduct ()
+    ((tm',t'),constraints) <- listen $ checkTerm (M.insert nm' ty env) (subst (nm |-> var nm') tm) $ Atom $ var v2
+    s <- finishSubstWith nm' <$> (lift $ genUnifyEngine constraints)
+    tell $ map (\(s,t) -> var s :=: t ) $ M.toList s
+    let s' = s *** nm' |-> var nm 
+    return $ (Abs nm ty' $ subst s' tm' , Forall v1 ty t')
+    
+checkTipe :: Environment -> Tp -> NatDeduct Tp
 checkTipe env v = case v of
-  Atom tm -> checkTerm env tm atom
+  Atom tm -> do
+    (a,t) <- checkTerm env tm atom
+    return $ Atom a
   Forall nm ty t -> do
-    checkTipe env ty
-    nm' <- (++'η':nm) <$> getNew
-    checkTipe (M.insert nm' ty env) $ subst (nm |-> cons nm') t
-
+    ty' <- checkTipe env ty
+    nm' <- (++'*':nm) <$> getNew
+    (a,constraints) <- listen $ checkTipe (M.insert nm' ty env) $ subst (nm |-> var nm') t
+    s <- finishSubstWith nm' <$> (lift $ genUnifyEngine constraints)
+    
+    tell $ map (\(s,t) -> var s :=: t ) $ M.toList s
+    let s' = s *** nm' |-> var nm 
+    return $ Forall nm ty' (subst s' a)
+    
 getCons tm = case tm of
   Spine (Cons t) _ -> return t
   Abs _ _ t -> getCons t
@@ -156,11 +171,11 @@ checkType env base ty = fmap fst $ flip runStateT 0 $ appendErr ("FOR: "++show t
   con <- getPred ty
   unless (null base || con == base) 
     $ throwError $ "non local name \""++con++"\" expecting "++base
-  (_,constraints) <- runWriterT $ checkTipe env ty
+  (ty',constraints) <- runWriterT $ checkTipe env ty
   
   s <- appendErr ("CONSTRAINTS: "++show constraints) $ genUnifyEngine constraints
   
-  return $ subst s ty
+  return $ subst s ty'
 
 typeCheckPredicate :: Environment -> Predicate -> Choice Predicate
 typeCheckPredicate env (Query nm ty) = appendErr ("in query : "++show ty) $ do

@@ -54,7 +54,7 @@ unify env constraint@(a :=: b) =
     Abs n ty t :=: Abs n' ty' t' -> do  
       s <- unify' $ tpToTm ty :=: tpToTm ty'
       nm <- getNew
-      s' <- unify (subst s $ M.insert nm ty env) $ subst (M.insert n (var nm) s) t :=: subst (s *** n' |-> var nm) t'
+      s' <- unify (subst s $ M.insert nm ty env) $ subst (M.insert n (var nm) s) t :=: subst (M.insert n' (var nm) s) t'
       return $ s *** M.delete nm s'
     Abs n ty t :=: _ -> do  
       nm <- getNew
@@ -63,11 +63,11 @@ unify env constraint@(a :=: b) =
     
     Spine (Var a) [] :=: Spine (Var a') [] | a == a' -> 
       return mempty
-    Spine (Var a) [] :=: _ | not $ S.member a $ freeVariables b -> 
+    Spine (Var a) [] :=: _ | not (M.member a env) && (not $ S.member a $ freeVariables b) -> 
       return $ a |-> b
-    
     Spine (Var a) m :=: Spine (Var a') n | a == a' && M.member a env && length m == length n ->  -- the var has the same rule whether it is quantified or not.
       doUntoBoth m n
+      
     Spine (Cons c) _ :=: Spine (Cons c') _ | c /= c' -> 
       badConstraint
     Spine (Cons c) m :=: Spine (Cons c') n | length m == length n -> 
@@ -146,7 +146,15 @@ unify env constraint@(a :=: b) =
 
 genUnifyEngine consts = do
   s <- unifyAll mempty consts
-  return $ M.fromList $ recSubst s $ M.toList s
+  return $ finishSubst s
   
 recSubst :: (Eq b, Subst b) => Substitution -> b -> b
 recSubst s f = fst $ head $ dropWhile (not . uncurry (==)) $ iterate (\(_,b) -> (b,subst s b)) (f,subst s f)  
+
+finishSubst s = recSubst s s
+
+finishSubstWith w s = case M.lookup w s of
+  Just (Spine (Var v) []) -> finishSubst $ M.insert v (var w) (M.delete w s)
+  _ -> s
+
+
