@@ -21,6 +21,23 @@ Goals
 
 * A language/system for conversing with the machine in a manner less one sided and instructional than regular programming.
 
+Philosophies 
+------------
+
+* Metaprogramming should be easy and thus first class.
+
+* User facing code should not crash - runtime code should be type checked.
+
+* Metacode should be optionally typechecked, but well type checked.
+
+* Metaprogramming should not require AST traversal.  
+
+* your programming language should be turing complete - totality checking is annoying.
+
+* Syntax should be elegant.
+
+* Primitives should be minimal, libraries should be extensive.  Learning a culture is easy if you speak the language.  Learning a language by cultural immersion isn't as trivial.
+
 Features
 --------
 
