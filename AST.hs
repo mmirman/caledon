@@ -59,6 +59,7 @@ instance Show Variable where
   show (Cons n) = n
 showWithParens t = if (case t of
                           Forall _ _ _ -> True
+                          ForallImp _ _ _ -> True
                           Atom (Spine _ lst) -> not $ null lst
                           Atom (Abs _ _ _) -> True
                           Atom (AbsImp _ _ _) -> True

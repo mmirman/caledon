@@ -69,12 +69,12 @@ trm =  parens trm
           (nm,tp) <- parens anonNamed <|> anonNamed
           reservedOp "."
           tp' <- tmpState nm trm
-          return $ AbsImp nm tp tp'
+          return $ Abs nm tp tp'
    <|> do reservedOp "?λ" <|> reservedOp "?\\"
           (nm,tp) <- parens anonNamed <|> anonNamed
           reservedOp "."
           tp' <- tmpState nm trm
-          return $ Abs nm tp tp'          
+          return $ AbsImp nm tp tp'          
    <|> do t <- pAtom
           tps <- many $ (parens tipe) <|> (Atom <$> pAtom)
           return $ rebuildSpine t tps

@@ -59,9 +59,11 @@ unify envE env constraint@(a :=: b) =
 
   in case a :=: b of
     _ :=: _ | a > b -> unify' env $ b :=: a
+                       
     AbsImp n ty t :=: _ -> do
       (v',s) <- solve $ (M.toList envE)++(M.toList env) :|- ty
       unify' env $ subst s (subst (n |-> v') t) :=: (subst s b)
+      
     Abs n ty t :=: Abs n' ty' t' -> do  
       s <- unify'' $ tpToTm ty :=: tpToTm ty'
       nm <- getNew
@@ -76,6 +78,8 @@ unify envE env constraint@(a :=: b) =
       return mempty
     Spine (Var a) [] :=: _ | not (M.member a env) && (not $ S.member a $ freeVariables b) -> 
       return $ a |-> b
+      
+    
     Spine (Var a) m :=: Spine (Var a') n | a == a' && M.member a env && length m == length n ->  -- the var has the same rule whether it is quantified or not.
       doUntoBoth m n
       
@@ -135,6 +139,7 @@ unify envE env constraint@(a :=: b) =
           baseG = Spine (Var h) (snd <$> zs)
           g' = foldr' (\(v,vt) t -> Abs v vt t) baseG ys'
       return (sub *** (f |-> f' *** g |-> g'))
+
       
     _ :=: _ -> badConstraint
 
