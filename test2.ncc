@@ -1,0 +1,20 @@
+{-defn num  : atom
+  as zero = num
+   | succ = num -> num
+
+defn add   : num -> num -> num -> atom
+  as add-z = [N] add zero N N
+   | add-s = [N][M][R] add N M R -> add (succ N) M (succ R)
+
+query sum-1 = add (succ zero) (succ (succ zero)) 'v
+query sum-2 = add (succ zero) 'v (succ (succ (succ zero)))
+query sum-3 = add zero (succ zero) 'v
+-}
+defn maybe : atom -> atom
+  as just = [A : atom] A -> maybe A
+   | nothing = [A : atom] maybe A
+
+defn maybeFSUM : [a : atom] [b : atom] (a -> b) -> maybe a -> maybe b -> atom
+  as maybe_FSUM_just = [A : atom][B : atom][V : A][F : A -> B] 
+                  maybeFSUM {A} {B} F (just {A} V) (just {A} (F V))
+

@@ -240,26 +240,29 @@ checkTerm env v t = case v of
       -- in the mean time, assume there is only one use of each unbound variable
     Just t' -> trace ("\tis "++show t') $ do
       tell [tpToTm t' :=: tpToTm t]
+      
   TyApp a b -> do
-    nm <- (++"tyapp") <$> getNew
-    tv1 <- Atom <$> Var <$> getNew
-    tv2 <- Atom <$> Var <$> getNew
-    tell [ tpToTm tv1 :=: tpToTm (Forall nm tv2 t)]    
-    checkTerm env a          tv1
-    checkTerm env (tpToTm b) tv2  
+    nm <- getNew
+    tv2 <- Var <$> getNew
+    tell [tpToTm b :=: Var nm]    
+    checkTerm env a          $ Forall nm (Atom tv2) t
+    checkTerm env (tpToTm b) $ Atom tv2
+    
   App a b -> do
     v1 <- Atom <$> Var <$> getNew
-    checkTerm env a $ v1 :->: t
-    checkTerm env b v1
+    checkTerm env a (v1 :->: t)
+    checkTerm env b v1    
+    
   Abstract nm ty tm -> do
     v1 <- (++'-':nm) <$> getNew
     v2 <- Atom <$> Var <$> getNew
-    tell [tpToTm t :=: tpToTm (Atom (Var v1) :->: v2)]
-    (_,newconstraints) <- listens id $ checkTerm (M.insert v1 ty env) (subst (nm |-> Var v1) tm) v2
-    s <- trace (show newconstraints) $ lift $ genUnifyEngine newconstraints
+    (_,newconstraints) <- listens id $ do
+      tell [tpToTm t :=: tpToTm (Atom (Var v1) :->: v2 )]    
+      checkTerm (M.insert v1 ty env) (subst (nm |-> Cons v1) tm) v2
+    s <- lift $ genUnifyEngine newconstraints
     let s' = M.delete v1 s
     tell $ map (\(s,i) -> Var s :=: i) $ M.toList s'
-    return ()
+
 
 addVarsTm t = case t of
   App t1 t2 -> do
