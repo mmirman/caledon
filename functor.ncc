@@ -1,0 +1,8 @@
+defn maybe : atom → atom
+  as nothing = {a} maybe a
+   | just = {a} a → maybe a
+
+defn maybe_fsum : {a}{b} (a → b) → maybe a → maybe b → atom
+  as maybe_fsum_just = {a}{b}[F : _ → b][av : a]
+                       maybe_fsum F (just av) (just (F av))
+
