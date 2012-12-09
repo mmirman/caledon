@@ -1,2 +1,0 @@
-defn maybe : [a : atom] a -> atom
-  as maybe_just = [a : atom][ va ] maybe a va

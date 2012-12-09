@@ -1,0 +1,18 @@
+defn num  : atom
+  as zero = num
+   | succ = num → num
+
+defn add   : num → num → num → atom
+  as add_z = {N} add zero N N
+   | add_s = {N}{M}{R} add N M R → add (succ N) M (succ R)
+
+defn sub   : num → num → num → atom
+  as sub_with_add : {N}{M}{R} sub N M R ← add N R M
+
+defn maybe : atom → atom
+  as nothing = {a} maybe a
+   | just = {a} a → maybe a
+
+defn list : atom → atom
+  as nil = {a} nil a
+   | cons = {a} a → list a → list a
