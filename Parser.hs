@@ -56,14 +56,14 @@ atom =  do reserved "_"
 trm =  parens trm 
    <|> do t <- atom
           tl <- many $ (flip TyApp <$> braces tipe) <|> (flip App <$> (atom <|> parens trm))
---          tl <- many $ (flip TyApp <$> parens tipe) <|> (flip TyApp <$> Atom <$> atom)
+--          tl <- many $ (flip TyApp <$> braces tipe) <|> (flip TyApp <$> Atom <$> atom)
           return $ foldl (flip ($)) t tl 
    <?> "term"
 
 imp = Forall ""
 
-table = [ [binary "->" {- imp -} (:->:) AssocRight] 
-        , [binary "<-" (flip  {- imp -} (:->:)) AssocLeft] 
+table = [ [binary "->" (:->:) AssocRight] 
+        , [binary "<-" (flip (:->:)) AssocLeft] 
         ]
   where  binary  name fun assoc = Infix (reservedOp name >> return fun) assoc
          

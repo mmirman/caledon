@@ -28,6 +28,7 @@ import Data.Foldable as F (msum, forM_, fold, Foldable)
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Debug.Trace
+import Data.List
 
 --------------------------------------------------------------------
 ----------------------- UNIFICATION --------------------------------
@@ -87,14 +88,14 @@ unify = nextConstraint $ \(t, constraint@(a :=: b)) -> let
     _ :=: Hole -> return () -- its a hole, what can we say?
     Var v :=: _ -> case b of
       Var v' | v == v' -> return ()
-      _ | S.member v (freeVariables b) -> throwError $ "occurs: " ++ show constraint      
+      _ | S.member v (freeVariables b) -> throwError $ "occurs: " ++ show constraint
       _ -> case t ! v of 
         Nothing -> v +|-> b
         Just s -> putConstraints [s :=: b]
     Abstract n ty t :=: Abstract n' ty' t' -> do  
-      putConstraints [ tpToTm ty :=: tpToTm ty' ]
-      nm <- getNew
-      putConstraints [ subst (n |-> Var nm) t :=: subst (n' |-> Var nm) t' ]
+      nm <- (++'@':n) <$> getNew
+      putConstraints [ tpToTm ty :=: tpToTm ty' 
+                     , subst (n |-> Cons nm) t :=: subst (n' |-> Cons nm) t' ]
     Cons nm :=: Cons nm' -> do
       unless (nm == nm') badConstraint 
     App a b :=: App a' b' -> do
@@ -138,7 +139,7 @@ left :: Judgement -> Reification
 left judge@((x,f):context :|- r) = case f of
   Atom _ -> unifier [(x,f)] r
   Forall nm t1 t2 -> do
-    nm' <- getNew
+    nm' <- (++'@':nm) <$> getNew
     y <- getNew
     (m,so) <- left $ (y,subst (nm |-> Var nm') t2):context :|- r
     let n = case M.lookup nm' so of
@@ -208,15 +209,31 @@ instance ToTm Tp where
 instance (ToTm t) => ToTm (Maybe t) where
   tpToTm (Just t) = tpToTm t
   tpToTm Nothing = Hole
+{-
 
+    forall \a      :atom.forall \b     :atom.maybe a -> maybe b -> atom
+:=: forall \12tyapp:atom.forall \9tyapp:atom.8 -> 7 -> 6
+
+    forall \a      :atom.(maybe a) 
+:=: forall \15tyapp:atom.8
+
+    forall \a      :atom.maybe a 
+:=: forall \18tyapp:atom.7
+
+--------------------------------------------------------
+
+    forall \a      :atom.forall \b     :atom.maybe a -> maybe b -> atom
+:=: forall \12tyapp:atom.forall \9tyapp:atom.maybe 12tyapp -> maybe 9tyapp -> atom
+
+-}
 checkTerm :: Environment -> Tm -> Tp -> WriterT [Constraint Tm] (StateT Integer Choice) ()
 checkTerm env v t = case v of
-  Cons nm -> case env ! nm of
+  Cons nm -> trace ("cons "++show v++" : "++show t) $ case env ! nm of
     Nothing -> error $ nm++" was not found in the environment in "++show v
-    Just t' -> do
+    Just t' -> trace ("\tis "++show t') $ do
         tell [tpToTm t' :=: tpToTm t]
   Var nm -> trace ("var "++show v++" : "++show t) $ case env ! nm of
-    Nothing -> do 
+    Nothing -> do
       (t'',s) <- lift $ solve $ M.toList env :|- t
       tell [t'' :=: v]  
       -- I'm not sure this makes sense at all.
@@ -224,7 +241,7 @@ checkTerm env v t = case v of
     Just t' -> trace ("\tis "++show t') $ do
       tell [tpToTm t' :=: tpToTm t]
   TyApp a b -> do
-    nm <- getNew
+    nm <- (++"tyapp") <$> getNew
     tv1 <- Atom <$> Var <$> getNew
     tv2 <- Atom <$> Var <$> getNew
     tell [ tpToTm tv1 :=: tpToTm (Forall nm tv2 t)]    
@@ -232,16 +249,14 @@ checkTerm env v t = case v of
     checkTerm env (tpToTm b) tv2  
   App a b -> do
     v1 <- Atom <$> Var <$> getNew
-    v2 <- Atom <$> Var <$> getNew
-    tell [tpToTm v2 :=: tpToTm (v1 :->: t)]    
-    checkTerm env a v2
+    checkTerm env a $ v1 :->: t
     checkTerm env b v1
   Abstract nm ty tm -> do
-    v1 <- (++'@':nm) <$> getNew
+    v1 <- (++'-':nm) <$> getNew
     v2 <- Atom <$> Var <$> getNew
-    tell [tpToTm t :=: tpToTm (Atom (Var v1) :->: v2 )]    
+    tell [tpToTm t :=: tpToTm (Atom (Var v1) :->: v2)]
     (_,newconstraints) <- listens id $ checkTerm (M.insert v1 ty env) (subst (nm |-> Var v1) tm) v2
-    s <- lift $ genUnifyEngine newconstraints
+    s <- trace (show newconstraints) $ lift $ genUnifyEngine newconstraints
     let s' = M.delete v1 s
     tell $ map (\(s,i) -> Var s :=: i) $ M.toList s'
     return ()
@@ -272,13 +287,13 @@ addVars t = case t of
     return $ t1' :->: t2'
 getCons tm = case tm of
   Cons t -> return t
-  App t1 t2 -> getCons t1
-  TyApp t1 t2 -> getCons t1
+  App t1 _ -> getCons t1
+  TyApp t1 _ -> getCons t1
   _ -> throwError $ "can't place a non constructor term here: "++ show tm
 getPred tp = case tp of
   Atom t -> getCons t
   Forall _ _ t -> getPred t
-  t1 :->: t2 -> getPred t2
+  _ :->: t2 -> getPred t2
   
 -- need to do a topological sort of types and predicates.
 -- such that types get minimal correct bindings
