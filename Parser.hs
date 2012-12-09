@@ -71,21 +71,27 @@ trm =  parens trm
           (nm,tp) <- parens anonNamed <|> anonNamed
           reservedOp "."
           tp' <- tmpState nm trm
-          return $ Abs nm tp tp'
+          return $ AbsImp nm tp tp'
+   <|> do reservedOp "?λ" <|> reservedOp "?\\"
+          (nm,tp) <- parens anonNamed <|> anonNamed
+          reservedOp "."
+          tp' <- tmpState nm trm
+          return $ Abs nm tp tp'          
    <|> do t <- pAtom
           tps <- many $ (parens tipe) <|> (Atom <$> pAtom)
           return $ rebuildSpine t tps
    <?> "term"
 
-imp = Forall ""
+fall = Forall ""
+fallImp = ForallImp ""
 
-table = [ [ binary "->" imp AssocRight
-          , binary "→" imp AssocRight
+table = [ [ binary (reservedOp "->" <|> reservedOp "→") fall AssocRight
+          , binary (reservedOp "=>" <|> reservedOp "⇒") fallImp AssocRight
           ] 
-        , [binary "<-" (flip  imp) AssocLeft
-          , binary "←" (flip  imp) AssocLeft ] 
+        , [ binary (reservedOp "<-" <|> reservedOp "←") (flip fall) AssocLeft
+          , binary (reservedOp "<=" <|> reservedOp "⇐") (flip fallImp) AssocLeft ]
         ]
-  where  binary  name fun assoc = Infix (reservedOp name >> return fun) assoc
+  where  binary  name fun assoc = Infix (name >> return fun) assoc
          
  
 dec_tipe = (getId lower, ":")
@@ -125,6 +131,14 @@ tipe = buildExpressionParser table (
            reservedOp "."
            tp' <- tmpState nm tipe
            return $ Forall nm tp tp'
+    <|> do (nm,tp) <- braces anonNamed 
+           tp' <- tmpState nm tipe
+           return $ ForallImp nm tp tp'           
+    <|> do reservedOp "?∀" <|> reserved "?forall"
+           (nm,tp) <- parens anonNamed <|> anonNamed
+           reservedOp "."
+           tp' <- tmpState nm tipe
+           return $ ForallImp nm tp tp'     
            
     <?> "type")
            
@@ -132,8 +146,8 @@ P.TokenParser{..} = P.makeTokenParser $ mydef
 mydef = haskellDef 
  { P.identStart = lower
  , P.identLetter = alphaNum <|> oneOf "_'-/"
- , P.reservedNames = ["defn", "as", "query", "forall", "exists", "_"]
+ , P.reservedNames = ["defn", "as", "query", "forall", "?forall", "_"]
  , P.caseSensitive = True
- , P.reservedOpNames = ["->", "→", "<-", "←", ":", "|", "\\", "λ", "∀", "."]
+ , P.reservedOpNames = ["->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", ":", "|", "\\", "λ","?\\", "?λ", "∀", "?∀", "."]
  }
 getId start = P.identifier $ P.makeTokenParser $ mydef { P.identStart = start }

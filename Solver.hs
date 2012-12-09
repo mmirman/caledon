@@ -110,15 +110,16 @@ checkVariable env v t = case v of
     Just t' -> do
       tell [tpToTm t' :=: tpToTm t]
       return t'
+      
 checkTerm :: Environment -> Tm -> Tp -> NatDeduct (Tm,Tp)
 checkTerm env v t = case v of
   Spine a l -> do
-    nm <- (++'α':show a) <$> getNew
-    tv1 <- (++':':show a) <$> getNew
+    nm   <- (++'α':show a) <$> getNew
+    tv1  <- (++':':show a) <$> getNew
     tv2l <- forM l $ \b -> do
       bty <- getNew
       nm' <- getNew
-      t' <- checkTerm env (tpToTm b) $ Atom $ var bty
+      t'  <- checkTerm env (tpToTm b) $ Atom $ var bty
       return (nm',t')
       
     tv1' <- checkVariable env a $ Atom $ var $ tv1
@@ -126,11 +127,23 @@ checkTerm env v t = case v of
     tell [ tpToTm tv1' :=: tpToTm (foldr (\(nm,b) tp -> Forall nm (snd b) tp) t tv2l ) ]
     return $ (Spine a $ map (Atom . fst . snd) tv2l, t)
         
+  AbsImp nm ty tm -> do  
+    ty' <- checkTipe env ty
+    v1  <- (++':':'<':nm) <$> getNew
+    nm' <- (++'@':nm) <$> getNew
+    v2  <- (++':':'>':nm) <$> getNew
+    tell [ tpToTm (ForallImp v1 ty $ Atom $ var v2) :=: tpToTm t ]
+    ((tm',t'),constraints) <- listen $ checkTerm (M.insert nm' ty env) (subst (nm |-> var nm') tm) $ Atom $ var v2
+    s <- finishSubstWith nm' <$> (lift $ genUnifyEngine constraints)
+    tell $ map (\(s,t) -> var s :=: t ) $ M.toList s
+    let s' = s *** nm' |-> var nm 
+    return $ (AbsImp nm ty' $ subst s' tm' , ForallImp v1 ty t')
+    
   Abs nm ty tm -> do
     ty' <- checkTipe env ty
-    v1 <- (++':':'<':nm) <$> getNew
+    v1  <- (++':':'<':nm) <$> getNew
     nm' <- (++'@':nm) <$> getNew
-    v2 <- (++':':'>':nm) <$> getNew
+    v2  <- (++':':'>':nm) <$> getNew
 
     tell [ tpToTm (Forall v1 ty $ Atom $ var v2) :=: tpToTm t ]
     
@@ -145,6 +158,9 @@ checkTipe env v = case v of
   Atom tm -> do
     (a,t) <- checkTerm env tm atom
     return $ Atom a
+  ForallImp nm ty t -> do
+    Forall nm' ty' t' <- checkTipe env (Forall nm ty t)
+    return $ ForallImp nm' ty' t'
   Forall nm ty t -> do
     ty' <- checkTipe env ty
     nm' <- (++'*':nm) <$> getNew
@@ -163,6 +179,7 @@ getCons tm = case tm of
 getPred tp = case tp of
   Atom t -> getCons t
   Forall _ _ t -> getPred t
+  ForallImp _ _ t -> getPred t
 
 -- need to do a topological sort of types and predicates.
 -- such that types get minimal correct bindings

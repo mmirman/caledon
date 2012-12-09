@@ -51,6 +51,11 @@ unify env constraint@(a :=: b) =
 
   in case a :=: b of
     _ :=: _ | a > b -> unify env $ b :=: a
+    AbsImp n ty t :=: AbsImp n' ty' t' -> do
+      s <- unify' $ tpToTm ty :=: tpToTm ty'
+      nm <- getNew
+      s' <- unify (subst s $ M.insert nm ty env) $ subst (M.insert n (var nm) s) t :=: subst (M.insert n' (var nm) s) t'
+      return $ s *** M.delete nm s'
     Abs n ty t :=: Abs n' ty' t' -> do  
       s <- unify' $ tpToTm ty :=: tpToTm ty'
       nm <- getNew

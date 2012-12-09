@@ -20,7 +20,8 @@ data Variable = Var  Name
               | Cons Name
               deriving (Ord, Eq)
                        
-data Tm = Abs Name Tp Tm
+data Tm = AbsImp Name Tp Tm
+        | Abs Name Tp Tm
         | Spine Variable [Tp] 
         deriving (Eq, Ord)
                  
@@ -32,6 +33,7 @@ data Constraint a = a :=: a
 
 data Tp = Atom Tm
         | Forall Name Tp Tp
+        | ForallImp Name Tp Tp
         deriving (Eq, Ord)
 
 data Predicate = Predicate { predName::Name
@@ -61,6 +63,7 @@ showWithParens t = if (case t of
 
 instance Show Tm where
   show (Abs nm ty tm) = "λ "++nm++" : "++showWithParens ty++" . "++show tm
+  show (AbsImp nm ty tm) = "?λ "++nm++" : "++showWithParens ty++" . "++show tm
   show (Spine cons apps) = show cons++concatMap (\s -> " "++showWithParens s) apps
 instance Show Tp where
   show t = case t of
@@ -70,6 +73,12 @@ instance Show Tp where
               Forall _ _ _ -> "(" ++ show t ++ ")"
               _ ->  show t
     Forall nm ty t -> "∀ "++nm++" : "++show ty++" . "++show t
+    
+    ForallImp nm t t' | not (S.member nm (freeVariables t')) -> showWithParens++" ⇒ "++ show t'
+      where showWithParens = case t of
+              Forall _ _ _ -> "(" ++ show t ++ ")"
+              _ ->  show t
+    ForallImp nm ty t -> "?∀ "++nm++" : "++show ty++" . "++show t
   
 instance Show Judgement where 
   show (a :|- b) =  removeHdTl (show a) ++" ⊢ "++ show b
@@ -152,5 +161,5 @@ class ToTm t where
   tpToTm :: t -> Tm
 instance ToTm Tp where
   tpToTm (Forall n ty t) = Spine (Cons "forall") [Atom $ Abs n ty $ tpToTm t ]
---  tpToTm (Forall n ty t) = Abs n ty $ tpToTm t
+  tpToTm (ForallImp n ty t) = Spine (Cons "forall") [Atom $ AbsImp n ty $ tpToTm t ]
   tpToTm (Atom tm) = tm
