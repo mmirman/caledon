@@ -2,7 +2,9 @@ Name: caledon
 
 Version: 0.0.0.0
 
-Description: 
+Description:         a dependently typed, polymorphic, higher order logic programming language. ie, everything you need to have a conversation with your computer.
+
+Synopsis:            a dependently typed, polymorphic, higher order logic programming language
 
 Homepage:            https://github.com/mmirman/caledon
 
