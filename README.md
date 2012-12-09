@@ -1,5 +1,5 @@
-Caledon Language  ![logo](/media/logo.png)
-==========================================
+Caledon Language  ![logo](/mmirman/caledon/blob/hopa/media/logo.png)
+====================================================================
 
 Caledon is a dependently typed, polymorphic, higher order logic programming language. ie, everything you need to have a conversation with your computer.
 
