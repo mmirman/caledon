@@ -1,6 +1,7 @@
 {-# LANGUAGE  
  DeriveFunctor,
- FlexibleInstances
+ FlexibleInstances,
+ PatternGuards
  #-}
 module AST where
 

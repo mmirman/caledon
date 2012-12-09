@@ -1,9 +1,7 @@
 {-# LANGUAGE 
  DeriveFunctor, 
- FlexibleContexts, 
- TypeSynonymInstances, 
- FlexibleInstances, 
- MultiParamTypeClasses
+ FlexibleContexts,
+ TypeSynonymInstances
  #-}
 
 module Choice where

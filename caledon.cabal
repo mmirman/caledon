@@ -1,9 +1,44 @@
-name: caledon
-version: 0.0
-build-type: Simple
-cabal-version: >= 1.2
+Name: caledon
+
+Version: 0.0.0.0
+
+Description: 
+
+Homepage:            https://github.com/mmirman/caledon
+
+License:             GPL-3
+
+License-file:        LICENSE
+
+Author:              Matthew Mirman
+
+Maintainer:          Matthew Mirman <mmirman@andrew.cmu.edu>
+
+Category:            Language, Interpreter
+
+Build-type: Simple
+
+Cabal-version: >= 1.6
+
+Source-repository head
+  Type:     git
+  Location: git://github.com/mmirman/caledon.git
 
 executable caledon
   main-is: Main.hs
-  build-depends: parsec, mtl, base, containers, transformers
   other-modules: Solver, Choice, Parser
+
+  Build-depends: base >= 4.0 && < 5.0,
+                 mtl >= 2.0 && < 3.0,
+                 parsec >= 3.0 && < 4.0, 
+                 containers >= 0.4 && < 1.0, 
+                 transformers >= 0.3 && < 1.0
+
+  Extensions: DeriveFunctor,
+              FlexibleContexts,
+              FlexibleInstances,
+              MultiParamTypeClasses,
+              PatternGuards,
+              RecordWildCards,
+              TupleSections,
+              TypeSynonymInstances
