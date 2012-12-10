@@ -65,6 +65,8 @@ defn trm : atom
 -- we can check that a term is linear!
 defn linear : (trm → trm) → atom
   as linear_var = linear ( λ v . v )
+   | linear_lam = {N} linear (λ v . lam (λ x . N x v)) 
+                ← [x] linear (λ v . N x v)
    | linear_app1 = {V}{F} linear (λ v . app (F v) V) 
                         ← linear F
    | linear_app2 = ?∀ V . ?∀ F . linear (λ v . app F (V v)) 
