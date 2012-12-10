@@ -32,7 +32,7 @@ Philosophies
 
 * Metaprogramming should not require AST traversal.  
 
-* your programming language should be turing complete - totality checking is annoying.
+* Your programming language should be turing complete - totality checking is annoying.
 
 * Syntax should be elegant.
 
@@ -122,3 +122,5 @@ Usage
 * To install, cabal install
 
 * To run, caledon file.ncc
+
+* Unicode syntax is possible in haskell with M-x \ TeX <ENTER>
