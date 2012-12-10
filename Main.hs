@@ -5,8 +5,7 @@ import Choice
 import Solver
 import Parser
 import System.Environment
-import Data.Foldable as F (msum, forM_)
-import Data.Functor
+import Data.Foldable as F (forM_)
 import Data.List (partition)
 import Text.Parsec
 import Data.Monoid
@@ -15,7 +14,9 @@ import Data.Monoid
 -------------------------- MAIN ---------------------------------------
 -----------------------------------------------------------------------
 checkAndRun decs = do
-  
+  putStrLn $ "\nAXIOMS: "
+  forM_ decs  $ \s -> putStrLn $ show s++"\n"
+                            
   putStrLn "\nTYPE CHECKING: "
   decs <- case runError $ typeCheckAll $ decs of
     Left e -> error e

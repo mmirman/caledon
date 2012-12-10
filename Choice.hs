@@ -10,12 +10,8 @@ module Choice where
 import Control.Monad
 import Data.Functor
 import Control.Applicative
-import Control.Monad.Error (ErrorT, runErrorT)
 import Control.Monad.Error.Class (catchError, throwError, MonadError)
 import Control.Monad.State.Class
-import Control.Monad.Trans.Class
-import Control.Monad.Trans.Maybe
-import Data.Maybe
 
 data Choice a = Choice a :<|>: Choice a 
               | Fail String
@@ -53,14 +49,15 @@ instance RunChoice Choice where
     _ -> error "this result makes no sense"
     where lst = chs:queue lst 1
           
-          queue l 0 = []
+          queue _ 0 = []
+          queue [] _ = error "queue size should be empty when queu is empty"
           queue ((a :<|>: b):l) q = a:b:queue l (q + 1)
           queue (_:l) q = queue l (q - 1)
           
-          notFail (Fail a) = False
+          notFail (Fail _) = False
           notFail _ = True
           
-          notSuccess (Success a) = False
+          notSuccess (Success _) = False
           notSuccess _ = True
   
 appendErr :: (MonadError String m) => String -> m a -> m a

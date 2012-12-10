@@ -12,6 +12,7 @@ import Data.Monoid
 import Data.Functor
 import qualified Data.Map as M
 import qualified Data.Set as S
+
 --------------------------------------------------------------------
 ----------------------- DATA TYPES ---------------------------------
 --------------------------------------------------------------------
@@ -21,9 +22,13 @@ data Variable = Var  Name
               | Cons Name
               deriving (Ord, Eq)
                        
+data Argument = Impl { getTipe :: Tp } 
+              | Norm  { getTipe :: Tp }
+              deriving (Eq, Ord)
+
 data Tm = AbsImp Name Tp Tm
         | Abs Name Tp Tm
-        | Spine Variable [Tp] 
+        | Spine Variable [Argument] 
         deriving (Eq, Ord)
                  
 var nm = Spine (Var nm) []
@@ -57,6 +62,7 @@ atom = Atom $ cons "atom"
 instance Show Variable where
   show (Var n)  = n
   show (Cons n) = n
+  
 showWithParens t = if (case t of
                           Forall _ _ _ -> True
                           ForallImp _ _ _ -> True
@@ -65,10 +71,13 @@ showWithParens t = if (case t of
                           Atom (AbsImp _ _ _) -> True
                       ) then "("++show t++")" else show t 
 
+instance Show Argument where
+  show (Impl t) = "{"++show t++"}"
+  show (Norm t) = showWithParens t
 instance Show Tm where
   show (Abs nm ty tm) = "λ "++nm++" : "++showWithParens ty++" . "++show tm
   show (AbsImp nm ty tm) = "?λ "++nm++" : "++showWithParens ty++" . "++show tm
-  show (Spine cons apps) = show cons++concatMap (\s -> " "++showWithParens s) apps
+  show (Spine cons apps) = show cons++concatMap (\s -> " "++show s) apps
 instance Show Tp where
   show t = case t of
     Atom t -> show t
@@ -109,10 +118,13 @@ m1 *** m2 = M.union m2 (subst m2 <$> m1)
 (!) = flip M.lookup
 
 
-rebuildSpine :: Tm -> [Tp] -> Tm
+rebuildSpine :: Tm -> [Argument] -> Tm
 rebuildSpine s [] = s
 rebuildSpine (Spine c apps) apps' = Spine c (apps ++ apps')
-rebuildSpine (Abs nm _ rst) (a:apps') = rebuildSpine (subst (nm |-> tpToTm a) $ rst) apps'
+rebuildSpine (Abs nm _ rst) (Norm a:apps') = rebuildSpine (subst (nm |-> toTm a) $ rst) apps'
+rebuildSpine a@(Abs _ _ _) b@(Impl _:_) = error $ "attempting to apply an implied argument to a regular term: "++show a++" "++show b
+rebuildSpine (AbsImp nm _ rst) (Impl a:apps') = rebuildSpine (subst (nm |-> toTm a) $ rst) apps'
+rebuildSpine (AbsImp nm ty rst) apps' = AbsImp nm ty (rebuildSpine rst apps')
 
 newName nm s = (nm',s')
   where s' = if nm == nm' then s else M.insert nm (var nm') s 
@@ -133,6 +145,8 @@ instance Subst Tm where
     case head of
       Var nm | Just head' <- s ! nm -> rebuildSpine head' apps'
       _ -> Spine head apps'
+instance Subst Argument where
+  subst s a = a { getTipe = subst s $ getTipe a}
 instance Subst Tp where
   subst s t = case t of
     Atom t -> Atom $ subst s t
@@ -151,15 +165,17 @@ class FV a where
   
 instance (FV a, F.Foldable f) => FV (f a) where
   freeVariables m = F.foldMap freeVariables m
+instance FV Argument where  
+  freeVariables = freeVariables . getTipe
 instance FV Tp where
   freeVariables t = case t of
-    Forall a ty t -> (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
-    ForallImp a ty t -> (S.delete a $ freeVariables t) `S.union` (freeVariables ty)
+    Forall a ty t -> (S.delete a $ freeVariables t) `mappend` (freeVariables ty)
+    ForallImp a ty t -> (S.delete a $ freeVariables t) `mappend` (freeVariables ty)
     Atom a -> freeVariables a
 instance FV Tm where
   freeVariables t = case t of
-    Abs nm t p -> S.delete nm $ freeVariables p
-    AbsImp nm t p -> S.delete nm $ freeVariables p    
+    Abs nm t p -> (S.delete nm $ freeVariables p) -- `mappend` freeVariables t
+    AbsImp nm t p -> (S.delete nm $ freeVariables p) -- `mappend` freeVariables t
     Spine head others -> mappend (freeVariables head) $ mconcat $ freeVariables <$> others
 instance FV Variable where    
   freeVariables (Var a) = S.singleton a
@@ -167,9 +183,11 @@ instance FV Variable where
 instance (FV a,FV b) => FV (a,b) where 
   freeVariables (a,b) = freeVariables a `S.union` freeVariables b
   
-class ToTm t where
-  tpToTm :: t -> Tm
-instance ToTm Tp where
-  tpToTm (Forall n ty t) = Spine (Cons "forall") [Atom $ Abs n ty $ tpToTm t ]
-  tpToTm (ForallImp n ty t) = AbsImp n ty $ tpToTm t
-  tpToTm (Atom tm) = tm
+class ToTm t where  
+  toTm :: t -> Tm
+instance ToTm Argument where    
+  toTm t = toTm $ getTipe t
+instance ToTm Tp where  
+  toTm (Forall n ty t) = Spine (Cons "forall") [Norm $ Atom $ Abs n ty $ toTm t ]
+  toTm (ForallImp n ty t) = AbsImp n ty $ toTm t
+  toTm (Atom tm) = tm

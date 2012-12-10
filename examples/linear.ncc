@@ -3,4 +3,4 @@ defn trm : atom
    | app = trm -> trm -> trm
 
 defn linear : (trm -> trm) -> atom
-  as linear_var = linear ( λ V : trm . V )
+  as linear_var = linear (λ V : trm . V )

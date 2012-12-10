@@ -3,11 +3,8 @@ module Parser where
 
 import AST
 
-import Data.Foldable as F (msum, forM_)
 import Data.Functor
-import Text.Parsec.String
 import Text.Parsec
-import Data.Monoid
 import Control.Monad (unless)
 import Text.Parsec.Language (haskellDef)
 import Text.Parsec.Expr
@@ -61,10 +58,10 @@ pAtom =  do reserved "_"
             mp <- currentSet <$> getState 
             return $ (if S.member r mp then var else cons) r
 
-     <|> (tpToTm <$> parens tipe)
+     <|> (toTm <$> parens tipe)
      <?> "atom"
-  
-trm =  parens trm 
+
+trm =     parens trm 
    <|> do reservedOp "λ" <|> reservedOp "\\"
           (nm,tp) <- parens anonNamed <|> anonNamed
           reservedOp "."
@@ -76,7 +73,8 @@ trm =  parens trm
           tp' <- tmpState nm trm
           return $ AbsImp nm tp tp'          
    <|> do t <- pAtom
-          tps <- many $ (parens tipe) <|> (Atom <$> pAtom)
+          tps <- many $ (Impl <$> braces tipe)
+                 <|> (Norm <$> (parens tipe <|> (Atom <$> pAtom)))
           return $ rebuildSpine t tps
    <?> "term"
 
@@ -119,7 +117,7 @@ tmpState nm m = do
   return r
 
 tipe = buildExpressionParser table ( 
-        parens tipe
+        parens tipe 
     <|> (Atom <$> trm)
     <|> do (nm,tp) <- brackets anonNamed 
            tp' <- tmpState nm tipe

@@ -1,4 +1,4 @@
-defn num  : atom
+{-defn num  : atom
   as zero = num
    | succ = num → num
 
@@ -9,6 +9,7 @@ defn add   : num → num → num → atom
 defn sub   : num → num → num → atom
   as sub_with_add = {N}{M}{R} sub N M R ← add N R M
 
+
 defn maybe : atom → atom
   as nothing = {a} maybe a
    | just = {a} a → maybe a
@@ -16,3 +17,6 @@ defn maybe : atom → atom
 defn list : atom → atom
   as nil = {a} list a
    | cons = {a} a → list a → list a
+-}
+defn app : {a : atom} {b : atom} (a -> b -> atom) -> a -> b -> atom
+  as app_imp = {at: atom} {bt : atom}{foo :  at -> bt -> atom }{a}{b} (app foo a b <- foo a b)
