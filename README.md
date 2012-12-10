@@ -8,7 +8,7 @@ Background
 
 * This is part of my masters thesis.  Feedback would be appreciated. Considering this, it is still in the very early research stages.  Syntax is liable to change, there will be bugs, and it doesn't yet have IO (I'm still working out how to do IO cleanly, but this WILL come).
 
-* Its named caledon after the "New Caledonian Crow" - a crow which can make tools and meta tools.  Since this language supports meta programming with holes, implicits, polymorphism, and dependent types, I thought this crow might be a good masscot. Also, file extensions are ".ncc"
+* It's named caledon after the "New Caledonian Crow" - a crow which can make tools and meta tools.  Since this language supports meta programming with holes, implicits, polymorphism, and dependent types, I thought this crow might be a good masscot. Also, file extensions are ".ncc"
 
 * This language was inspired by twelf, haskell and agda.  
 
