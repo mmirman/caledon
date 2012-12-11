@@ -18,8 +18,8 @@ import qualified Data.Set as S
 --------------------------------------------------------------------
 type Name = String
               
-data Variable = Var  Name
-              | Cons Name
+data Variable = Var  {getName :: Name}
+              | Cons {getName :: Name}
               deriving (Ord, Eq)
                        
 data Argument = Impl { getTipe :: Tp } 
@@ -30,7 +30,7 @@ data Tm = AbsImp Name Tp Tm
         | Abs Name Tp Tm
         | Spine Variable [Argument] 
         deriving (Eq, Ord)
-                 
+
 var nm = Spine (Var nm) []
 cons nm = Spine (Cons nm) []
 
@@ -50,17 +50,15 @@ data Predicate = Predicate { predName::Name
                deriving (Eq)
 
 infixl 1 :|-
-data Judgement = (:|-) { antecedent :: [(Name,Tp)] , succedent :: Tp }
-
+data Judgement = (:|-) { antecedent :: [(Variable,Tp)] , succedent :: Tp }
 
 atom = Atom $ cons "atom"
-
 
 --------------------------------------------------------------------
 ----------------------- PRETTY PRINT -------------------------------
 --------------------------------------------------------------------
 instance Show Variable where
-  show (Var n)  = n
+  show (Var n)  = "?"++n
   show (Cons n) = n
   
 showWithParens t = if (case t of
@@ -120,6 +118,7 @@ m1 *** m2 = M.union m2 (subst m2 <$> m1)
 
 rebuildSpine :: Tm -> [Argument] -> Tm
 rebuildSpine s [] = s
+rebuildSpine (Spine (Cons "forall") [Norm (Atom a)]) apps' = rebuildSpine a apps'
 rebuildSpine (Spine c apps) apps' = Spine c (apps ++ apps')
 rebuildSpine (Abs nm _ rst) (Norm a:apps') = rebuildSpine (subst (nm |-> toTm a) $ rst) apps'
 rebuildSpine a@(Abs _ _ _) b@(Impl _:_) = error $ "attempting to apply an implied argument to a regular term: "++show a++" "++show b
@@ -174,8 +173,8 @@ instance FV Tp where
     Atom a -> freeVariables a
 instance FV Tm where
   freeVariables t = case t of
-    Abs nm t p -> (S.delete nm $ freeVariables p) -- `mappend` freeVariables t
-    AbsImp nm t p -> (S.delete nm $ freeVariables p) -- `mappend` freeVariables t
+    Abs nm t p -> (S.delete nm $ freeVariables p) `mappend` freeVariables t
+    AbsImp nm t p -> (S.delete nm $ freeVariables p)  `mappend` freeVariables t
     Spine head others -> mappend (freeVariables head) $ mconcat $ freeVariables <$> others
 instance FV Variable where    
   freeVariables (Var a) = S.singleton a
@@ -185,9 +184,29 @@ instance (FV a,FV b) => FV (a,b) where
   
 class ToTm t where  
   toTm :: t -> Tm
+
+  
 instance ToTm Argument where    
   toTm t = toTm $ getTipe t
+
 instance ToTm Tp where  
   toTm (Forall n ty t) = Spine (Cons "forall") [Norm $ Atom $ Abs n ty $ toTm t ]
   toTm (ForallImp n ty t) = AbsImp n ty $ toTm t
   toTm (Atom tm) = tm
+
+class ToTp t where
+  toTp :: t -> Tp  
+
+instance ToTp Tm where  
+  toTp (Spine (Cons "forall") [Norm (Atom (Abs nm ty t))]) = Forall nm (toTp ty) $ toTp t
+  toTp (Spine (Cons "forall") [Norm (Atom (AbsImp nm ty t))]) = ForallImp nm (toTp ty) $ toTp t
+  toTp a = Atom $ toTpInt a
+                     
+toTpInt (Spine c l) = Spine c (map (\a -> a { getTipe = toTp $ getTipe a}) l)
+toTpInt (Abs nm ty r) = Abs nm (toTp ty) (toTpInt r)
+toTpInt (AbsImp nm ty r) = AbsImp nm (toTp ty) (toTpInt r)
+
+instance ToTp Tp where
+  toTp (Forall nm ty1 ty2) = Forall nm (toTp ty1) (toTp ty2)
+  toTp (ForallImp nm ty1 ty2) = ForallImp nm (toTp ty1) (toTp ty2)
+  toTp (Atom t) = toTp t  

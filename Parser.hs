@@ -51,7 +51,8 @@ defn =  do
 
 pAtom =  do reserved "_"
             nm <- getNextVar
-            return $ var nm
+            mp <- currentSet <$> getState 
+            return $ Spine (Var nm) $ Norm <$> Atom <$> var <$> S.toList mp
      <|> do r <- id_var
             return $ var r
      <|> do r <- identifier
@@ -106,7 +107,8 @@ anonNamed = do
   nm <- ident
   ty <- optionMaybe $ reservedOp sep >> tipe
   nm' <- getNextVar
-  return (nm,fromMaybe (Atom $ var nm') ty)
+  mp <- currentSet <$> getState 
+  return (nm,fromMaybe (Atom $ Spine (Var nm') $ Norm <$> Atom <$> var <$> S.toList mp) ty)
 
 tmpState nm m = do
   s <- currentSet <$> getState

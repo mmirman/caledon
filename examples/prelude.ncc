@@ -18,5 +18,7 @@ defn list : atom → atom
   as nil = {a} list a
    | cons = {a} a → list a → list a
 -}
-defn app : {a : atom} {b : atom} (a -> b -> atom) -> a -> b -> atom
-  as app_imp = {at: atom} {bt : atom}{foo :  at -> bt -> atom }{a}{b} (app foo a b <- foo a b)
+
+defn app : [atz : _][btz : atom] (atz -> btz -> atom) -> atz -> btz -> atom
+  as app_imp = [at : _][bt : atom][a : at][b: bt][foo : at -> bt -> atom]
+               app at bt foo a b

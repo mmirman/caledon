@@ -5,6 +5,7 @@ import Choice
 import Solver
 import Parser
 import System.Environment
+import Data.Functor
 import Data.Foldable as F (forM_)
 import Data.List (partition)
 import Text.Parsec
@@ -14,9 +15,6 @@ import Data.Monoid
 -------------------------- MAIN ---------------------------------------
 -----------------------------------------------------------------------
 checkAndRun decs = do
-  putStrLn $ "\nAXIOMS: "
-  forM_ decs  $ \s -> putStrLn $ show s++"\n"
-                            
   putStrLn "\nTYPE CHECKING: "
   decs <- case runError $ typeCheckAll $ decs of
     Left e -> error e
@@ -34,7 +32,7 @@ checkAndRun decs = do
 
   let allTypes c = (predName c, predType c):predConstructors c
   forM_ targets $ \target -> 
-    case solver (concatMap allTypes predicates) $ predType target of
+    case solver ((\(a,b) -> (Cons a,b)) <$> concatMap allTypes predicates) $ predType target of
       Left e -> putStrLn $ "ERROR: "++e
       Right sub -> putStrLn $ 
                    "\nTARGET: \n"++show target
