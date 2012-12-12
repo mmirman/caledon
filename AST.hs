@@ -1,8 +1,5 @@
-{-# LANGUAGE  
- DeriveFunctor,
- FlexibleInstances,
- PatternGuards
- #-}
+{-# LANGUAGE DeriveFunctor, FlexibleInstances, PatternGuards #-}
+
 module AST where
 
 import qualified Data.Foldable as F
@@ -17,18 +14,18 @@ import qualified Data.Set as S
 ----------------------- DATA TYPES ---------------------------------
 --------------------------------------------------------------------
 type Name = String
-              
+
 data Variable = Var  {getName :: Name}
               | Cons {getName :: Name}
               deriving (Ord, Eq)
-                       
-data Argument = Impl { getTipe :: Tp } 
+
+data Argument = Impl { getTipe :: Tp }
               | Norm  { getTipe :: Tp }
               deriving (Eq, Ord)
 
 data Tm = AbsImp Name Tp Tm
         | Abs Name Tp Tm
-        | Spine Variable [Argument] 
+        | Spine Variable [Argument]
         deriving (Eq, Ord)
 
 var nm = Spine (Var nm) []
@@ -43,9 +40,9 @@ data Tp = Atom Tm
         deriving (Eq, Ord)
 
 data Predicate = Predicate { predName::Name
-                           , predType::Tp 
+                           , predType::Tp
                            , predConstructors::[(Name, Tp)]
-                           } 
+                           }
                | Query { predName :: Name, predType::Tp }
                deriving (Eq)
 
@@ -60,14 +57,14 @@ atom = Atom $ cons "atom"
 instance Show Variable where
   show (Var n)  = "?"++n
   show (Cons n) = n
-  
+
 showWithParens t = if (case t of
                           Forall _ _ _ -> True
                           ForallImp _ _ _ -> True
                           Atom (Spine _ lst) -> not $ null lst
                           Atom (Abs _ _ _) -> True
                           Atom (AbsImp _ _ _) -> True
-                      ) then "("++show t++")" else show t 
+                      ) then "("++show t++")" else show t
 
 instance Show Argument where
   show (Impl t) = "{"++show t++"}"
@@ -84,20 +81,20 @@ instance Show Tp where
               Forall _ _ _ -> "(" ++ show t ++ ")"
               _ ->  show t
     Forall nm ty t -> "∀ "++nm++" : "++show ty++" . "++show t
-    
+
     ForallImp nm t t' | not (S.member nm (freeVariables t')) -> showWithParens++" ⇒ "++ show t'
       where showWithParens = case t of
               Forall _ _ _ -> "(" ++ show t ++ ")"
               _ ->  show t
     ForallImp nm ty t -> "?∀ "++nm++" : "++show ty++" . "++show t
-  
-instance Show Judgement where 
+
+instance Show Judgement where
   show (a :|- b) =  removeHdTl (show a) ++" ⊢ "++ show b
-    where removeHdTl = reverse . tail . reverse . tail    
+    where removeHdTl = reverse . tail . reverse . tail
 
 instance Show Predicate where
   show (Predicate nm ty []) =  ""++"defn "++nm++" : "++show ty++";"
-  show (Predicate nm ty (a:cons)) = 
+  show (Predicate nm ty (a:cons)) =
       ""++"defn "++nm++" : "++show ty++"\n"
       ++  "  as "++showSingle a++concatMap (\x->
         "\n   | "++showSingle x) cons++";"
@@ -126,7 +123,7 @@ rebuildSpine (AbsImp nm _ rst) (Impl a:apps') = rebuildSpine (subst (nm |-> toTm
 rebuildSpine (AbsImp nm ty rst) apps' = AbsImp nm ty (rebuildSpine rst apps')
 
 newName nm s = (nm',s')
-  where s' = if nm == nm' then s else M.insert nm (var nm') s 
+  where s' = if nm == nm' then s else M.insert nm (var nm') s
         nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/") [0..]
         fv = mappend (M.keysSet s) (freeVariables s)
         free k = not $ S.member k fv
@@ -139,7 +136,7 @@ instance Subst Tm where
   subst s (Abs nm t rst) = Abs nm' (subst s t) $ subst s' rst
     where (nm',s') = newName nm s
   subst s (AbsImp nm t rst) = AbsImp nm' (subst s t) $ subst s' rst
-    where (nm',s') = newName nm s          
+    where (nm',s') = newName nm s
   subst s (Spine head apps) = let apps' = subst s <$> apps  in
     case head of
       Var nm | Just head' <- s ! nm -> rebuildSpine head' apps'
@@ -153,18 +150,18 @@ instance Subst Tp where
         where (nm',s') = newName nm s
     Forall nm ty t -> Forall nm' (subst s ty) $ subst s' t  -- THIS RULE is unsafe capture!
         where (nm',s') = newName nm s
-instance Subst Judgement where 
+instance Subst Judgement where
   subst foo (c :|- s) = subst foo c :|- subst foo s
 
 --------------------------------------------------------------------
 ----------------------- FREE VARIABLES -----------------------------
 --------------------------------------------------------------------
-class FV a where         
+class FV a where
   freeVariables :: a -> S.Set Name
-  
+
 instance (FV a, F.Foldable f) => FV (f a) where
   freeVariables m = F.foldMap freeVariables m
-instance FV Argument where  
+instance FV Argument where
   freeVariables = freeVariables . getTipe
 instance FV Tp where
   freeVariables t = case t of
@@ -176,32 +173,32 @@ instance FV Tm where
     Abs nm t p -> (S.delete nm $ freeVariables p) `mappend` freeVariables t
     AbsImp nm t p -> (S.delete nm $ freeVariables p)  `mappend` freeVariables t
     Spine head others -> mappend (freeVariables head) $ mconcat $ freeVariables <$> others
-instance FV Variable where    
+instance FV Variable where
   freeVariables (Var a) = S.singleton a
   freeVariables _ = mempty
-instance (FV a,FV b) => FV (a,b) where 
+instance (FV a,FV b) => FV (a,b) where
   freeVariables (a,b) = freeVariables a `S.union` freeVariables b
-  
-class ToTm t where  
+
+class ToTm t where
   toTm :: t -> Tm
 
-  
-instance ToTm Argument where    
+
+instance ToTm Argument where
   toTm t = toTm $ getTipe t
 
-instance ToTm Tp where  
+instance ToTm Tp where
   toTm (Forall n ty t) = Spine (Cons "forall") [Norm $ Atom $ Abs n ty $ toTm t ]
   toTm (ForallImp n ty t) = AbsImp n ty $ toTm t
   toTm (Atom tm) = tm
 
 class ToTp t where
-  toTp :: t -> Tp  
+  toTp :: t -> Tp
 
-instance ToTp Tm where  
+instance ToTp Tm where
   toTp (Spine (Cons "forall") [Norm (Atom (Abs nm ty t))]) = Forall nm (toTp ty) $ toTp t
   toTp (Spine (Cons "forall") [Norm (Atom (AbsImp nm ty t))]) = ForallImp nm (toTp ty) $ toTp t
   toTp a = Atom $ toTpInt a
-                     
+
 toTpInt (Spine c l) = Spine c (map (\a -> a { getTipe = toTp $ getTipe a}) l)
 toTpInt (Abs nm ty r) = Abs nm (toTp ty) (toTpInt r)
 toTpInt (AbsImp nm ty r) = AbsImp nm (toTp ty) (toTpInt r)
@@ -209,4 +206,4 @@ toTpInt (AbsImp nm ty r) = AbsImp nm (toTp ty) (toTpInt r)
 instance ToTp Tp where
   toTp (Forall nm ty1 ty2) = Forall nm (toTp ty1) (toTp ty2)
   toTp (ForallImp nm ty1 ty2) = ForallImp nm (toTp ty1) (toTp ty2)
-  toTp (Atom t) = toTp t  
+  toTp (Atom t) = toTp t
