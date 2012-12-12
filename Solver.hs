@@ -9,6 +9,7 @@ import Control.Monad (void, unless)
 import Control.Applicative ((<|>), empty)
 import Control.Monad.Error.Class
 import Control.Monad.State (StateT, runStateT)
+import Control.Monad.State.Class
 import Control.Monad.Writer (WriterT, runWriterT)
 import Control.Monad.Writer.Class
 import Control.Monad.Trans.Class
@@ -31,6 +32,7 @@ type Unification = VarGen Substitution
 getV = id
 setV a _ = a
 
+unifyAll :: M.Map Name Tp -> M.Map Name Tp -> ([Constraint Tm] -> VarGen (M.Map Name Tm))
 unifyAll _ _ [] = return mempty
 unifyAll envE env (a:l) = do
   s <- appendErr ("UNIFYING CONSTRAINT: "++show a) $ unify envE env a
@@ -139,6 +141,7 @@ unify envE env constraint@(a :=: b :@ from) =
 
     _ :=: _ -> badConstraint
 
+genUnifyEngine :: M.Map Name Tp -> [Constraint Tm] -> VarGen Substitution
 genUnifyEngine env consts = do
   s <- unifyAll env mempty consts
   return $ finishSubst s
@@ -304,16 +307,21 @@ instance CheckType Tp where
       intermediateUnify env oldBody (nm,nmTy) (body,atom)
       return atom
     -}
+
+getCons :: Tm -> VarGen String
 getCons tm = case tm of
   Spine (Cons t) _ -> return t
   Abs _ _ t -> getCons t
   _ -> throwError $ "can't place a non constructor term here: "++ show tm
 
+getPred :: Tp -> VarGen String
 getPred tp = case tp of
   Atom t -> getCons t
   Forall _ _ t -> getPred t
   ForallImp _ _ t -> getPred t
 
+--I think this type signature might be unnecessarily verbose
+getNewWith :: (Functor m, MonadState Integer m) => String -> m String
 getNewWith t = (++t) <$> getNew
 
 -- need to do a topological sort of types and predicates.

@@ -69,6 +69,7 @@ instance Show Variable where
   show (Var n)  = '\'':n
   show (Cons n) = n
 
+showWithParens :: Tp -> String
 showWithParens t = if (case t of
                           Forall _ _ _ -> True
                           ForallImp _ _ _ -> True
@@ -133,6 +134,7 @@ rebuildSpine a@(Abs _ _ _) b@(Impl _:_) = error $ "attempting to apply an implie
 rebuildSpine (AbsImp nm _ rst) (Impl a:apps') = rebuildSpine (subst (nm |-> toTm a) $ rst) apps'
 rebuildSpine (AbsImp nm ty rst) apps' = AbsImp nm ty (rebuildSpine rst apps')
 
+newName :: Name -> Substitution -> (Name, Substitution)
 newName nm s = (nm',s')
   where s' = if nm == nm' then s else M.insert nm (var nm') s
         nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/") [0..]
@@ -193,7 +195,6 @@ instance (FV a,FV b) => FV (a,b) where
 class ToTm t where
   toTm :: t -> Tm
 
-
 instance ToTm Argument where
   toTm t = toTm $ getTipe t
 
@@ -213,6 +214,7 @@ instance ToTp Tm where
   toTp (AbsImp nm ty t) = ForallImp nm (toTp ty) $ toTp t
   toTp a = Atom $ toTpInt a
 
+toTpInt :: Tm -> Tm
 toTpInt (Spine c l) = Spine c (map (\a -> a { getTipe = toTp $ getTipe a}) l)
 toTpInt (Abs nm ty r) = Abs nm (toTp ty) (toTpInt r)
 toTpInt (AbsImp nm ty r) = AbsImp nm (toTp ty) (toTpInt r)
@@ -221,9 +223,6 @@ instance ToTp Tp where
   toTp (Forall nm ty1 ty2) = Forall nm (toTp ty1) (toTp ty2)
   toTp (ForallImp nm ty1 ty2) = ForallImp nm (toTp ty1) (toTp ty2)
   toTp (Atom t) = toTp t
-
-
-
 
 class AllConsts a where
   allConstants :: a -> S.Set Name
