@@ -1,4 +1,8 @@
-{-# LANGUAGE FlexibleContexts, FlexibleInstances, TupleSections #-}
+{-# LANGUAGE
+  FlexibleContexts,
+  FlexibleInstances,
+  TupleSections
+  #-}
 
 module Solver where
 
@@ -51,6 +55,16 @@ unify envE env constraint@(a :=: b :@ from) =
         sub' <- unify' (subst sub env) $ subst sub $ toTm mt :=: toTm nt
         return $ sub *** sub'
 
+      getTp :: Name -> Maybe Tp
+      getTp nm = case env ! nm of
+        Nothing -> envE ! nm
+        Just t -> Just t
+
+      getTmTp s = case getTipe s of
+        Atom (Spine v []) | Just t <- getTp (getName v) -> return t
+        Atom (Spine v []) -> Atom <$> var <$> getNew
+        _ -> return $ atom
+
   in case a :=: b of
     _ :=: _ | a > b -> unify' env $ b :=: a
 
@@ -84,7 +98,7 @@ unify envE env constraint@(a :=: b :@ from) =
 
     Spine (Var x) n :=: Spine (Cons c) m | not $ M.member x env -> do -- Gvar-Const
       us <- forM n $ const $ getNewWith $ "@var=cons_L:"++x
-      usty <- forM n $ const $ Atom <$> var <$> getNew
+      usty <- forM n getTmTp
       xs <- forM m $ const $ Var <$> (getNewWith $ "@var=cons_R:"++c)
       let l = Spine (Cons c) $ (\xi -> Norm $ Atom $ Spine xi $ Norm <$> Atom <$> var <$> us) <$> xs
           s = x |-> foldr' (\(v,ty) t -> Abs v ty t) l (zip us usty)
@@ -96,17 +110,23 @@ unify envE env constraint@(a :=: b :@ from) =
 
       let act (xi, yi) next = do
             vi <- getNew
+
             sub' <- catchError (Just <$> unify'' (toTm xi :=: toTm yi)) $ \_ -> return Nothing
+
             (xs,zs,sub) <- next
             case sub' of
-              Just sub' -> return (vi:xs,vi:zs, sub' *** sub)
-              Nothing   -> return (vi:xs,zs, sub)
+              Just sub' -> do
+                vit  <- getTmTp $ Norm xi
+                return ((vi,vit):xs,vi:zs, sub' *** sub)
+              Nothing   -> do
+                vit <- Atom <$> var <$> getNew
+                return ((vi,vit):xs,zs  , sub)
 
-      (xs,zs,sub) <- foldr' act (return (mempty, mempty, mempty)) (zip (getTipe <$> n) (getTipe <$> m))
-      xts <- mapM (\s -> (s,) <$> getNewWith "#spine") xs
+      (xts,zs,sub) <- foldr' act (return (mempty, mempty, mempty)) (zip (getTipe <$> n) (getTipe <$> m))
 
-      let base = Spine (Var h) (Norm <$> Atom <$> var <$> zs)
-          f' = foldr' (\(v,xt) t -> Abs v (Atom $ var xt) t) base xts
+      let xs = map fst xts
+          base = Spine (Var h) (Norm <$> Atom <$> var <$> zs)
+          f' = foldr' (\(v,xt) t -> Abs v xt t) base xts
       return (sub *** a |-> f')
 
     Spine (Var f) xs :=: Spine (Var g) ys | f /= g && xs == ys && not (M.member f env) && not (M.member g env) -> do
@@ -124,9 +144,9 @@ unify envE env constraint@(a :=: b :@ from) =
               Nothing  -> return (zs, sub)
       (zs,sub) <- foldr' act (return (mempty, mempty)) xs
 
-      let toVar (Atom (Spine (Var x) [])) = do
-            t <- getNewWith "tovar"
-            return (x, Atom $ var t)
+      let toVar a@(Atom (Spine (Var x) [])) = do
+            t <- getTmTp $ Norm a
+            return (x, t)
           toVar _ = badConstraint
 
       xs' <- mapM toVar (getTipe <$> xs)
@@ -199,16 +219,19 @@ right (context :|- r) = case r of
   Atom _ -> unifier context r
   ForallImp nm t1 t2 -> do
     nm' <- getNew
-    (v,s) <- solve $ (Var nm', t1):context :|- subst (nm |-> var nm') t2
-    return $ (toTm $ ForallImp nm' t1 (Atom v), s)
+    (v,s) <- solve $ (Var nm', t1):context :|- subst (nm |-> cons nm') t2
+    return $ (AbsImp nm' t1 v, s)
   Forall nm t1 t2 -> do
-    nm' <- getNew
-    (v,s) <- solve $ (Var nm', t1):context :|- subst (nm |-> var nm') t2
-    return $ (toTm $ Forall nm' t1 (Atom v), s)
+    nm' <- getNewWith $ "/f/" -- ++nm
+    (v,s) <- solve $ (Var nm', t1):context :|- subst (nm |-> cons nm') t2
+    return $ (Abs nm' t1 v, s)
 
 solve :: Judgement -> Reification
-solve judge@(context :|- r) = right judge <|> (msum $ useSingle (\f ctx -> left $ f:ctx :|- r) context)
-  where useSingle f lst = sw id lst
+solve judge@(context :|- r) = case r of
+  Atom (Spine (Cons "atom") []) -> return (toTm atom, mempty) <|> soln
+  _ -> soln
+  where soln = right judge <|> (msum $ useSingle (\f ctx -> left $ f:ctx :|- r) context)
+        useSingle f lst = sw id lst
           where sw _ [] = []
                 sw placeOnEnd (a:lst) =  f a (placeOnEnd lst):sw (placeOnEnd . (a:)) lst
 
@@ -234,7 +257,7 @@ class CheckType t where
   checkTipe :: Environment -> t -> Tp -> NatDeduct Tp
 
 instance CheckType Variable where
-  checkTipe env v t = appendErr ("IN VARIABLE: "++show v) $ case v of
+  checkTipe env v t = case v of
     Cons nm -> case env ! nm of
       Nothing -> error $ nm++" was not found in the environment in "++show v++" : "++show t
       Just t' -> do
@@ -242,30 +265,41 @@ instance CheckType Variable where
         return t'
     Var nm -> case env ! nm of
       Nothing -> throwError $ nm++" was not found in the environment in "++show v++" : "++show t
-
       Just t' -> do
         tell [toTm t' :=: toTm t :@ show v]
         return t'
 
+traceOn a = trace (show a) a
+
 instance CheckType Tm where
-  checkTipe env oldBody t = appendErr ("IN TERM: "++show oldBody) $ case oldBody of
-    Spine a [] -> do
-      checkTipe env a t
+  checkTipe env oldBody t = case oldBody of
+    Spine a [] -> checkTipe env a t
     Spine a l -> do
       tv1  <- getNewWith $ ':':show a
+
       tv2l <- forM l $ \b -> do
         bty <- getNewWith $ "@bty"
-        t'  <- checkTipe env (getTipe b) $ Atom $ var bty
-        return $ b { getTipe = t'}
+        t' <- checkTipe env (getTipe b) $ Atom $ var bty
+        return (b, b { getTipe = t'} )
 
       tv1' <- checkTipe env a $ Atom $ var $ tv1
 
-      tell [ rebuildSpine (toTm tv1') tv2l :=: toTm t :@ show oldBody]
+      let part (ForallImp nm ty b) ((Impl v,Impl ty'):l) = do
+            tell [ toTm ty :=: toTm ty' :@ show oldBody ]
+            part (subst (nm |-> toTm v) b) l
+          part (Forall nm ty b) ((Norm v,Norm ty'):l) = do
+            tell [ toTm ty :=: toTm ty' :@ show oldBody ]
+            part (subst (nm |-> toTm v) b) l
+          part tv1' l@(_:_) = do
+            -- now we don't know what it is yet, so we'll have to postpone argument checking
+            tell [ rebuildSpine (toTm tv1') (fst <$> l) :=: toTm t :@ show oldBody]
+          part r [] = do
+            tell [ toTm r :=: toTm t :@ show oldBody]
 
+      part tv1' tv2l
       return t
-
     AbsImp nm nmTy body -> do
-      checkTipe env nmTy atom
+      at <- checkTipe env nmTy atom
       v1  <- getNewWith $ ":<"++nm
       v2  <- getNewWith $ ":>"++nm
       tell [ toTm (ForallImp v1 nmTy $ Atom $ var v2) :=: toTm t :@ show oldBody]
@@ -277,6 +311,17 @@ instance CheckType Tm where
       v2  <- getNewWith $ ":>"++nm
       tell [ toTm (Forall v1 nmTy $ Atom $ var v2) :=: toTm t :@ show oldBody]
       Forall v1 nmTy <$> intermediateUnify env oldBody (nm,nmTy) (body, Atom $ var v2)
+
+instance CheckType Tp where
+  checkTipe env oldBody atomty = case oldBody of
+    Atom tm -> do
+      checkTipe env tm atomty
+    ForallImp nm nmTy body -> do
+      checkTipe env (Forall nm nmTy body) atomty
+    Forall nm nmTy body -> do
+      checkTipe env nmTy atom
+      intermediateUnify env oldBody (nm, nmTy) (body, atom)
+      return atom
 
 intermediateUnify env oldBody (nm, nmTy) (body, bodyTipe) = do
   nm' <- getNewWith $ '*':nm
@@ -292,21 +337,6 @@ intermediateUnify env oldBody (nm, nmTy) (body, bodyTipe) = do
 
   tell $ map (\(s',t) -> var s' :=: t :@ show oldBody) $ M.toList sub'
   return t'
-
-instance CheckType Tp where
-  checkTipe env oldBody atomty = checkTipe env (toTm oldBody) atomty
-  {-
-  checkTipe env oldBody atomty = case oldBody of
-    Atom tm -> do
-      checkTipe env tm atomty
-    ForallImp nm ty t -> do
-      checkTipe env (Forall nm ty t) atomty
-    Forall nm nmTy body -> do
-      tell [ toTm atomty :=: toTm atom :@ show oldBody]
-      checkTipe env nmTy atom
-      intermediateUnify env oldBody (nm,nmTy) (body,atom)
-      return atom
-    -}
 
 getCons :: Tm -> VarGen String
 getCons tm = case tm of
@@ -335,11 +365,12 @@ checkType env base ty = fmap fst $ flip runStateT 0 $ appendErr ("FOR: "++show t
   let fv = freeVariables ty
 
   fvTy <- M.fromList <$> mapM (\i -> (i,) <$> Atom <$> var <$> getNew) (S.toList fv)
+
   let envWF = mappend env fvTy
 
-  (_,constraints) <- appendErr ("WHILE CHECKING WITH: "++show envWF) $ runWriterT $ checkTipe envWF ty atom
+  (_,constraints) <- runWriterT $ checkTipe envWF ty atom
 
-  s <- appendErr ("WHILE FINALIZING CONSTRAINTS: "++show constraints) $ genUnifyEngine envWF constraints
+  s <- genUnifyEngine envWF constraints
 
   let envWFL = (\(a,l) -> (Cons a, l)) <$> M.toList env
       act :: (Name, Tp) -> VarGen Substitution -> VarGen Substitution
@@ -348,7 +379,9 @@ checkType env base ty = fmap fst $ flip runStateT 0 $ appendErr ("FOR: "++show t
         let tyVar' = toTp $ subst s tyVar
         (imp,s') <- trace ("WHILE RESOLVING: "++show tyVar'++"\nWITH SUBST: "++show (M.toList s) ++ "\nWITH ENV:"++show envWFL) $ solve $ envWFL :|- tyVar'
         trace ("WHICH BECAME: "++show imp) $ return (s *** s' *** nm |-> imp)
-  s' <- foldr' act (return s) (M.toList fvTy)
+      fvTyL = M.toList fvTy
+  s' <- foldr' act (return s) fvTyL
+
   -- I'm not sure this makes sense at all.
   -- in the mean time, assume there is only one use of each unbound variable
 
