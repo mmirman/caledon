@@ -30,9 +30,20 @@ data Tm = AbsImp Name Tp Tm
 
 var nm = Spine (Var nm) []
 cons nm = Spine (Cons nm) []
+(~~>) a b = Forall "" a b 
+(==>) a b = ForallImp "" a b 
+infixr 1 :=:
+data UnEq a = a :=: a
+            deriving (Eq, Ord, Functor, Show)
+                     
+infixr 0 :@
+data Constraint a = (UnEq a) :@ String
+                  deriving (Eq, Ord, Functor)
 
-data Constraint a = a :=: a
-                  deriving (Eq, Ord, Functor, Show)
+instance Show a => Show (Constraint a) where                           
+  show (u :@ f) = show u++"\n\tFROM: "++f
+                           
+
 
 data Tp = Atom Tm
         | Forall Name Tp Tp
@@ -55,7 +66,7 @@ atom = Atom $ cons "atom"
 ----------------------- PRETTY PRINT -------------------------------
 --------------------------------------------------------------------
 instance Show Variable where
-  show (Var n)  = "?"++n
+  show (Var n)  = '\'':n
   show (Cons n) = n
 
 showWithParens t = if (case t of
@@ -188,15 +199,24 @@ instance ToTm Argument where
 
 instance ToTm Tp where
   toTm (Forall n ty t) = Spine (Cons "forall") [Norm $ Atom $ Abs n ty $ toTm t ]
-  toTm (ForallImp n ty t) = AbsImp n ty $ toTm t
+  toTm (ForallImp n ty t) = Spine (Cons "?forall") [Norm $ Atom $ AbsImp n ty $ toTm t]
   toTm (Atom tm) = tm
 
 class ToTp t where
   toTp :: t -> Tp
 
+<<<<<<< HEAD
 instance ToTp Tm where
   toTp (Spine (Cons "forall") [Norm (Atom (Abs nm ty t))]) = Forall nm (toTp ty) $ toTp t
   toTp (Spine (Cons "forall") [Norm (Atom (AbsImp nm ty t))]) = ForallImp nm (toTp ty) $ toTp t
+=======
+instance ToTp Tm where  
+--  toTp (Spine (Cons "forall") [Norm (Atom (Abs nm ty t))]) = Forall nm (toTp ty) $ toTp t
+--  toTp (Spine (Cons "forall") [Norm (Atom (AbsImp nm ty t))]) = ForallImp nm (toTp ty) $ toTp t
+  
+  toTp (Abs nm ty t) = Forall nm (toTp ty) $ toTp t  
+  toTp (AbsImp nm ty t) = ForallImp nm (toTp ty) $ toTp t  
+>>>>>>> 75334064ec78a1d0f95b3ddaf605e81ae94bbd2b
   toTp a = Atom $ toTpInt a
 
 toTpInt (Spine c l) = Spine c (map (\a -> a { getTipe = toTp $ getTipe a}) l)
@@ -206,4 +226,33 @@ toTpInt (AbsImp nm ty r) = AbsImp nm (toTp ty) (toTpInt r)
 instance ToTp Tp where
   toTp (Forall nm ty1 ty2) = Forall nm (toTp ty1) (toTp ty2)
   toTp (ForallImp nm ty1 ty2) = ForallImp nm (toTp ty1) (toTp ty2)
+<<<<<<< HEAD
   toTp (Atom t) = toTp t
+=======
+  toTp (Atom t) = toTp t  
+  
+  
+
+
+class AllConsts a where         
+  allConstants :: a -> S.Set Name
+instance (AllConsts a, F.Foldable f) => AllConsts (f a) where
+  allConstants m = F.foldMap allConstants m
+instance AllConsts Argument where  
+  allConstants = allConstants . getTipe
+instance AllConsts Tp where
+  allConstants t = case t of
+    Forall a ty t -> (allConstants t) `mappend` (allConstants ty)
+    ForallImp a ty t -> (allConstants t) `mappend` (allConstants ty)
+    Atom a -> allConstants a
+instance AllConsts Tm where
+  allConstants t = case t of
+    Abs nm t p -> allConstants p `mappend` allConstants t
+    AbsImp nm t p -> allConstants p  `mappend` allConstants t
+    Spine head others -> mappend (allConstants head) $ mconcat $ allConstants <$> others
+instance AllConsts Variable where    
+  allConstants (Cons a) = S.singleton a
+  allConstants _ = mempty
+instance (AllConsts a,AllConsts b) => AllConsts (a,b) where 
+  allConstants (a,b) = allConstants a `S.union` allConstants b
+>>>>>>> 75334064ec78a1d0f95b3ddaf605e81ae94bbd2b
