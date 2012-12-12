@@ -185,7 +185,7 @@ instance FV Tp where
 instance FV Tm where
   freeVariables t = case t of
     Abs nm t p -> (S.delete nm $ freeVariables p) `mappend` freeVariables t
-    AbsImp nm t p -> (S.delete nm $ freeVariables p)  `mappend` freeVariables t
+    AbsImp nm t p -> (S.delete nm $ freeVariables p) `mappend` freeVariables t
     Spine head others -> mappend (freeVariables head) $ mconcat $ freeVariables <$> others
 instance FV Variable where    
   freeVariables (Var a) = S.singleton a

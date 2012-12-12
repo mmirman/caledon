@@ -261,26 +261,39 @@ instance CheckType Variable where
         return t'
     Var nm -> case env ! nm of
       Nothing -> throwError $ nm++" was not found in the environment in "++show v++" : "++show t
-      
       Just t' -> do
         tell [toTm t' :=: toTm t :@ show v]
         return t'
-      
+traceOn a = trace (show a) a
 instance CheckType Tm where
   checkTipe env oldBody t = case oldBody of
+    Spine a [] -> checkTipe env a t
     Spine a l -> do
       tv1  <- getNewWith $ ':':show a
+
       tv2l <- forM l $ \b -> do
         bty <- getNewWith $ "@bty"
-        t'  <- checkTipe env (getTipe b) $ Atom $ var bty
-        return $ b { getTipe = t'} 
-      
+        t' <- checkTipe env (getTipe b) $ Atom $ var bty
+        return (b, b { getTipe = t'} )
+        
       tv1' <- checkTipe env a $ Atom $ var $ tv1
-    
-      tell [ rebuildSpine (toTm tv1') tv2l :=: toTm t :@ show oldBody]
+      
+      let part (ForallImp nm ty b) ((Impl v,Impl ty'):l) = do
+            tell [ toTm ty :=: toTm ty' :@ show oldBody ] 
+            part (subst (nm |-> toTm v) b) l
+          part (Forall nm ty b) ((Norm v,Norm ty'):l) = do
+            tell [ toTm ty :=: toTm ty' :@ show oldBody ] 
+            part (subst (nm |-> toTm v) b) l
+          part tv1' l@(_:_) = do
+            -- now we don't know what it is yet, so we'll have to postpone argument checking
+            tell [ rebuildSpine (toTm tv1') (fst <$> l) :=: toTm t :@ show oldBody]
+          part r [] = do
+            tell [ toTm r :=: toTm t :@ show oldBody]
+          
+      part tv1' tv2l
       return t
     AbsImp nm nmTy body -> do  
-      checkTipe env nmTy atom
+      at <- checkTipe env nmTy atom
       v1  <- getNewWith $ ":<"++nm
       v2  <- getNewWith $ ":>"++nm
       tell [ toTm (ForallImp v1 nmTy $ Atom $ var v2) :=: toTm t :@ show oldBody]
@@ -292,7 +305,18 @@ instance CheckType Tm where
       v2  <- getNewWith $ ":>"++nm
       tell [ toTm (Forall v1 nmTy $ Atom $ var v2) :=: toTm t :@ show oldBody]
       Forall v1 nmTy <$> intermediateUnify env oldBody (nm,nmTy) (body, Atom $ var v2)
-
+  
+instance CheckType Tp where
+  checkTipe env oldBody atomty = case oldBody of 
+    Atom tm -> do
+      checkTipe env tm atomty
+    ForallImp nm nmTy body -> do
+      checkTipe env (Forall nm nmTy body) atomty
+    Forall nm nmTy body -> do
+      checkTipe env nmTy atom
+      intermediateUnify env oldBody (nm, nmTy) (body, atom)
+      return atom
+  
 intermediateUnify env oldBody (nm, nmTy) (body, bodyTipe) = do
   nm' <- getNewWith $ '*':nm
   (t',constraints) <- listen $ checkTipe (M.insert nm' nmTy env) (subst (nm |-> cons nm') body) bodyTipe
@@ -307,9 +331,7 @@ intermediateUnify env oldBody (nm, nmTy) (body, bodyTipe) = do
             
   tell $ map (\(s',t) -> var s' :=: t :@ show oldBody) $ M.toList sub'   
   return t'
-  
-instance CheckType Tp where
-  checkTipe env oldBody atomty = checkTipe env (toTm oldBody) atomty
+
 
 getCons tm = case tm of
   Spine (Cons t) _ -> return t
