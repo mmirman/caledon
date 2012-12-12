@@ -1,4 +1,4 @@
-{-defn num  : atom
+defn num  : atom
   as zero = num
    | succ = num → num
 
@@ -17,8 +17,4 @@ defn maybe : atom → atom
 defn list : atom → atom
   as nil = {a} list a
    | cons = {a} a → list a → list a
--}
 
-defn app : [atz : _][btz : atom] (atz -> btz -> atom) -> atz -> btz -> atom
-  as app_imp = [at : _][bt : atom][a : at][b: bt][foo : at -> bt -> atom]
-               app at bt foo a b
