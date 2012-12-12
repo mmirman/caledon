@@ -15,6 +15,10 @@ import Data.Monoid
 -------------------------- MAIN ---------------------------------------
 -----------------------------------------------------------------------
 checkAndRun decs = do
+    
+  putStrLn $ "\nFILE: "
+  forM_ decs  $ \s -> putStrLn $ show s++"\n"
+  
   putStrLn "\nTYPE CHECKING: "
   decs <- case runError $ typeCheckAll $ decs of
     Left e -> error e
