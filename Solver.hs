@@ -1,8 +1,8 @@
 {-# LANGUAGE
-  FlexibleContexts,
-  FlexibleInstances,
-  TupleSections
-  #-}
+ FlexibleContexts,
+ FlexibleInstances,
+ TupleSections
+ #-}
 
 module Solver where
 
