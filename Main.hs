@@ -8,7 +8,7 @@ import Parser
 import System.Environment
 import Data.Functor
 import Data.Foldable as F (forM_)
-import Data.List (partition)
+import Data.List (partition, concatMap)
 import Control.Arrow(first)
 import Text.Parsec hiding (parse)
 import Data.Monoid
@@ -16,26 +16,31 @@ import Data.Monoid
 -----------------------------------------------------------------------
 -------------------------- MAIN ---------------------------------------
 -----------------------------------------------------------------------
+
+showDecs :: [Predicate] -> String
+showDecs decs = init $ init $ concatMap (\s -> show s ++ "\n\n") decs
+
+typeCheck :: [Predicate] -> IO [Predicate]
+typeCheck decs = do
+    case runError $ typeCheckAll decs of
+        Left e -> error e
+        Right e -> putStrLn "Type checking success!" >> return e
+
+isPredicate :: Predicate -> Bool
+isPredicate Predicate {} = True
+isPredicate _            = False
+
 checkAndRun :: [Predicate] -> IO ()
 checkAndRun decs = do
-
-  putStrLn "\nFILE: "
-  forM_ decs  $ \s -> putStrLn $ show s++"\n"
+  putStrLn $ "FILE: \n" ++ showDecs decs
 
   putStrLn "\nTYPE CHECKING: "
-  decs <- case runError $ typeCheckAll decs of
-    Left e -> error e
-    Right e -> putStrLn "Type checking success!" >> return e
-  let (predicates, targets) = flip partition decs $ \x -> case x of
-        Predicate{} -> True
-        _           -> False
+  typedDecs <- typeCheck decs
 
+  let (predicates, targets) = flip partition typedDecs isPredicate
 
-  putStrLn "\nAXIOMS: "
-  forM_ predicates $ \s -> putStrLn $ show s++"\n"
-
-  putStrLn "\nTARGETS: "
-  forM_ targets $ \s -> putStrLn $ show s++"\n"
+  putStrLn $ "\nAXIOMS: \n" ++ showDecs predicates
+  putStrLn $ "\nTARGETS: \n" ++ showDecs targets
 
   let allTypes c = (predName c, predType c):predConstructors c
   forM_ targets $ \target ->
