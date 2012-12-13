@@ -45,20 +45,18 @@ data Constraint a = (UnEq a) :@ String
                   deriving (Eq, Ord, Functor)
 
 instance Show a => Show (Constraint a) where
-  show (u :@ f) = show u++"\n\tFROM: "++f
-
-
+  show (u :@ f) = show u ++ "\n\tFROM: " ++ f
 
 data Tp = Atom Tm
         | Forall Name Tp Tp
         | ForallImp Name Tp Tp
         deriving (Eq, Ord)
 
-data Predicate = Predicate { predName::Name
-                           , predType::Tp
-                           , predConstructors::[(Name, Tp)]
+data Predicate = Predicate { predName :: Name
+                           , predType :: Tp
+                           , predConstructors :: [(Name, Tp)]
                            }
-               | Query { predName :: Name, predType::Tp }
+               | Query { predName :: Name, predType :: Tp }
                deriving (Eq)
 
 infixl 1 :|-
@@ -70,7 +68,7 @@ atom = Atom $ cons "atom"
 ----------------------- PRETTY PRINT -------------------------------
 --------------------------------------------------------------------
 instance Show Variable where
-  show (Var n)  = '\'':n
+  show (Var n)  = '\'' : n
   show (Cons n) = n
 
 showWithParens :: Tp -> String
@@ -86,36 +84,34 @@ instance Show Argument where
   show (Impl t) = "{"++show t++"}"
   show (Norm t) = showWithParens t
 instance Show Tm where
-  show (Abs nm ty tm) = "λ "++nm++" : "++showWithParens ty++" . "++show tm
-  show (AbsImp nm ty tm) = "?λ "++nm++" : "++showWithParens ty++" . "++show tm
-  show (Spine cons apps) = show cons++concatMap (\s -> ' ' : show s) apps
+  show (Abs    nm ty tm) = "λ "  ++ nm ++ " : " ++ showWithParens ty ++ " . " ++ show tm
+  show (AbsImp nm ty tm) = "?λ " ++ nm ++ " : " ++ showWithParens ty ++ " . " ++ show tm
+  show (Spine cons apps) = show cons ++ concatMap (\s -> ' ' : show s) apps
 instance Show Tp where
   show t = case t of
     Atom t -> show t
-    Forall nm t t' | not (S.member nm (freeVariables t')) -> showWithParens++" → "++ show t'
+    Forall nm t t' | not (S.member nm (freeVariables t')) -> showWithParens ++ " → " ++ show t'
       where showWithParens = case t of
               Forall{} -> "(" ++ show t ++ ")"
               _ ->  show t
-    Forall nm ty t -> "∀ "++nm++" : "++show ty++" . "++show t
+    Forall nm ty t -> "∀ " ++ nm ++ " : " ++ show ty ++ " . " ++ show t
 
-    ForallImp nm t t' | not (S.member nm (freeVariables t')) -> showWithParens++" ⇒ "++ show t'
+    ForallImp nm t t' | not (S.member nm (freeVariables t')) -> showWithParens ++ " ⇒ " ++ show t'
       where showWithParens = case t of
               Forall{} -> "(" ++ show t ++ ")"
               _ ->  show t
-    ForallImp nm ty t -> "?∀ "++nm++" : "++show ty++" . "++show t
+    ForallImp nm ty t -> "?∀ " ++ nm ++ " : " ++ show ty ++ " . " ++ show t
 
 instance Show Judgement where
-  show (a :|- b) =  removeHdTl (show a) ++" ⊢ "++ show b
+  show (a :|- b) =  removeHdTl (show a) ++ " ⊢ " ++ show b
     where removeHdTl = init . tail
 
 instance Show Predicate where
-  show (Predicate nm ty []) =  ""++"defn "++nm++" : "++show ty++";"
+  show (Predicate nm ty []) = "defn " ++ nm ++ " : " ++ show ty ++ ";"
   show (Predicate nm ty (a:cons)) =
-      ""++"defn "++nm++" : "++show ty++"\n"
-      ++  "  as "++showSingle a++concatMap (\x->
-        "\n   | "++showSingle x) cons++";"
-        where showSingle (nm,ty) = nm++" = "++show ty
-  show (Query nm ty) = "query "++nm++" = "++show ty
+      "defn " ++ nm ++ " : " ++ show ty ++ "\n" ++ "  as " ++ showSingle a ++ concatMap (\x-> "\n   | " ++ showSingle x) cons ++ ";"
+    where showSingle (nm,ty) = nm ++ " = " ++ show ty
+  show (Query nm ty) = "query " ++ nm ++ " = " ++ show ty
 
 --------------------------------------------------------------------
 ----------------------- SUBSTITUTION -------------------------------
