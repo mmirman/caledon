@@ -22,10 +22,9 @@ showDecs []   = []
 showDecs decs = init $ init $ concatMap (\s -> show s ++ "\n\n") decs
 
 typeCheck :: [Predicate] -> IO [Predicate]
-typeCheck decs = do
-    case runError $ typeCheckAll decs of
-        Left e -> error e
-        Right e -> putStrLn "Type checking success!" >> return e
+typeCheck decs = case runError $ typeCheckAll decs of
+    Left  e -> error e
+    Right p -> putStrLn "Type checking success!" >> return p
 
 isPredicate :: Predicate -> Bool
 isPredicate Predicate {} = True
@@ -38,7 +37,7 @@ checkAndRun decs = do
   putStrLn "\nTYPE CHECKING: "
   typedDecs <- typeCheck decs
 
-  let (predicates, targets) = flip partition typedDecs isPredicate
+  let (predicates, targets) = partition isPredicate typedDecs
 
   putStrLn $ "\nAXIOMS: \n" ++ showDecs predicates
   putStrLn $ "\nTARGETS: \n" ++ showDecs targets
