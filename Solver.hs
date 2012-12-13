@@ -314,8 +314,7 @@ instance CheckType Tm where
 
 instance CheckType Tp where
   checkTipe env oldBody atomty = case oldBody of
-    Atom tm -> do
-      checkTipe env tm atomty
+    Atom tm -> checkTipe env tm atomty
     ForallImp nm nmTy body -> do
       checkTipe env (Forall nm nmTy body) atomty
     Forall nm nmTy body -> do
