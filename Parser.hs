@@ -47,16 +47,16 @@ decls = do
 query :: Parser Predicate
 query = do
   reserved "query"
-  (nm,ty) <- named dec_pred
+  (nm,ty) <- named decPred
   optional semi
   return $ Query nm ty
 
 defn :: Parser Predicate
 defn =  do
   reserved "defn"
-  (nm,ty) <- named dec_tipe
+  (nm,ty) <- named decTipe
   let more =  do reserved "as"
-                 lst <- flip sepBy1 (reservedOp "|") $ named dec_pred
+                 lst <- flip sepBy1 (reservedOp "|") $ named decPred
                  optional semi
                  return $ Predicate nm ty lst
       none = do optional semi
@@ -68,7 +68,7 @@ pAtom =  do reserved "_"
             nm <- getNextVar
             mp <- currentSet <$> getState
             return $ Spine (Var nm) $ Norm <$> Atom <$> var <$> S.toList mp
-     <|> do r <- id_var
+     <|> do r <- idVar
             return $ var r
      <|> do r <- identifier
             mp <- currentSet <$> getState
@@ -108,19 +108,19 @@ table = [ [ binary (reservedOp "->" <|> reservedOp "→") fall AssocRight
         , [ binary (reservedOp "<-" <|> reservedOp "←") (flip fall) AssocLeft
           , binary (reservedOp "<=" <|> reservedOp "⇐") (flip fallImp) AssocLeft ]
         ]
-  where  binary  name fun assoc = Infix (name >> return fun) assoc
+  where binary name fun = Infix (name >> return fun)
 
-dec_tipe :: (Parser String, String)
-dec_tipe = (getId lower, ":")
+decTipe :: (Parser String, String)
+decTipe = (getId lower, ":")
 
-dec_pred :: (Parser String, String)
-dec_pred = (getId lower, "=")
+decPred :: (Parser String, String)
+decPred = (getId lower, "=")
 
-id_var :: Parser String
-id_var = getId $ upper <|> char '\''
+idVar :: Parser String
+idVar = getId $ upper <|> char '\''
 
-dec_anon :: (Parser String, String)
-dec_anon = (getId $ letter <|> char '\'' , ":")
+decAnon :: (Parser String, String)
+decAnon = (getId $ letter <|> char '\'' , ":")
 
 named :: (Parser a, String) -> Parser (a, Tp)
 named (ident, sep) = do
@@ -131,7 +131,7 @@ named (ident, sep) = do
 
 anonNamed :: Parser (String, Tp)
 anonNamed = do
-  let (ident,sep) = dec_anon
+  let (ident,sep) = decAnon
   nm <- ident
   ty <- optionMaybe $ reservedOp sep >> tipe
   nm' <- getNextVar
@@ -169,7 +169,7 @@ tipe = buildExpressionParser table (
            return $ ForallImp nm tp tp'
     <?> "type")
 
-P.TokenParser{..} = P.makeTokenParser $ mydef
+P.TokenParser{..} = P.makeTokenParser mydef
 
 mydef :: P.GenLanguageDef String ParseState Identity
 mydef = haskellDef
@@ -181,4 +181,4 @@ mydef = haskellDef
   }
 
 getId :: Parser Char -> Parser String
-getId start = P.identifier $ P.makeTokenParser $ mydef { P.identStart = start }
+getId start = P.identifier $ P.makeTokenParser mydef { P.identStart = start }

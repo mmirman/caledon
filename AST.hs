@@ -34,8 +34,8 @@ data Tm = AbsImp Name Tp Tm
 
 var nm = Spine (Var nm) []
 cons nm = Spine (Cons nm) []
-(~~>) a b = Forall "" a b
-(==>) a b = ForallImp "" a b
+(~~>) = Forall ""
+(==>) = ForallImp ""
 infixr 1 :=:
 data UnEq a = a :=: a
             deriving (Eq, Ord, Functor, Show)
@@ -75,11 +75,11 @@ instance Show Variable where
 
 showWithParens :: Tp -> String
 showWithParens t = if (case t of
-                          Forall _ _ _ -> True
-                          ForallImp _ _ _ -> True
+                          Forall{} -> True
+                          ForallImp{} -> True
                           Atom (Spine _ lst) -> not $ null lst
-                          Atom (Abs _ _ _) -> True
-                          Atom (AbsImp _ _ _) -> True
+                          Atom (Abs{}) -> True
+                          Atom (AbsImp{}) -> True
                       ) then "("++show t++")" else show t
 
 instance Show Argument where
@@ -88,25 +88,25 @@ instance Show Argument where
 instance Show Tm where
   show (Abs nm ty tm) = "λ "++nm++" : "++showWithParens ty++" . "++show tm
   show (AbsImp nm ty tm) = "?λ "++nm++" : "++showWithParens ty++" . "++show tm
-  show (Spine cons apps) = show cons++concatMap (\s -> " "++show s) apps
+  show (Spine cons apps) = show cons++concatMap (\s -> ' ' : show s) apps
 instance Show Tp where
   show t = case t of
     Atom t -> show t
     Forall nm t t' | not (S.member nm (freeVariables t')) -> showWithParens++" → "++ show t'
       where showWithParens = case t of
-              Forall _ _ _ -> "(" ++ show t ++ ")"
+              Forall{} -> "(" ++ show t ++ ")"
               _ ->  show t
     Forall nm ty t -> "∀ "++nm++" : "++show ty++" . "++show t
 
     ForallImp nm t t' | not (S.member nm (freeVariables t')) -> showWithParens++" ⇒ "++ show t'
       where showWithParens = case t of
-              Forall _ _ _ -> "(" ++ show t ++ ")"
+              Forall{} -> "(" ++ show t ++ ")"
               _ ->  show t
     ForallImp nm ty t -> "?∀ "++nm++" : "++show ty++" . "++show t
 
 instance Show Judgement where
   show (a :|- b) =  removeHdTl (show a) ++" ⊢ "++ show b
-    where removeHdTl = reverse . tail . reverse . tail
+    where removeHdTl = init . tail
 
 instance Show Predicate where
   show (Predicate nm ty []) =  ""++"defn "++nm++" : "++show ty++";"
@@ -124,7 +124,7 @@ type Substitution = M.Map Name Tm
 
 infixr 1 |->
 infixr 0 ***
-m1 *** m2 = M.union m2 (subst m2 <$> m1)
+m1 *** m2 = m2 `M.union` (subst m2 <$> m1)
 (|->) = M.singleton
 (!) = flip M.lookup
 
@@ -133,9 +133,9 @@ rebuildSpine :: Tm -> [Argument] -> Tm
 rebuildSpine s [] = s
 rebuildSpine (Spine (Cons "forall") [Norm (Atom a)]) apps' = rebuildSpine a apps'
 rebuildSpine (Spine c apps) apps' = Spine c (apps ++ apps')
-rebuildSpine (Abs nm _ rst) (Norm a:apps') = rebuildSpine (subst (nm |-> toTm a) $ rst) apps'
-rebuildSpine a@(Abs _ _ _) b@(Impl _:_) = error $ "attempting to apply an implied argument to a regular term: "++show a++" "++show b
-rebuildSpine (AbsImp nm _ rst) (Impl a:apps') = rebuildSpine (subst (nm |-> toTm a) $ rst) apps'
+rebuildSpine (Abs nm _ rst) (Norm a:apps') = rebuildSpine (subst (nm |-> toTm a) rst) apps'
+rebuildSpine a@(Abs{}) b@(Impl _:_) = error $ "attempting to apply an implied argument to a regular term: "++show a++" "++show b
+rebuildSpine (AbsImp nm _ rst) (Impl a:apps') = rebuildSpine (subst (nm |-> toTm a) rst) apps'
 rebuildSpine (AbsImp nm ty rst) apps' = AbsImp nm ty (rebuildSpine rst apps')
 
 newName :: Name -> Substitution -> (Name, Substitution)
@@ -177,18 +177,18 @@ class FV a where
   freeVariables :: a -> S.Set Name
 
 instance (FV a, F.Foldable f) => FV (f a) where
-  freeVariables m = F.foldMap freeVariables m
+  freeVariables = F.foldMap freeVariables
 instance FV Argument where
   freeVariables = freeVariables . getTipe
 instance FV Tp where
   freeVariables t = case t of
-    Forall a ty t -> (S.delete a $ freeVariables t) `mappend` (freeVariables ty)
-    ForallImp a ty t -> (S.delete a $ freeVariables t) `mappend` (freeVariables ty)
+    Forall a ty t -> S.delete a (freeVariables t) `mappend` freeVariables ty
+    ForallImp a ty t -> S.delete a (freeVariables t) `mappend` freeVariables ty
     Atom a -> freeVariables a
 instance FV Tm where
   freeVariables t = case t of
-    Abs nm t p -> (S.delete nm $ freeVariables p) `mappend` freeVariables t
-    AbsImp nm t p -> (S.delete nm $ freeVariables p) `mappend` freeVariables t
+    Abs nm t p -> S.delete nm (freeVariables p) `mappend` freeVariables t
+    AbsImp nm t p -> S.delete nm (freeVariables p) `mappend` freeVariables t
     Spine head others -> mappend (freeVariables head) $ mconcat $ freeVariables <$> others
 instance FV Variable where
   freeVariables (Var a) = S.singleton a
@@ -231,13 +231,13 @@ instance ToTp Tp where
 class AllConsts a where
   allConstants :: a -> S.Set Name
 instance (AllConsts a, F.Foldable f) => AllConsts (f a) where
-  allConstants m = F.foldMap allConstants m
+  allConstants = F.foldMap allConstants
 instance AllConsts Argument where
   allConstants = allConstants . getTipe
 instance AllConsts Tp where
   allConstants t = case t of
-    Forall a ty t -> (allConstants t) `mappend` (allConstants ty)
-    ForallImp a ty t -> (allConstants t) `mappend` (allConstants ty)
+    Forall a ty t -> allConstants t `mappend` allConstants ty
+    ForallImp a ty t -> allConstants t `mappend` allConstants ty
     Atom a -> allConstants a
 instance AllConsts Tm where
   allConstants t = case t of

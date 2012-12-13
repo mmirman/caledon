@@ -20,7 +20,7 @@ data Choice a = Choice a :<|>: Choice a
               deriving (Functor)
 
 instance Monad Choice where
-  fail a = Fail a
+  fail = Fail
   return = Success
   Fail a >>= _ = Fail a
   (m :<|>: m') >>= f = (m >>= f) :<|>: (m' >>= f)
@@ -46,7 +46,7 @@ instance RunChoice Choice where
     [] -> case dropWhile notFail lst of
       Fail a:_ -> Left a
       _ -> error "this result makes no sense"
-    (Success a):_ -> Right a
+    Success a : _ -> Right a
     _ -> error "this result makes no sense"
     where lst = chs:queue lst 1
 
@@ -65,7 +65,7 @@ appendErr :: (MonadError String m) => String -> m a -> m a
 appendErr s m = catchError m $ \s' -> throwError $ s' ++ "\n" ++ s
 
 instance MonadError String Choice where
-  throwError a = Fail a
+  throwError = Fail
   catchError try1 foo_try2 = case runError try1 of
     Left s -> foo_try2 s
     Right a -> Success a
