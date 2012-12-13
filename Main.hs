@@ -18,6 +18,7 @@ import Data.Monoid
 -----------------------------------------------------------------------
 
 showDecs :: [Predicate] -> String
+showDecs []   = []
 showDecs decs = init $ init $ concatMap (\s -> show s ++ "\n\n") decs
 
 typeCheck :: [Predicate] -> IO [Predicate]
