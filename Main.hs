@@ -21,17 +21,29 @@ showDecs :: [Predicate] -> String
 showDecs []   = []
 showDecs decs = init $ init $ concatMap (\s -> show s ++ "\n\n") decs
 
-typeCheck :: [Predicate] -> IO [Predicate]
-typeCheck decs = case runError $ typeCheckAll decs of
-    Left  e -> error e
-    Right p -> putStrLn "Type checking success!" >> return p
+showTarget :: Predicate -> [(Name, Tm)] -> String
+showTarget t s = "\nTARGET: \n" ++ show t ++ "\n\nSOLVED WITH:\n" ++ concatMap (\(a,b) -> a ++ " => " ++ show b ++ "\n") s
 
 isPredicate :: Predicate -> Bool
 isPredicate Predicate {} = True
 isPredicate _            = False
 
+allTypes :: Predicate -> [(Name, Tp)]
+allTypes x = (predName x, predType x) : predConstructors x
+
+typeCheck :: [Predicate] -> IO [Predicate]
+typeCheck decs = case runError $ typeCheckAll decs of
+    Left  e -> error e
+    Right p -> putStrLn "Type checking success!" >> return p
+
+solveTarget :: [Predicate] -> Predicate -> IO ()
+solveTarget ps t = putStrLn $ case solver (first Cons <$> concatMap allTypes ps) $ predType t of
+    Left  e -> "Error: " ++ e
+    Right s -> showTarget t s
+
 checkAndRun :: [Predicate] -> IO ()
 checkAndRun decs = do
+
   putStrLn $ "FILE: \n" ++ showDecs decs
 
   putStrLn "\nTYPE CHECKING: "
@@ -39,17 +51,10 @@ checkAndRun decs = do
 
   let (predicates, targets) = partition isPredicate typedDecs
 
-  putStrLn $ "\nAXIOMS: \n" ++ showDecs predicates
+  putStrLn $ "\nAXIOMS: \n"  ++ showDecs predicates
   putStrLn $ "\nTARGETS: \n" ++ showDecs targets
 
-  let allTypes c = (predName c, predType c):predConstructors c
-  forM_ targets $ \target ->
-    case solver (first Cons <$> concatMap allTypes predicates) $ predType target of
-      Left e -> putStrLn $ "ERROR: "++e
-      Right sub -> putStrLn $
-                   "\nTARGET: \n"++show target
-                   ++"\n\nSOLVED WITH:\n"
-                   ++concatMap (\(a,b) -> a++" => "++show b++"\n") sub
+  mapM_ (solveTarget predicates) targets
 
 parseFile :: String -> IO (Either ParseError [Predicate])
 parseFile fname = readFile fname >>= \file -> return $ runP decls (ParseState 0 mempty) fname file
