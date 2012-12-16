@@ -51,7 +51,7 @@ instance RunChoice Choice where
     where lst = chs:queue lst 1
 
           queue _ 0 = []
-          queue [] _ = error "queue size should be empty when queu is empty"
+          queue [] _ = error "queue size should be empty when queue is empty"
           queue ((a :<|>: b):l) q = a:b:queue l (q + 1)
           queue (_:l) q = queue l (q - 1)
 
