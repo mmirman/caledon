@@ -31,6 +31,11 @@ data Tm = AbsImp Name Tp Tm
         | Spine Variable [Argument] 
         deriving (Eq, Ord)
 
+data Tp = Atom Tm
+        | Forall Name Tp Tp
+        | ForallImp Name Tp Tp
+        deriving (Eq, Ord)
+
 var nm = Spine (Var nm) []
 cons nm = Spine (Cons nm) []
 (~~>) a b = Forall "" a b 
@@ -45,13 +50,6 @@ data Constraint a = (UnEq a) :@ String
 
 instance Show a => Show (Constraint a) where                           
   show (u :@ f) = show u++"\n\tFROM: "++f
-                           
-
-
-data Tp = Atom Tm
-        | Forall Name Tp Tp
-        | ForallImp Name Tp Tp
-        deriving (Eq, Ord)
 
 data Predicate = Predicate { predName::Name
                            , predType::Tp 
@@ -236,13 +234,13 @@ instance AllConsts Argument where
   allConstants = allConstants . getTipe
 instance AllConsts Tp where
   allConstants t = case t of
-    Forall a ty t -> (allConstants t) `mappend` (allConstants ty)
-    ForallImp a ty t -> (allConstants t) `mappend` (allConstants ty)
+    Forall _ ty t -> (allConstants t) `mappend` (allConstants ty)
+    ForallImp _ ty t -> (allConstants t) `mappend` (allConstants ty)
     Atom a -> allConstants a
 instance AllConsts Tm where
   allConstants t = case t of
-    Abs nm t p -> allConstants p `mappend` allConstants t
-    AbsImp nm t p -> allConstants p  `mappend` allConstants t
+    Abs _ t p -> allConstants p `mappend` allConstants t
+    AbsImp _ t p -> allConstants p  `mappend` allConstants t
     Spine head others -> mappend (allConstants head) $ mconcat $ allConstants <$> others
 instance AllConsts Variable where    
   allConstants (Cons a) = S.singleton a
