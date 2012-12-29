@@ -335,17 +335,15 @@ instance CheckType Tp where
       return atom
   
 intermediateUnify env oldBody (nm, nmTy) (body, bodyTipe) = do
-  nm' <- getNewWith $ '*':nm
-  (t',constraints) <- listen $ checkTipe (M.insert nm' nmTy env) (subst (nm |-> cons nm') body) bodyTipe
+  (t',constraints) <- listen $ checkTipe (M.insert nm nmTy env) body bodyTipe
   s <- lift $ genUnifyEngine env constraints
-  let sub = flip M.mapMaybe (M.delete nm' s) $ \t -> case S.member nm' $ allConstants t  of
+  let sub = flip M.mapMaybe (M.delete nm s) $ \t -> case S.member nm $ allConstants t  of
         True -> Nothing
         False -> Just t
       fv = freeVariables oldBody
       sub' = flip M.mapMaybeWithKey sub $ \k t -> case S.member k fv of
         True -> Just t
         False -> Nothing
-            
   tell $ map (\(s',t) -> var s' :=: t :@ show oldBody) $ M.toList sub'   
   return t'
 
