@@ -23,8 +23,14 @@ import Data.Traversable (forM)
 import Data.Foldable as F (msum, foldr', foldl', foldl')
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Data.List
 
 import Debug.Trace
+
+-- TODO: type inference isn't broken per se, it appears as though
+-- type inference only works properly when types are bounded - ie, under an
+-- abstraction.  Thus we need to move type inference back into the typechecker
+
 
 type VarGen = StateT Integer Choice
 
@@ -44,8 +50,8 @@ unifyAll envE env (a:l) = do
 
 unify :: M.Map Name Tp -> M.Map Name Tp -> Constraint Tm -> Unification
 unify envE env constraint@(a :=: b :@ from) =
-  let badConstraint :: VarGen a
-      badConstraint = throwError $ show constraint
+  let badConstraint :: String -> VarGen a
+      badConstraint s = throwError $ "\n"++s++"\n\tIN CONSRAINT:"++show constraint
       unify'' c = unify envE env (c :@ from)
       unify' env c = unify envE env (c :@ from)
       doUntoBoth :: [Argument] -> [Argument] -> Unification
@@ -84,15 +90,14 @@ unify envE env constraint@(a :=: b :@ from) =
 
     Spine (Var a) [] :=: Spine (Var a') [] | a == a' ->
       return mempty
-    Spine (Var a) [] :=: Spine (Var a') l | a == a' -> badConstraint
+
+    Spine (Var a) [] :=: Spine (Var a') l | a == a' -> badConstraint "OCCURS CHECK: different number of arguments for same metavariable"
     Spine (Var a) [] :=: _ | not (M.member a env) && (not $ S.member a $ freeVariables b) ->
       return $ a |-> b
-
     Spine (Var a) m :=: Spine (Var a') n | a == a' && M.member a env && length m == length n ->  -- the var has the same rule whether it is quantified or not.
       doUntoBoth m n
-
     Spine (Cons c) _ :=: Spine (Cons c') _ | c /= c' -> -- Const-Const /=
-      badConstraint
+      badConstraint "DIFFERENT CONSTRUCTORS"
     Spine (Cons _) m :=: Spine (Cons _) n | length m == length n ->  -- Const-Const =
       doUntoBoth m n
 
@@ -134,20 +139,25 @@ unify envE env constraint@(a :=: b :@ from) =
 
     Spine (Var f) xs :=: Spine (Var g) ys | f /= g && not (M.member f env) && not (M.member g env) -> do -- Gvar-Gvar - diff
       h <- getNewWith $ "@var!=var:"++f++"&"++g
-      let act xi next = do
+      let act [] = return (mempty, mempty)
+          act (xi:l)  = do
             sub' <- flip catchError (const $ return Nothing) $ msum $ flip fmap ys $ \yi -> do
               sub <- unify'' (toTm xi :=: toTm yi)
               return $ Just (yi,sub)
-            (zs,sub) <- next
+            (zs,sub) <- act l
             case sub' of
-              Just (yi,sub') -> return ((xi,yi):zs, sub' *** sub)
+              Just (yi ,sub' ) -> return ((xi,yi):zs, sub' *** sub)
               Nothing  -> return (zs, sub)
-      (zs,sub) <- foldr' act (return (mempty, mempty)) xs
+      (zs,sub) <- act xs
 
       let toVar a@(Atom (Spine (Var x) [])) = do
             t <- getTmTp $ Norm a
             return (x, t)
-          toVar _ = badConstraint
+          toVar a@(Atom (Spine (Cons x) [])) = do
+            t <- getTmTp $ Norm a
+            v <- getNewWith "ignored"
+            return (x, t)
+          toVar _ = badConstraint "ARGUMENT NOT A VARIABLE"
 
       xs' <- mapM toVar (getTipe <$> xs)
       ys' <- mapM toVar (getTipe <$> ys)
@@ -157,9 +167,16 @@ unify envE env constraint@(a :=: b :@ from) =
 
           baseG = Spine (Var h) (snd <$> zs)
           g' = foldr' (\(v,vt) t -> Abs v vt t) baseG ys'
-      return (sub *** (f |-> f' *** g |-> g'))
+      trace (show constraint++" \n\tf': "++show f'
+                            ++"\n\tg': "++show g'
+                            ++"\n\tf:  "++show f
+                            ++"\n\tg:  "++show g
+                            ++"\n\txs: "++show xs
+                            ++"\n\tys: "++show ys
+            )
+        $ return (sub *** (f |-> f' *** g |-> g'))
 
-    _ :=: _ -> badConstraint
+    _ :=: _ -> badConstraint "ANYTHING ELSE"
 
 genUnifyEngine :: M.Map Name Tp -> [Constraint Tm] -> VarGen Substitution
 genUnifyEngine env consts = do
@@ -278,26 +295,25 @@ instance CheckType Tm where
       tv1  <- getNewWith $ ':':show a
 
       tv2l <- forM l $ \b -> do
-        bty <- getNewWith $ "@bty"
+        bty <- getNewWith $ "@bty"++show b
         t' <- checkTipe env (getTipe b) $ Atom $ var bty
-        return (b, b { getTipe = t'} )
+        return (b, t')
 
       tv1' <- checkTipe env a $ Atom $ var $ tv1
 
-      let part (ForallImp nm ty b) ((Impl v,Impl ty'):l) = do
-            tell [ toTm ty :=: toTm ty' :@ show oldBody ]
+      let part (ForallImp nm ty b) ((Impl v,ty'):l) = do
+            tell [ toTm ty :=: toTm ty' :@ show v++" @ "++show oldBody ]
             part (subst (nm |-> toTm v) b) l
-          part (Forall nm ty b) ((Norm v,Norm ty'):l) = do
-            tell [ toTm ty :=: toTm ty' :@ show oldBody ]
+          part (Forall nm ty b) ((Norm v, ty'):l) = do
+            tell [ toTm ty :=: toTm ty' :@ show v ++" @ "++show oldBody ]
             part (subst (nm |-> toTm v) b) l
-          part tv1' l@(_:_) = do
+          part tv1' l = do
             -- now we don't know what it is yet, so we'll have to postpone argument checking
             tell [ rebuildSpine (toTm tv1') (fst <$> l) :=: toTm t :@ show oldBody]
-          part r [] = do
-            tell [ toTm r :=: toTm t :@ show oldBody]
 
       part tv1' tv2l
       return t
+
     AbsImp nm nmTy body -> do
       at <- checkTipe env nmTy atom
       v1  <- getNewWith $ ":<"++nm
@@ -323,16 +339,18 @@ instance CheckType Tp where
       return atom
 
 intermediateUnify env oldBody (nm, nmTy) (body, bodyTipe) = do
-  nm' <- getNewWith $ '*':nm
-  (t',constraints) <- listen $ checkTipe (M.insert nm' nmTy env) (subst (nm |-> cons nm') body) bodyTipe
+  (t',constraints) <- listen $ checkTipe (M.insert nm nmTy env) body bodyTipe
   s <- lift $ genUnifyEngine env constraints
-  let sub = flip M.mapMaybe (M.delete nm' s) $ \t -> case S.member nm' $ allConstants t  of
+  let sub = flip M.mapMaybe (M.delete nm s) $ \t -> case S.member nm $ allConstants t  of
         True -> Nothing
         False -> Just t
       fv = freeVariables oldBody
       sub' = flip M.mapMaybeWithKey sub $ \k t -> case S.member k fv of
         True -> Just t
         False -> Nothing
+
+  tell $ map (\(s',t) -> var s' :=: t :@ show oldBody) $ M.toList sub'
+  return t'
 
   tell $ map (\(s',t) -> var s' :=: t :@ show oldBody) $ M.toList sub'
   return t'
@@ -367,9 +385,9 @@ checkType env base ty = fmap fst $ flip runStateT 0 $ appendErr ("FOR: "++show t
 
   let envWF = mappend env fvTy
 
-  (_,constraints) <- runWriterT $ checkTipe envWF ty atom
+  (_,constraints) <- appendErr ("WHILE TYPE CHECKING") $ runWriterT $ checkTipe envWF ty atom
 
-  s <- genUnifyEngine envWF constraints
+  s <- appendErr ("WHILE UNIFYING") $ genUnifyEngine envWF constraints
 
   let envWFL = (\(a,l) -> (Cons a, l)) <$> M.toList env
       act :: (Name, Tp) -> VarGen Substitution -> VarGen Substitution

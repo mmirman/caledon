@@ -16,5 +16,6 @@ defn maybe : atom → atom
 
 defn list : atom → atom
   as nil = {a} list a
-   | cons = {a} a → list a → list a
+   | cons = {a} a -> list a → list a
+
 
