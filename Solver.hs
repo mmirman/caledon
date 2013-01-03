@@ -77,9 +77,8 @@ unify envE env constraint@(a :=: b :@ from) =
       
     Abs n ty t :=: Abs n' ty' t' -> do  
       s <- unify'' $ toTm ty :=: toTm ty'
-      nm <- getNewWith $ "@abs=abs:"++n
-      s' <- unify' (subst s $ M.insert nm ty env) $ subst (M.insert n (var nm) s) t :=: subst (M.insert n' (var nm) s) t'
-      return $ s *** M.delete nm s'
+      s' <- unify' (subst s $ M.insert n ty env) $ subst s t :=: subst (M.insert n' (var n) s) t'
+      return $ s *** M.delete n s'
     Abs n ty t :=: _ -> do  
       nm <- getNewWith $ "@abs=_:"++n
       s <- unify' (M.insert nm ty env) $ subst (n |-> var nm) t :=: rebuildSpine b [Norm $ Atom $ var nm]

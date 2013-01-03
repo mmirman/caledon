@@ -201,7 +201,7 @@ unify cons = case cons of
         
         -- now we can match against the right hand side
         (sub ***) <$> case s' of -- gvar-blah?
-          PI _ _ _ -> return $ x |-> makeFromType ty' s'
+          
           Spine x' y'l -> do
             bind' <- getElm x
             case bind' of
@@ -210,4 +210,5 @@ unify cons = case cons of
               Left Binding{ elmQuant = Forall } -> undefined -- gvar-gvar 
                  -- gvar-gvar-same
                  -- gvar-gvar-diff
-        
+
+          _ -> return $ x |-> makeFromType ty' s'
