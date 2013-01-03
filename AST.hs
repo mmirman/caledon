@@ -124,7 +124,6 @@ m1 *** m2 = M.union m2 (subst m2 <$> m1)
 (|->) = M.singleton
 (!) = flip M.lookup
 
-
 rebuildSpine :: Tm -> [Argument] -> Tm
 rebuildSpine s [] = s
 rebuildSpine (Spine (Cons "forall") [Norm (Atom a)]) apps' = rebuildSpine a apps'
