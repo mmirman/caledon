@@ -312,7 +312,7 @@ instance CheckType Tm where
       at <- checkTipe env nmTy atom
       v1  <- getNewWith $ ":<"++nm
       v2  <- getNewWith $ ":>"++nm
-      tell [ toTm (ForallImp v1 nmTy $ Atom $ var v2) :=: toTm t :@ show oldBody]
+      tell [ toTm (ForallImp v1 nmTy $ Atom $ Spine (Var v2) [Norm $ Atom $ var v1] ) :=: toTm t :@ show oldBody]
       ForallImp v1 nmTy <$> intermediateUnify env oldBody (nm,nmTy) (body, Atom $ var v2)
       
     Abs nm nmTy body -> do
