@@ -1,2 +1,2 @@
 defn example : [ atx : atom ] atx -> atom 
-  as eximp = [atx : atom][a : _ ] example atx a
+  as eximp = [atx : atom][a : atom ] example atx a
