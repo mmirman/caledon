@@ -4,66 +4,54 @@ import AST
 import Choice
 import Solver
 import Parser
-
 import System.Environment
 import Data.Functor
 import Data.Foldable as F (forM_)
-import Data.List (partition, concatMap)
-import Control.Arrow(first)
-import Text.Parsec hiding (parse)
+import Data.List (partition)
+import Text.Parsec
 import Data.Monoid
+import Control.Arrow (first)
 
 -----------------------------------------------------------------------
 -------------------------- MAIN ---------------------------------------
 -----------------------------------------------------------------------
-
-showDecs :: [Predicate] -> String
-showDecs []   = []
-showDecs decs = init $ init $ concatMap (\s -> show s ++ "\n\n") decs
-
-showTarget :: Predicate -> [(Name, Tm)] -> String
-showTarget t s = "\nTARGET: \n" ++ show t ++ "\n\nSOLVED WITH:\n" ++ concatMap (\(a,b) -> a ++ " => " ++ show b ++ "\n") s
-
-isPredicate :: Predicate -> Bool
-isPredicate Predicate {} = True
-isPredicate _            = False
-
-allTypes :: Predicate -> [(Name, Tp)]
-allTypes x = (predName x, predType x) : predConstructors x
-
-typeCheck :: [Predicate] -> IO [Predicate]
-typeCheck decs = case runError $ typeCheckAll decs of
-    Left  e -> error e
-    Right p -> putStrLn "Type checking success!" >> return p
-
-solveTarget :: [Predicate] -> Predicate -> IO ()
-solveTarget ps t = putStrLn $ case solver (first Cons <$> concatMap allTypes ps) $ predType t of
-    Left  e -> "Error: " ++ e
-    Right s -> showTarget t s
-
-checkAndRun :: [Predicate] -> IO ()
 checkAndRun decs = do
 
-  putStrLn $ "FILE: \n" ++ showDecs decs
+  putStrLn "\nFILE: "
+  forM_ decs $ \s -> putStrLn $ show s++"\n"
 
   putStrLn "\nTYPE CHECKING: "
-  typedDecs <- typeCheck decs
+  decs <- case runError $ typeCheckAll decs of
+    Left e -> error e
+    Right e -> putStrLn "Type checking success!" >> return e
+  let (predicates, targets) = flip partition decs $ \x -> case x of
+        Predicate {} -> True
+        _ -> False
 
-  let (predicates, targets) = partition isPredicate typedDecs
+  putStrLn "\nAXIOMS: "
+  forM_ predicates $ \s -> putStrLn $ show s++"\n"
 
-  putStrLn $ "\nAXIOMS: \n"  ++ showDecs predicates
-  putStrLn $ "\nTARGETS: \n" ++ showDecs targets
+  putStrLn "\nTARGETS: "
+  forM_ targets $ \s -> putStrLn $ show s++"\n"
 
-  mapM_ (solveTarget predicates) targets
-
-parseFile :: String -> IO (Either ParseError [Predicate])
-parseFile fname = readFile fname >>= \file -> return $ runP decls (ParseState 0 mempty) fname file
+  let allTypes c = (predName c, predType c):predConstructors c
+  forM_ targets $ \target ->
+    case solver (first Cons <$> concatMap allTypes predicates) $ predType target of
+      Left e -> putStrLn $ "ERROR: "++e
+      Right sub -> putStrLn $
+                   "\nTARGET: \n"++show target
+                   ++"\n\nSOLVED WITH:\n"
+                   ++concatMap (\(a,b) -> a++" => "++show b++"\n") sub
 
 main = do
   fnames <- getArgs
   case fnames of
-    []      -> putStrLn "No file specified." --REPL Here
-    [fname] -> do mDecls <- parseFile fname  --Parser
-                  case mDecls of
-                    Left e -> putStrLn "Parse Error:\n" >> print e
-                    Right l -> checkAndRun l
+    [] -> putStrLn "No file specified. Usage is \"caledon file.ncc\""
+    [fname] -> do
+      file <- readFile fname
+      let mError = runP decls (ParseState 0 mempty) fname file
+      decs <- case mError of
+        Left e -> error $ show e
+        Right l -> return l
+      checkAndRun decs
+    _ -> putStrLn "Unrecognized arguments. Usage is \"caledon file.ncc\""
