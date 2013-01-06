@@ -1,8 +1,9 @@
-{-# LANGUAGE 
- FlexibleContexts,  
+{-# LANGUAGE
+ FlexibleContexts,
  FlexibleInstances,
  TupleSections
  #-}
+
 module Solver where
 
 import AST
@@ -12,6 +13,7 @@ import Control.Monad (void, unless)
 import Control.Applicative ((<|>), empty)
 import Control.Monad.Error.Class
 import Control.Monad.State (StateT, runStateT)
+import Control.Monad.State.Class
 import Control.Monad.Writer (WriterT, runWriterT)
 import Control.Monad.Writer.Class
 import Control.Monad.Trans.Class
@@ -27,7 +29,7 @@ import Debug.Trace
 
 -- TODO: type inference isn't broken per se, it appears as though
 -- type inference only works properly when types are bounded - ie, under an
--- abstraction.  Thus we need to move type inference back into the typechecker 
+-- abstraction.  Thus we need to move type inference back into the typechecker
 
 
 type VarGen = StateT Integer Choice
@@ -39,14 +41,15 @@ type Unification = VarGen Substitution
 
 getV = id
 setV a _ = a
-      
+
+unifyAll :: M.Map Name Tp -> M.Map Name Tp -> ([Constraint Tm] -> VarGen (M.Map Name Tm))
 unifyAll _ _ [] = return mempty
 unifyAll envE env (a:l) = do
   s <- appendErr ("UNIFYING CONSTRAINT: "++show a) $ unify envE env a
   (s ***) <$> unifyAll envE env (subst s l)
 
 unify :: M.Map Name Tp -> M.Map Name Tp -> Constraint Tm -> Unification
-unify envE env constraint@(a :=: b :@ from) = 
+unify envE env constraint@(a :=: b :@ from) =
   let badConstraint :: String -> VarGen a
       badConstraint s = throwError $ "\n"++s++"\n\tIN CONSRAINT:"++show constraint
       unify'' c = unify envE env (c :@ from)
@@ -54,7 +57,7 @@ unify envE env constraint@(a :=: b :@ from) =
       doUntoBoth :: [Argument] -> [Argument] -> Unification
       doUntoBoth m n = F.foldl' act (return mempty) (zip (getTipe <$> m) (getTipe <$> n))
       act prev (mt,nt) = do
-        sub <- prev 
+        sub <- prev
         sub' <- unify' (subst sub env) $ subst sub $ toTm mt :=: toTm nt
         return $ sub *** sub'
 
@@ -62,42 +65,41 @@ unify envE env constraint@(a :=: b :@ from) =
       getTp nm = case env ! nm of
         Nothing -> envE ! nm
         Just t -> Just t
-        
+
       getTmTp s = case getTipe s of
         Atom (Spine v []) | Just t <- getTp (getName v) -> return t
         Atom (Spine v []) -> Atom <$> var <$> getNew
         _ -> return $ atom
-        
+
   in case a :=: b of
     _ :=: _ | a > b -> unify' env $ b :=: a
-    
+
     AbsImp n ty t :=: _ -> do
       (v',s) <- solve $ (map (\(a,b)-> (Cons a,b)) $ M.toList envE)++(map (\(a,b)-> (Var a,b) )$ M.toList env) :|- ty
       unify' env $ subst (s *** n |-> v') t :=: subst s b
-      
-    Abs n ty t :=: Abs n' ty' t' -> do  
+
+    Abs n ty t :=: Abs n' ty' t' -> do
       s <- unify'' $ toTm ty :=: toTm ty'
       s' <- unify' (subst s $ M.insert n ty env) $ subst s t :=: subst (M.insert n' (var n) s) t'
       return $ s *** M.delete n s'
-    Abs n ty t :=: _ -> do  
+    Abs n ty t :=: _ -> do
       nm <- getNewWith $ "@abs=_:"++n
       s <- unify' (M.insert nm ty env) $ subst (n |-> var nm) t :=: rebuildSpine b [Norm $ Atom $ var nm]
       return $ M.delete nm s
-    
-    Spine (Var a) [] :=: Spine (Var a') [] | a == a' -> 
+
+    Spine (Var a) [] :=: Spine (Var a') [] | a == a' ->
       return mempty
-    Spine (Var a) [] :=: Spine (Var a') l | a == a' -> badConstraint "OCCURS CHECK: different number of arguments for same metavariable" 
-    Spine (Var a) [] :=: _ | not (M.member a env) && (not $ S.member a $ freeVariables b) -> 
+
+    Spine (Var a) [] :=: Spine (Var a') l | a == a' -> badConstraint "OCCURS CHECK: different number of arguments for same metavariable"
+    Spine (Var a) [] :=: _ | not (M.member a env) && (not $ S.member a $ freeVariables b) ->
       return $ a |-> b
-    
     Spine (Var a) m :=: Spine (Var a') n | a == a' && M.member a env && length m == length n ->  -- the var has the same rule whether it is quantified or not.
       doUntoBoth m n
-      
-    Spine (Cons c) _ :=: Spine (Cons c') _ | c /= c' -> -- Const-Const /= 
+    Spine (Cons c) _ :=: Spine (Cons c') _ | c /= c' -> -- Const-Const /=
       badConstraint "DIFFERENT CONSTRUCTORS"
-    Spine (Cons _) m :=: Spine (Cons _) n | length m == length n ->  -- Const-Const = 
+    Spine (Cons _) m :=: Spine (Cons _) n | length m == length n ->  -- Const-Const =
       doUntoBoth m n
-      
+
     Spine (Var x) n :=: Spine (Cons c) m | not $ M.member x env -> do -- Gvar-Const
       us <- forM n $ const $ getNewWith $ "@var=cons_L:"++x
       usty <- forM n getTmTp
@@ -106,10 +108,10 @@ unify envE env constraint@(a :=: b :@ from) =
           s = x |-> foldr' (\(v,ty) t -> Abs v ty t) l (zip us usty)
       s' <- unify' (subst s env) $ subst s (a :=: b)
       return $ (s *** s')
-      
+
     Spine (Var a) n :=: Spine (Var a') m | a == a' && not (M.member a env) && length m == length n -> do
       h <- getNewWith $ "@var=var:"++a
-      
+
       let act (xi, yi) next = do
             vi <- getNew
 
@@ -117,57 +119,57 @@ unify envE env constraint@(a :=: b :@ from) =
 
             (xs,zs,sub) <- next
             case sub' of
-              Just sub' -> do 
+              Just sub' -> do
                 vit  <- getTmTp $ Norm xi
-                return ((vi,vit):xs,vi:zs, sub' *** sub)              
+                return ((vi,vit):xs,vi:zs, sub' *** sub)
               Nothing   -> do
                 vit <- Atom <$> var <$> getNew
                 return ((vi,vit):xs,zs  , sub)
-                
+
       (xts,zs,sub) <- foldr' act (return (mempty, mempty, mempty)) (zip (getTipe <$> n) (getTipe <$> m))
-      
+
       let xs = map fst xts
           base = Spine (Var h) (Norm <$> Atom <$> var <$> zs)
           f' = foldr' (\(v,xt) t -> Abs v xt t) base xts
       return (sub *** a |-> f')
-      
+
     Spine (Var f) xs :=: Spine (Var g) ys | f /= g && xs == ys && not (M.member f env) && not (M.member g env) -> do
       return (g |-> var f)
 
     Spine (Var f) xs :=: Spine (Var g) ys | f /= g && not (M.member f env) && not (M.member g env) -> do -- Gvar-Gvar - diff
       h <- getNewWith $ "@var!=var:"++f++"&"++g
-      let act [] = return (mempty, mempty)      
+      let act [] = return (mempty, mempty)
           act (xi:l)  = do
             sub' <- flip catchError (const $ return Nothing) $ msum $ flip fmap ys $ \yi -> do
               sub <- unify'' (toTm xi :=: toTm yi)
               return $ Just (yi,sub)
             (zs,sub) <- act l
             case sub' of
-              Just (yi ,sub' ) -> return ((xi,yi):zs, sub' *** sub)              
+              Just (yi ,sub' ) -> return ((xi,yi):zs, sub' *** sub)
               Nothing  -> return (zs, sub)
       (zs,sub) <- act xs
-      
+
       let toVar a@(Atom (Spine (Var x) [])) = do
             t <- getTmTp $ Norm a
             return (x, t)
           toVar a@(Atom (Spine (Cons x) [])) = do
             t <- getTmTp $ Norm a
-            v <- getNewWith "ignored"                  
-            return (x, t) 
+            v <- getNewWith "ignored"
+            return (x, t)
           toVar _ = badConstraint "ARGUMENT NOT A VARIABLE"
-      
+
       xs' <- mapM toVar (getTipe <$> xs)
       ys' <- mapM toVar (getTipe <$> ys)
-      
+
       let baseF = Spine (Var h) (fst <$> zs)
           f' = foldr' (\(v,vt) t -> Abs v vt t) baseF xs'
-          
+
           baseG = Spine (Var h) (snd <$> zs)
           g' = foldr' (\(v,vt) t -> Abs v vt t) baseG ys'
-      trace (show constraint++" \n\tf': "++show f' 
+      trace (show constraint++" \n\tf': "++show f'
                             ++"\n\tg': "++show g'
                             ++"\n\tf:  "++show f
-                            ++"\n\tg:  "++show g                            
+                            ++"\n\tg:  "++show g
                             ++"\n\txs: "++show xs
                             ++"\n\tys: "++show ys
             )
@@ -175,12 +177,13 @@ unify envE env constraint@(a :=: b :@ from) =
 
     _ :=: _ -> badConstraint "ANYTHING ELSE"
 
+genUnifyEngine :: M.Map Name Tp -> [Constraint Tm] -> VarGen Substitution
 genUnifyEngine env consts = do
   s <- unifyAll env mempty consts
   return $ finishSubst s
-  
+
 recSubst :: (Eq b, Subst b) => Substitution -> b -> b
-recSubst s f = fst $ head $ dropWhile (not . uncurry (==)) $ iterate (\(_,b) -> (b,subst s b)) (f,subst s f)  
+recSubst s f = fst $ head $ dropWhile (not . uncurry (==)) $ iterate (\(_,b) -> (b,subst s b)) (f,subst s f)
 
 finishSubst s = recSubst s s
 
@@ -190,7 +193,7 @@ finishSubst s = recSubst s s
 type Reification = VarGen (Tm,Substitution)
 type Deduction = VarGen Substitution
 
-unifier :: [(Variable,Tp)] -> Tp -> Reification 
+unifier :: [(Variable,Tp)] -> Tp -> Reification
 unifier cons t = do
   t' <- case t of
     Atom k -> return k
@@ -199,7 +202,7 @@ unifier cons t = do
       isAtom _ = False
   msum $ flip map (filter (isAtom . snd) cons) $ \(x,Atom con) -> do
     s <- genUnifyEngine (M.fromList $ (\(a,b) -> (getName a, b) ) <$> cons) [con :=: t' :@ show x]
-    return $ (Spine x [],s) 
+    return $ (Spine x [],s)
 
 left :: Judgement -> Reification
 left ([] :|- _) = empty
@@ -215,7 +218,7 @@ left ((x,f):context :|- r) = case f of
         s = seq n $ M.delete nm' so
     s' <- natural (subst s $ (x,f):context) $ subst s (n,t1)
     return (subst s' $ subst (y |-> Spine x []) m, s *** s')
-    
+
   Forall nm t1 t2 -> do
     nm' <- getNew
     y <- getNew
@@ -253,22 +256,22 @@ natural cont (tm,ty) = do
   let env = M.fromList $ (\(a,b) -> (getName a, b)) <$> cont
   (_, constraints) <- runWriterT $ checkTipe env tm ty
   genUnifyEngine env constraints
-  
+
 
 solver :: [(Variable,Tp)] -> Tp -> Either String [(Name, Tm)]
 solver axioms t = case runError $ runStateT (solve $ axioms :|- t) 0 of
   Right ((tm,s),_) -> Right $ ("query", tm):(recSubst s $ map (\a -> (a,var a)) $ S.toList $ freeVariables t)
   Left s -> Left $ "reification not possible: "++s
-  
+
 -----------------------------------------------------------------
------------------------ Type Checker ----------------------------    
+----------------------- Type Checker ----------------------------
 -----------------------------------------------------------------
 type Environment = M.Map Name Tp
 type NatDeduct = WriterT [Constraint Tm] VarGen
 
 class CheckType t where
   checkTipe :: Environment -> t -> Tp -> NatDeduct Tp
-  
+
 instance CheckType Variable where
   checkTipe env v t = case v of
     Cons nm -> case env ! nm of
@@ -281,7 +284,9 @@ instance CheckType Variable where
       Just t' -> do
         tell [toTm t' :=: toTm t :@ show v]
         return t'
+
 traceOn a = trace (show a) a
+
 instance CheckType Tm where
   checkTipe env oldBody t = case oldBody of
     Spine a [] -> checkTipe env a t
@@ -292,47 +297,46 @@ instance CheckType Tm where
         bty <- getNewWith $ "@bty"++show b
         t' <- checkTipe env (getTipe b) $ Atom $ var bty
         return (b, t')
-        
+
       tv1' <- checkTipe env a $ Atom $ var $ tv1
-      
+
       let part (ForallImp nm ty b) ((Impl v,ty'):l) = do
-            tell [ toTm ty :=: toTm ty' :@ show v++" @ "++show oldBody ] 
+            tell [ toTm ty :=: toTm ty' :@ show v++" @ "++show oldBody ]
             part (subst (nm |-> toTm v) b) l
           part (Forall nm ty b) ((Norm v, ty'):l) = do
-            tell [ toTm ty :=: toTm ty' :@ show v ++" @ "++show oldBody ] 
+            tell [ toTm ty :=: toTm ty' :@ show v ++" @ "++show oldBody ]
             part (subst (nm |-> toTm v) b) l
           part tv1' l = do
             -- now we don't know what it is yet, so we'll have to postpone argument checking
             tell [ rebuildSpine (toTm tv1') (fst <$> l) :=: toTm t :@ show oldBody]
-            
+
       part tv1' tv2l
       return t
-      
-    AbsImp nm nmTy body -> do  
+
+    AbsImp nm nmTy body -> do
       at <- checkTipe env nmTy atom
       v1  <- getNewWith $ ":<"++nm
       v2  <- getNewWith $ ":>"++nm
       tell [ toTm (ForallImp v1 nmTy $ Atom $ Spine (Var v2) [Norm $ Atom $ var v1] ) :=: toTm t :@ show oldBody]
       ForallImp v1 nmTy <$> intermediateUnify env oldBody (nm,nmTy) (body, Atom $ var v2)
-      
+
     Abs nm nmTy body -> do
       checkTipe env nmTy atom
       v1  <- getNewWith $ ":<"++nm
       v2  <- getNewWith $ ":>"++nm
       tell [ toTm (Forall v1 nmTy $ Atom $ var v2) :=: toTm t :@ show oldBody]
       Forall v1 nmTy <$> intermediateUnify env oldBody (nm,nmTy) (body, Atom $ var v2)
-  
+
 instance CheckType Tp where
-  checkTipe env oldBody atomty = case oldBody of 
-    Atom tm -> do
-      checkTipe env tm atomty
+  checkTipe env oldBody atomty = case oldBody of
+    Atom tm -> checkTipe env tm atomty
     ForallImp nm nmTy body -> do
       checkTipe env (Forall nm nmTy body) atomty
     Forall nm nmTy body -> do
       checkTipe env nmTy atom
       intermediateUnify env oldBody (nm, nmTy) (body, atom)
       return atom
-  
+
 intermediateUnify env oldBody (nm, nmTy) (body, bodyTipe) = do
   (t',constraints) <- listen $ checkTipe (M.insert nm nmTy env) body bodyTipe
   s <- lift $ genUnifyEngine env constraints
@@ -343,20 +347,27 @@ intermediateUnify env oldBody (nm, nmTy) (body, bodyTipe) = do
       sub' = flip M.mapMaybeWithKey sub $ \k t -> case S.member k fv of
         True -> Just t
         False -> Nothing
-  tell $ map (\(s',t) -> var s' :=: t :@ show oldBody) $ M.toList sub'   
+
+  tell $ map (\(s',t) -> var s' :=: t :@ show oldBody) $ M.toList sub'
   return t'
 
+  tell $ map (\(s',t) -> var s' :=: t :@ show oldBody) $ M.toList sub'
+  return t'
 
+getCons :: Tm -> VarGen String
 getCons tm = case tm of
   Spine (Cons t) _ -> return t
   Abs _ _ t -> getCons t
   _ -> throwError $ "can't place a non constructor term here: "++ show tm
 
+getPred :: Tp -> VarGen String
 getPred tp = case tp of
   Atom t -> getCons t
   Forall _ _ t -> getPred t
   ForallImp _ _ t -> getPred t
 
+--I think this type signature might be unnecessarily verbose
+getNewWith :: (Functor m, MonadState Integer m) => String -> m String
 getNewWith t = (++t) <$> getNew
 
 -- need to do a topological sort of types and predicates.
@@ -364,16 +375,17 @@ getNewWith t = (++t) <$> getNew
 checkType :: Environment -> Name -> Tp -> Choice Tp
 checkType env base ty = fmap fst $ flip runStateT 0 $ appendErr ("FOR: "++show ty) $ do
   con <- getPred ty
-  unless (null base || con == base) 
+  unless (null base || con == base)
     $ throwError $ "non local name \""++con++"\" expecting "++base
 
-  let fv = freeVariables ty  
-      
+  let fv = freeVariables ty
+
   fvTy <- M.fromList <$> mapM (\i -> (i,) <$> Atom <$> var <$> getNew) (S.toList fv)
-  let envWF = mappend env fvTy 
-      
+
+  let envWF = mappend env fvTy
+
   (_,constraints) <- appendErr ("WHILE TYPE CHECKING") $ runWriterT $ checkTipe envWF ty atom
-  
+
   s <- appendErr ("WHILE UNIFYING") $ genUnifyEngine envWF constraints
 
   let envWFL = (\(a,l) -> (Cons a, l)) <$> M.toList env
@@ -388,7 +400,7 @@ checkType env base ty = fmap fst $ flip runStateT 0 $ appendErr ("FOR: "++show t
 
   -- I'm not sure this makes sense at all.
   -- in the mean time, assume there is only one use of each unbound variable
-  
+
   return $ subst s' ty
 
 typeCheckPredicate :: Environment -> Predicate -> Choice Predicate
@@ -398,15 +410,15 @@ typeCheckPredicate env (Query nm ty) = appendErr ("in query : "++show ty) $ do
 typeCheckPredicate env pred@(Predicate pnm pty plst) = appendErr ("in\n"++show pred) $ do
   pty' <- appendErr ("in name: "++ pnm ++" : "++show pty) $
     checkType env "atom" pty
-  plst' <- forM plst $ \(nm,ty) -> 
+  plst' <- forM plst $ \(nm,ty) ->
     appendErr ("in case: " ++nm ++ " = "++show ty) $ (nm,) <$> checkType env pnm ty
   return $ Predicate pnm pty' plst'
 
 typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = forM preds $ typeCheckPredicate assumptions
-  where assumptions = M.fromList $ 
+  where assumptions = M.fromList $
                       ("atom", atom): -- atom : atom is a given.
-                      ("forall", (atom ~~> atom) ~~> atom): -- atom : atom is a given.                      
+                      ("forall", (atom ~~> atom) ~~> atom): -- atom : atom is a given.
                       ("?forall", (atom ==> atom) ~~> atom): -- atom : atom is a given.
                       concatMap (\st -> case st of
                                     Query _ _ -> []
