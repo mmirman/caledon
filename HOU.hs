@@ -6,11 +6,12 @@
  #-}
 module HOU where
 import Choice
-import Control.Monad.State (StateT, runStateT, modify, get)
+import Control.Monad.State (StateT, runStateT, modify, get, put)
 import Control.Monad.RWS (RWST, runRWST, ask, withRWST)
 import Control.Monad.Error (throwError)
 import Control.Monad (unless, forM_, replicateM)
 import Control.Monad.Trans (lift)
+import Control.Applicative
 import qualified Data.Foldable as F
 import Data.List
 import Data.Maybe
@@ -116,7 +117,8 @@ instance Show Quant where
   show Exists = "∃"
 
 -- as ineficient as it is, I'll make this the constraint representation.
-data Constraint = Spine :=: Spine
+data Constraint = Top
+                | Spine :=: Spine
                 | Constraint :&: Constraint
                 | Bind Quant Name Type Constraint
                 deriving (Eq)
@@ -168,35 +170,37 @@ emptyContext = Context Nothing mempty Nothing
 
 -- assumes the element is not already in the context, or it is and the only thing that is changing is it's type.
 addToContext :: Context -> Binding -> Context
-addToContext (Context Nothing ctxt Nothing) elm@(Binding _ nm _ Nothing Nothing) | M.null ctxt = Context (Just nm) (M.singleton nm elm) (Just nm)
+addToContext (Context Nothing ctxt Nothing) elm@(Binding _ nm _ Nothing Nothing) | M.null ctxt = checkContext "addToCtxt N N" $ 
+                                                                                                 Context (Just nm) (M.singleton nm elm) (Just nm)
 addToContext c (Binding _ _ _ Nothing Nothing) = error $ "context not empty so can't add to tail: "++show c
-addToContext (Context h ctxt t) elm@(Binding _ nm _ t'@(Just p) Nothing) | t' == t = Context h (M.insert p t'val $ M.insert nm elm $ ctxt) (Just nm)
+addToContext (Context h ctxt t) elm@(Binding _ nm _ t'@(Just p) Nothing) | t' == t = checkContext "addToCtxt J N" $ 
+  Context h (M.insert p t'val $ M.insert nm elm $ ctxt) (Just nm)
   where t'val = (lookupWith "looking up p ctxt" p ctxt) { elmNext = Just nm }
 addToContext _ (Binding _ _ _ _ Nothing) = error "can't add this to tail"
-addToContext (Context h ctxt t) elm@(Binding _ nm _ Nothing h'@(Just n)) | h' == h = Context (Just nm) (M.insert n h'val $ M.insert nm elm $ ctxt) t
+addToContext (Context h ctxt t) elm@(Binding _ nm _ Nothing h'@(Just n)) | h' == h = checkContext "addToCtxt N J" $ 
+  Context (Just nm) (M.insert n h'val $ M.insert nm elm $ ctxt) t
   where h'val = (lookupWith "looking up n ctxt" n ctxt) { elmPrev = Just nm }
 addToContext _ (Binding _ _ _ Nothing _) = error "can't add this to head"
-addToContext ctxt@Context{ctxtMap = cmap} elm@(Binding _ nm _ (Just p) (Just n)) = 
+addToContext ctxt@Context{ctxtMap = cmap} elm@(Binding _ nm _ (Just p) (Just n)) = checkContext "addToCtxt J J" $ 
   ctxt { ctxtMap = M.insert n n'val $ M.insert p p'val $ M.insert nm elm $ cmap }
   where n'val = (lookupWith "looking up n cmap" n cmap) { elmPrev = Just nm }
         p'val = (lookupWith "looking up p cmap" p cmap) { elmNext = Just nm }
-
-
+  
 removeFromContext :: Name -> Context -> Context
 removeFromContext nm ctxt@(Context h cmap t) = case M.lookup nm cmap of
-  Nothing -> ctxt
+  Nothing -> checkContext "removing: nothing" $ ctxt
   Just Binding{ elmPrev = Nothing, elmNext = Nothing } -> emptyContext
-  Just Binding{ elmPrev = Nothing, elmNext = Just n } | Just nm == h -> Context (Just n) (M.insert n h' $ M.delete nm cmap) t
+  Just Binding{ elmPrev = Nothing, elmNext = Just n } | Just nm == h -> checkContext "removing: N J" $ Context (Just n) (M.insert n h' $ M.delete nm cmap) t
     where h' = (lookupWith "attempting to find new head" n cmap) { elmPrev = Nothing }
-  Just Binding{ elmPrev = Just p, elmNext = Nothing } | Just nm == t -> Context h (M.insert p t' $ M.delete nm cmap) (Just p)
+  Just Binding{ elmPrev = Just p, elmNext = Nothing } | Just nm == t -> checkContext "removing: J N" $ Context h (M.insert p t' $ M.delete nm cmap) (Just p)
     where t' = (lookupWith "attempting to find new tail" p cmap) { elmNext = Nothing }
   Just Binding{elmPrev = Just cp, elmNext = Just cn } -> case () of
-    _ | h == t -> Context Nothing mempty Nothing
-    _ | h == Just nm -> Context (Just cn) (n' $ M.delete nm cmap) t
-    _ | t == Just nm -> Context h   (p' $ M.delete nm cmap) (Just cp)
-    _ -> Context h   (n' $ p' $ M.delete nm cmap) t
-    where n' = M.insert cn $ (lookupWith "looking up a cmap for n'" cn cmap) { elmNext = Just cp }
-          p' = M.insert cp $ (lookupWith "looking up a cmap for p'" cp cmap ) { elmPrev = Just cn }
+    _ | h == t -> checkContext "removing: J J | h == t " $ Context Nothing mempty Nothing
+    _ | h == Just nm -> checkContext "removing: J J | h == Just nm  " $ Context (Just cn) (n' $ M.delete nm cmap) t
+    _ | t == Just nm -> checkContext "removing: J J | t == Just nm  " $ Context h   (p' $ M.delete nm cmap) (Just cp)
+    _ -> checkContext ("removing: J J | h /= t \n\t"++show ctxt) $ Context h (n' $ p' $ M.delete nm cmap) t
+    where n' = M.insert cn $ (lookupWith "looking up a cmap for n'" cn cmap) { elmPrev = Just cp }
+          p' = M.insert cp $ (lookupWith "looking up a cmap for p'" cp cmap ) { elmNext = Just cn }
           
 addToHead quant nm tp ctxt = addToContext ctxt $ Binding quant nm tp Nothing (ctxtHead ctxt)
 addToTail quant nm tp ctxt = addToContext ctxt $ Binding quant nm tp (ctxtTail ctxt) Nothing
@@ -209,6 +213,27 @@ removeTail ctxt = case ctxtTail ctxt of
   Nothing -> ctxt
   Just a -> removeFromContext a ctxt
 
+getTail (Context _ ctx (Just t)) = lookupWith "getting tail" t ctx
+getHead (Context (Just h) ctx _) = lookupWith "getting head" h ctx
+
+getEnd s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
+  where gb (Binding _ nm ty _ n) = (nm,ty):case n of
+          Nothing -> []
+          Just n -> gb $ case M.lookup n ctxt of 
+            Nothing -> error $ "element "++show n++" not in map \n\twith ctxt: "++show ctx++" \n\t for bind: "++show bind++"\n\t"++s
+            Just c -> c
+
+getStart s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
+  where gb (Binding _ nm ty p _) = (nm,ty):case p of
+          Nothing -> []
+          Just p -> gb $ case M.lookup p ctxt of 
+            Nothing -> error $ "element "++show p++" not in map \n\twith ctxt: "++show ctx++" \n\t for bind: "++show bind++"\n\t"++s
+            Just c -> c
+            
+checkContext s c@(Context Nothing _ Nothing) = c
+checkContext s ctx = foldr seq ctx $ zip st ta
+  where st = getStart s (getTail ctx) ctx
+        ta = getEnd s (getHead ctx) ctx
 
 -----------------------------------------------
 ---  the higher order unification algorithm ---
@@ -216,50 +241,91 @@ removeTail ctxt = case ctxtTail ctxt of
 
 type Unification = StateT Context Env Substitution
 
-getElm x = do 
+getElm s x = do 
   ty <- lookupConstant x
-  case ty of 
-    Nothing -> Left <$> (lookupWith ("looking up x c: "++show x) x ) <$> ctxtMap <$> get
+  case ty of
+    Nothing -> Left <$> (\ctxt -> lookupWith ("looking up "++x++"\n\t in context: "++show ctxt++"\n\t"++s) x ctxt) <$> ctxtMap <$> get
     Just a -> return $ Right a
+{-
+("11@xm",Binding {elmQuant = ∃, elmName = "11@xm", elmType = Π 16@un : (atom 3@tyA a atx 11@xm) . Π 15@un : atom . Π 14@un : atx . Π 13@un : atom . Π 12@un : atom . Π  : atom . atom, elmPrev = Nothing, elmNext = Just "atx"})
+("atx",Binding {elmQuant = ∀, elmName = "atx", elmType = atom, elmPrev = Just "11@xm", elmNext = Just "a"})
+("a",Binding {elmQuant = ∀, elmName = "a", elmType = atx, elmPrev = Just "atx", elmNext = Just "3@tyA"})
+("3@tyA",Binding {elmQuant = ∃, elmName = "3@tyA", elmType = atom, elmPrev = Just "a", elmNext = Just "atx2"})
+("atx2",Binding {elmQuant = ∀, elmName = "atx2", elmType = atom, elmPrev = Just "3@tyA", elmNext = Nothing})]
+-}
 
+-- | This gets all the bindings outside of a given bind and returns them in a list.
 getBindings bind = do
-  ctxt <- ctxtMap <$> get
-  
-  let gb (Binding _ nm ty p _) = (nm,ty):case p of
-        Nothing -> []
-        Just p -> gb $ ctxt M.! p
-  return $ tail $ gb bind
-  
+  ctx <- get
+  return $ getStart "IN: getBindings" bind ctx
+
+
 getTypes (Spine "forall" [Abs _ ty l]) = ty:getTypes l
 getTypes _ = []
 
-unify :: Constraint -> Unification
-unify cons = case cons of 
-  c1 :&: c2 -> do  -- this assumes and-forall, forall-and is a rule
-    sub <- unify c1
-    modify $ subst sub
-    (sub ***) <$> unify (subst sub c2)
-  Bind quant nm ty c -> do -- this assumes and-forall, forall-and is a rule
-    modify $ addToTail quant nm ty
-    unify c
+flatten cons = case cons of
+  Top -> ([],[])
+  c1 :&: c2 -> let (binds1,c1') = flatten c1
+                   (binds2,c2') = flatten c2
+               in (binds1++binds2,c1'++c2')
+  Bind quant nm ty c -> ((quant,nm,ty):binds,c')
+    where (binds, c') = flatten c
+  a :=: b -> ([],[(a,b)])
+  
+addBinds binds = mapM_ (\(quant,nm,ty) -> modify $ addToTail quant nm ty) binds   
+
+isolate m = do
+  s <- get
+  a <- m
+  s' <- get
+  put s
+  return (s',a)
+
+unify cons = do
+  let (binds,constraints) = flatten cons
+      
+  addBinds binds
+  
+  let uniOne [] r  = throwError "can not unify any further"
+      uniOne ((a,b):l) r = do
+        (newstate,choice) <- isolate $ unifyEq a b
+        case choice of
+          Just (sub,cons) -> do
+            let (binds,constraints) = flatten cons
+            put newstate
+            addBinds binds
+            let l' = subst sub l
+                r' = subst sub $ reverse r
+            return $ (sub,l'++constraints++r')
+          Nothing -> uniOne l ((a,b):r)
+     
+      uniWhile [] = return mempty
+      uniWhile l = do 
+        (sub,l') <- uniOne l []
+        modify $ subst sub
+        (sub ***) <$> uniWhile l'
+      
+  uniWhile constraints
+
+unifyEq a b = let cons = a :=: b in case cons of 
   Abs nm ty s :=: Abs nm' ty' s' -> do
-    unify $ ty :=: ty' :&: (Bind Forall nm ty $ s :=: subst (nm' |-> var nm) s')
+    return $ Just (mempty, ty :=: ty' :&: (Bind Forall nm ty $ s :=: subst (nm' |-> var nm) s'))
   Abs nm ty s :=: s' -> do
-    unify $ Bind Forall nm ty $ s :=: rebuildSpine s' [var nm]
-  s :=: s' | s == s' -> return mempty
+    return $ Just (mempty, Bind Forall nm ty $ s :=: rebuildSpine s' [var nm])
+  s :=: s' | s == s' -> return $ Just (mempty, Top)
   s@(Spine x yl) :=: s' -> do
-    bind <- getElm x
-    let constCase = case s' of -- uvar-blah?
+    bind <- getElm "all" x
+    let constCase = Just <$> case s' of -- uvar-blah?
           Spine x' _ | x /= x' -> do
-            bind' <- getElm x'
+            bind' <- getElm ("const case: "++show cons) x'
             case bind' of
-              Left Binding{ elmQuant = Exists } -> unify $ s' :=: s
+              Left Binding{ elmQuant = Exists } -> return $ (mempty,s' :=: s)
               _ -> throwError $ "two different universal equalities: "++show cons++" WITH BIND: "++show bind'
           Spine x' yl' | x == x' -> do -- const-const
-            unless (length yl == length yl') $ throwError "bad boys"        
-            foldr1 (***) <$> (mapM unify $ zipWith (:=:) yl yl')
+            unless (length yl == length yl') $ throwError "different numbers of arguments on constant"
+            return (mempty, foldl (:&:) Top $ zipWith (:=:) yl yl')
           _ -> throwError $ "uvar against a pi WITH CONS "++show cons
-    case bind of 
+    case bind of
       Right _ -> constCase
       Left Binding{ elmQuant = Forall } -> constCase
       Left bind@Binding{ elmQuant = Exists } -> do
@@ -275,30 +341,47 @@ unify cons = case cons of
             ty' = makeFromList (elmType bind) hl
             yl' = map (var . fst) hl++yl
             
-            addSub sub' = case M.lookup x sub' of
-              Nothing -> (sub *** sub')
-              Just xv -> M.insert x (rebuildSpine xv newx_args) sub'
+            addSub Nothing = Nothing
+            addSub (Just (sub',cons)) = case M.lookup x sub' of
+              Nothing -> Just (sub *** sub', cons)
+              Just xv -> Just (M.insert x (rebuildSpine xv newx_args) sub', cons)
               
         modify $ {- addToHead Exists x ty' . -} removeFromContext x
         modify $ subst sub
         -- now we can match against the right hand side
         addSub <$> case s' of -- gvar-blah?
           Spine x' y'l -> do
-            bind' <- getElm x'
+            bind' <- getElm "gvar-blah" x'
             case bind' of
               Right bty -> do -- gvar-const
                 gvar_const (Spine x yl', ty') (Spine x' y'l, bty)
-              Left Binding{ elmQuant = Exists } -> -- gvar-uvar-inside
-                error "gvar-uvar-inside"
-              Left Binding{ elmQuant = Forall } -> 
+              Left Binding{ elmQuant = Exists, elmType = bty } -> -- gvar-uvar-inside
+                gvar_uvar_inside (Spine x yl', ty') (Spine x' y'l, bty)
+              Left Binding{ elmQuant = Forall, elmType = bty } -> 
                 if x == x' 
                 then do -- gvar-gvar-same
-                  error "gvar-gvar-same"
+                  gvar_gvar_same (Spine x yl', ty') (Spine x' y'l, bty)
                 else do -- gvar-gvar-diff
-                  error "gvar-gvar-diff"
-          _ -> return $  x |-> makeFromType ty' s' -- gvar-abs?
-          
-gvar_const (Spine x yl, aty) (Spine x' y'l, bty) = do
+                  gvar_gvar_diff (Spine x yl', ty') (Spine x' y'l, bty)
+          _ -> return $ Just (x |-> makeFromType ty' s',Top) -- gvar-abs?
+
+
+gvar_gvar_same (Spine x yl, aty) (Spine x' y'l, bty) = do
+  error "gvar-uvar-same"
+  
+gvar_gvar_diff (Spine x yl, aty) (Spine x' y'l, bty) = do
+  error "gvar-uvar-diff"
+
+
+gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) = 
+  case elemIndex (var y) yl of
+    Nothing -> return Nothing
+    Just i -> gvar_fixed a b (!! i)
+
+gvar_const a b@(Spine x' _, _) = gvar_fixed a b (const x')
+
+
+gvar_fixed (Spine x yl, aty) (Spine x' y'l, bty) r = do
   let m = length y'l
       n = length yl
                     
@@ -307,11 +390,10 @@ gvar_const (Spine x yl, aty) (Spine x' y'l, bty) = do
   let vun = var <$> un
       
       toLterm (Spine "forall" [Abs _ ty r]) (ui:unr) = Abs ui ty $ toLterm r unr
-      toLterm _ [] = Spine x' $ map (\xi -> Spine xi vun) xm
+      toLterm _ [] = Spine (r un) $ map (\xi -> Spine xi vun) xm
       toLterm _ _ = error "what the fuck"
       
       l = toLterm aty un
-                    
       untylr = reverse $ zip un $ getTypes aty
       vbuild e = foldr (\(nm,ty) a -> forall nm ty a) e untylr
                     
@@ -324,8 +406,8 @@ gvar_const (Spine x yl, aty) (Spine x' y'l, bty) = do
   
   modify $ flip (foldr ($)) $ uncurry (addToHead Exists) <$> substBty mempty bty xm
   
-  return sub  
-          
+  return $ Just (sub, Top)
+
 -----------------------------
 --- constraint generation ---
 -----------------------------
