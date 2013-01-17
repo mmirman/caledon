@@ -308,7 +308,7 @@ unifyEq a b = let cons = a :=: b in case cons of
   s :=: s' | s == s' -> return $ Just (mempty, Top)
   s@(Spine x yl) :=: s' -> do
     bind <- getElm "all" x
-    let constCase = Just <$> case s' of -- uvar-blah?
+    let constCase = Just <$> case s' of
           Spine x' _ | x /= x' -> do
             bind' <- getElm ("const case: "++show cons) x'
             case bind' of
@@ -318,51 +318,56 @@ unifyEq a b = let cons = a :=: b in case cons of
             unless (length yl == length yl') $ throwError "different numbers of arguments on constant"
             return (mempty, foldl (:&:) Top $ zipWith (:=:) yl yl')
           _ -> throwError $ "uvar against a pi WITH CONS "++show cons
+          
     case bind of
       Right _ -> constCase
       Left Binding{ elmQuant = Forall } -> constCase
       Left bind@Binding{ elmQuant = Exists } -> do
-        -- first we need to raise.
-        hl <- getBindings bind
-        let makeFromList eb hl = foldr (\(nm,ty) a -> forall nm ty a) eb hl
+        raiseToTop bind (Spine x yl) $ \(Spine x yl) ty -> 
+          case s' of 
+            Spine x' y'l -> do
+              bind' <- getElm "gvar-blah" x'
+              case bind' of
+                Right ty' -> do -- gvar-const
+                  gvar_const (Spine x yl, ty) (Spine x' y'l, ty')
+                Left Binding{ elmQuant = Exists, elmType = ty' } -> -- gvar-uvar-inside
+                  gvar_uvar_inside (Spine x yl, ty) (Spine x' y'l, ty')
+                Left bind@Binding{ elmQuant = Forall, elmType = ty' } -> 
+                  if x == x' 
+                  then do -- gvar-gvar-same
+                    gvar_gvar_same (Spine x yl, ty) (Spine x' y'l, ty')
+                  else do -- gvar-gvar-diff
+                    gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
+            _ -> return $ Just (x |-> makeFromType ty s',Top) -- gvar-abs?
             
-            makeFromType (Spine "forall" [Abs x ty z]) f = Abs x ty $ makeFromType z f
-            makeFromType _ f = f            
-            
-            newx_args = (map (var . fst) hl)
-            sub = x |-> Spine x newx_args
-            ty' = makeFromList (elmType bind) hl
-            yl' = map (var . fst) hl++yl
-            
-            addSub Nothing = Nothing
-            addSub (Just (sub',cons)) = case M.lookup x sub' of
-              Nothing -> Just (sub *** sub', cons)
-              Just xv -> Just (M.insert x (rebuildSpine xv newx_args) sub', cons)
-              
-        modify $ {- addToHead Exists x ty' . -} removeFromContext x
-        modify $ subst sub
-        -- now we can match against the right hand side
-        addSub <$> case s' of -- gvar-blah?
-          Spine x' y'l -> do
-            bind' <- getElm "gvar-blah" x'
-            case bind' of
-              Right bty -> do -- gvar-const
-                gvar_const (Spine x yl', ty') (Spine x' y'l, bty)
-              Left Binding{ elmQuant = Exists, elmType = bty } -> -- gvar-uvar-inside
-                gvar_uvar_inside (Spine x yl', ty') (Spine x' y'l, bty)
-              Left Binding{ elmQuant = Forall, elmType = bty } -> 
-                if x == x' 
-                then do -- gvar-gvar-same
-                  gvar_gvar_same (Spine x yl', ty') (Spine x' y'l, bty)
-                else do -- gvar-gvar-diff
-                  gvar_gvar_diff (Spine x yl', ty') (Spine x' y'l, bty)
-          _ -> return $ Just (x |-> makeFromType ty' s',Top) -- gvar-abs?
+makeFromType (Spine "forall" [Abs x ty z]) f = Abs x ty $ makeFromType z f
+makeFromType _ f = f
 
+makeFromList eb hl = foldr (\(nm,ty) a -> forall nm ty a) eb hl
+
+raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
+  hl <- getBindings bind
+  let newx_args = (map (var . fst) hl)
+      sub = x |-> Spine x newx_args
+      ty' = makeFromList (elmType bind) hl
+            
+      addSub Nothing = Nothing
+      addSub (Just (sub',cons)) = case M.lookup x sub' of
+        Nothing -> Just (sub *** sub', cons)
+        Just xv -> Just (M.insert x (rebuildSpine xv newx_args) sub', cons)
+              
+  modify $ {- addToHead Exists x ty' . -} removeFromContext x
+  modify $ subst sub
+  -- now we can match against the right hand side
+  addSub <$> m (subst sub sp) ty'
+  
 
 gvar_gvar_same (Spine x yl, aty) (Spine x' y'l, bty) = do
   error "gvar-uvar-same"
   
-gvar_gvar_diff (Spine x yl, aty) (Spine x' y'l, bty) = do
+gvar_gvar_diff (Spine x yl, aty) (sp, _) bind = raiseToTop bind sp $ \(Spine x' y'l) bty -> do
+  -- this is the big one!
+  -- now x' comes before x.
   error "gvar-uvar-diff"
 
 
