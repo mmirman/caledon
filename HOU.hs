@@ -246,13 +246,6 @@ getElm s x = do
   case ty of
     Nothing -> Left <$> (\ctxt -> lookupWith ("looking up "++x++"\n\t in context: "++show ctxt++"\n\t"++s) x ctxt) <$> ctxtMap <$> get
     Just a -> return $ Right a
-{-
-("11@xm",Binding {elmQuant = ∃, elmName = "11@xm", elmType = Π 16@un : (atom 3@tyA a atx 11@xm) . Π 15@un : atom . Π 14@un : atx . Π 13@un : atom . Π 12@un : atom . Π  : atom . atom, elmPrev = Nothing, elmNext = Just "atx"})
-("atx",Binding {elmQuant = ∀, elmName = "atx", elmType = atom, elmPrev = Just "11@xm", elmNext = Just "a"})
-("a",Binding {elmQuant = ∀, elmName = "a", elmType = atx, elmPrev = Just "atx", elmNext = Just "3@tyA"})
-("3@tyA",Binding {elmQuant = ∃, elmName = "3@tyA", elmType = atom, elmPrev = Just "a", elmNext = Just "atx2"})
-("atx2",Binding {elmQuant = ∀, elmName = "atx2", elmType = atom, elmPrev = Just "3@tyA", elmNext = Nothing})]
--}
 
 -- | This gets all the bindings outside of a given bind and returns them in a list.
 getBindings bind = do
