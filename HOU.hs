@@ -328,18 +328,24 @@ unifyEq a b = let cons = a :=: b in case cons of
             Spine x' y'l -> do
               bind' <- getElm "gvar-blah" x'
               case bind' of
-                Right ty' -> do -- gvar-const
-                  gvar_const (Spine x yl, ty) (Spine x' y'l, ty')
+                Right ty' -> -- gvar-const
+                  gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
                 Left Binding{ elmQuant = Exists, elmType = ty' } -> -- gvar-uvar-inside
                   gvar_uvar_inside (Spine x yl, ty) (Spine x' y'l, ty')
                 Left bind@Binding{ elmQuant = Forall, elmType = ty' } -> 
-                  if x == x' 
-                  then do -- gvar-gvar-same
-                    gvar_gvar_same (Spine x yl, ty) (Spine x' y'l, ty')
-                  else do -- gvar-gvar-diff
-                    gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
+                  if not (allVars yl && allVars y'l) 
+                  then return Nothing 
+                  else if x == x' 
+                       then -- gvar-gvar-same
+                         gvar_gvar_same (Spine x yl, ty) (Spine x' y'l, ty')
+                       else -- gvar-gvar-diff
+                         gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
             _ -> return $ Just (x |-> makeFromType ty s',Top) -- gvar-abs?
             
+allVars = all (\c -> case c of
+               Spine a [] -> True
+               _ -> False)
+
 makeFromType (Spine "forall" [Abs x ty z]) f = Abs x ty $ makeFromType z f
 makeFromType _ f = f
 
@@ -360,15 +366,43 @@ raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
         Nothing -> Just (sub *** sub', cons)
         Just xv -> Just (M.insert x (rebuildSpine xv newx_args) sub', cons)
               
-  modify $ {- addToHead Exists x ty' . -} removeFromContext x
+  modify $ addToHead Exists x ty' . removeFromContext x
   modify $ subst sub
   -- now we can match against the right hand side
-  addSub <$> m (subst sub sp) ty'
+  l <- addSub <$> m (subst sub sp) ty'
+  modify $ removeFromContext x
+  return l
 
+-- TODO: make sure this is correct.  its now just a modification of gvar_gvar_diff!
 gvar_gvar_same (Spine x yl, aty) (Spine x' y'l, bty) = do
-  error "gvar-uvar-same"
+  let n = length yl
+      m = length y'l
+                    
+      (uNl,atyl) = unzip $ take n $ typeToListOfTypes aty
+      (vNl,btyl) = unzip $ take m $ typeToListOfTypes bty
+      
+  xN <- lift $ getNewWith "@x'"
+  
+  let perm = [iyt | (iyt,_) <- filter (\(_,(a,b)) -> a == b) $ zip (zip uNl atyl) (zip yl y'l) ]
+      
+      makeBind us tyl arg = foldr (uncurry Abs) (Spine xN $ map var arg) $ zip us tyl
+      
+      l = makeBind uNl atyl $ map fst perm
+      
+      getBase 0 a = a
+      getBase n (Spine "forall" [Abs _ ty r]) = getBase (n - 1) r
+      getBase _ a = a
+      
+      xNty = foldr (uncurry forall) (getBase n aty) perm
+      
+      sub = x |-> l
+      
+  modify $ addToHead Exists xN xNty
+  return $ Just (sub, Top)
+
   
 gvar_gvar_diff (Spine x yl, aty) (sp, _) bind = raiseToTop bind sp $ \(Spine x' y'l) bty -> do
+  
   -- now x' comes before x 
   -- but we no longer care since I tested it, and switching them twice reduces to original
   let n = length yl
