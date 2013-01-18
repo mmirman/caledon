@@ -470,7 +470,6 @@ gvar_fixed (Spine x yl, aty) (Spine x' y'l, bty) r = do
 -----------------------------
 --- constraint generation ---
 -----------------------------
-  
 checkType :: Spine -> Type -> Env Constraint
 checkType sp ty = case sp of
   Abs x tyA sp -> do
@@ -483,6 +482,10 @@ checkType sp ty = case sp of
     cons1 <- checkType tyA atom
     cons2 <- addToEnv x tyA $ checkType tyB atom
     return $ (atom :=: ty) :&: cons1 :&: (∀) x tyA cons2
+  Spine "exists" [Abs x tyA tyB] -> do
+    cons1 <- checkType tyA atom
+    cons2 <- addToEnv x tyA $ checkType tyB atom
+    return $ (atom :=: ty) :&: cons1 :&: (∃) x tyA cons2    
   Spine head args -> cty (head, reverse args) ty
     where cty (head,[]) ty = do
             mty <- (M.lookup head) <$> ask
@@ -506,6 +509,9 @@ checkType sp ty = case sp of
 ------------------------------------
 genPutStrLn s = trace s $ return ()
 
+-- [(Name, [(Name,Type)] , Type)]
+-- convert this into something that typechecks it as "exists e : t . t'" then substitutes for 
+-- e, when the jig is up.
 checkAll :: [(Name, Type)] -> Either String ()
 checkAll defined = runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts) 0
   where consts = ("atom", atom)
