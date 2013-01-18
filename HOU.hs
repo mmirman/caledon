@@ -345,6 +345,10 @@ makeFromType _ f = f
 
 makeFromList eb hl = foldr (\(nm,ty) a -> forall nm ty a) eb hl
 
+typeToListOfTypes (Spine _ _) = []
+typeToListOfTypes (Abs x ty l) = (x,ty):typeToListOfTypes l
+
+
 raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
   hl <- getBindings bind
   let newx_args = (map (var . fst) hl)
@@ -360,17 +364,40 @@ raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
   modify $ subst sub
   -- now we can match against the right hand side
   addSub <$> m (subst sub sp) ty'
-  
 
 gvar_gvar_same (Spine x yl, aty) (Spine x' y'l, bty) = do
   error "gvar-uvar-same"
   
 gvar_gvar_diff (Spine x yl, aty) (sp, _) bind = raiseToTop bind sp $ \(Spine x' y'l) bty -> do
-  -- this is the big one!
-  -- now x' comes before x.
-  error "gvar-uvar-diff"
-
-
+  -- now x' comes before x 
+  -- but we no longer care since I tested it, and switching them twice reduces to original
+  let n = length yl
+      m = length y'l
+                    
+      (uNl,atyl) = unzip $ take n $ typeToListOfTypes aty
+      (vNl,btyl) = unzip $ take m $ typeToListOfTypes bty
+      
+  xN <- lift $ getNewWith "@x'"
+  
+  let perm = [(iyt,i') | (iyt,y) <- zip (zip uNl atyl) yl, (i',_) <- filter (\(_,y') -> y == y') $ zip vNl y'l ]
+      
+      makeBind us tyl arg = foldr (uncurry Abs) (Spine xN $ map var arg) $ zip us tyl
+      
+      l = makeBind uNl atyl $ map (fst . fst) perm
+      l' = makeBind vNl btyl $ map snd perm
+      
+      getBase 0 a = a
+      getBase n (Spine "forall" [Abs _ ty r]) = getBase (n - 1) r
+      getBase _ a = a
+      
+      xNty = foldr (uncurry forall) (getBase n aty) (map fst perm)
+      
+      sub = (x |-> l) *** (x' |-> l')
+      
+  modify $ addToHead Exists xN xNty
+  return $ Just (sub, Top)
+  
+  
 gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) = 
   case elemIndex (var y) yl of
     Nothing -> return Nothing
