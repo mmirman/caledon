@@ -33,6 +33,8 @@ data Spine = Spine Name [Type]
            deriving (Eq)
 
 type Type = Spine
+type Kind = Spine
+type Term = Spine
 
 getNewWith s = (++s) <$> getNew
 
@@ -50,6 +52,7 @@ var nm = Spine nm []
 atom = var "atom"
 forall x tyA v = Spine ("forall") [Abs x tyA v]
 
+
 ---------------------
 ---  substitution ---
 ---------------------
@@ -58,7 +61,7 @@ type Substitution = M.Map Name Spine
 
 infixr 1 |->
 infixr 0 ***
-m1 *** m2 = M.union m2 (subst m2 <$> m1)
+m1 *** m2 = M.union m2 $ subst m2 <$> m1
 (|->) = M.singleton
 (!) = flip M.lookup
 
@@ -239,7 +242,9 @@ checkContext s ctx = foldr seq ctx $ zip st ta
 ---  the higher order unification algorithm ---
 -----------------------------------------------
 
-type Unification = StateT Context Env Substitution
+type WithContext = StateT Context Env 
+
+type Unification = WithContext Substitution
 
 getElm s x = do 
   ty <- lookupConstant x
@@ -306,6 +311,7 @@ unifyEq a b = let cons = a :=: b in case cons of
   Abs nm ty s :=: s' -> do
     return $ Just (mempty, Bind Forall nm ty $ s :=: rebuildSpine s' [var nm])
   s :=: s' | s == s' -> return $ Just (mempty, Top)
+  Spine x yl :=: s' | S.member x $ freeVariables s' -> throwError $ "occurs check: "++show cons 
   s@(Spine x yl) :=: s' -> do
     bind <- getElm "all" x
     let constCase = Just <$> case s' of
@@ -467,6 +473,19 @@ gvar_fixed (Spine x yl, aty) (Spine x' y'l, bty) r = do
   
   return $ Just (sub, Top)
 
+--------------------
+--- proof search ---  
+--------------------
+
+search :: Type -> WithContext Term
+search ty = case ty of 
+  Spine "exists" [Abs nm ty lm] -> undefined
+  Spine "forall" [Abs nm ty lm] -> undefined
+  Spine nm args -> undefined
+  _ -> error $ "Not a type: "++show ty
+  
+
+  
 -----------------------------
 --- constraint generation ---
 -----------------------------
