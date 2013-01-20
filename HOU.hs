@@ -533,13 +533,17 @@ getEnv = do
   
 search :: Type -> WithContext (Substitution, Term)
 search goal = case goal of 
-  Spine "exists" [Abs nm ty lm] -> do -- my current theory is that existential quantifiers just don't need proof terms, 
-                                      -- either in elimination or introduction.  This needs some thought.
+  Spine "exists" [Abs nm ty lm] -> do
+    
+    -- this case is a bit strange as we rely on unification, either now
+    -- OR in the FUTURE in order to find the actual value for tau/nm'
+    -- so we can't delete nm' from the context.
+    
     nm' <- lift $ getNewWith "@search"
     modify $ addToTail Exists nm' ty
-    -- The existential quantifier should get solved and thus removed from the context already!
-    search $ subst (nm |-> var nm') lm -- THIS IS MAYBE WRONG? HOW DO I EVEN?  
-
+    
+    (sub, e) <- search $ subst (nm |-> var nm') lm 
+    return $ (sub, Spine "#pack#" [e, subst sub $ var nm', Abs nm ty lm])
     
   Spine "forall" [Abs nm ty lm] -> do
     nm' <- lift $ getNewWith "@sr"
@@ -555,31 +559,34 @@ search goal = case goal of
         sameFamily (Spine "forall" [Abs _ _ lm]) = sameFamily lm
         sameFamily (Spine "exists" [Abs _ _ lm]) = sameFamily lm
         sameFamily _ = False
-        
-        left target = case target of 
+
+        left x target = case target of 
           Spine "forall" [Abs nm ty lm] -> do
             nm' <- lift $ getNewWith "@sla"
+            -- by using existential quantification we can defer search implicitly
+            modify $ addToTail Exists nm' ty
+            (sub, result)  <- left x $ subst (nm |-> var nm') lm
+            return $ (sub, \l -> result $ (subst sub $ var nm'):l )
             
+          Spine "exists" [Abs nm ty lm] -> do 
+            nm' <- lift $ getNewWith "@sle"
+            -- universal quantification as information hiding
             modify $ addToTail Forall nm' ty
-            (sub, result)  <- left $ subst (nm |-> var nm') lm
+            (sub,result) <- left x $ subst (nm |-> var nm') lm
             modify $ removeFromContext nm'
             
-            (sub', newArg) <- search $ subst sub ty
-            return $ (sub *** sub', newArg:subst sub' result)
-          Spine "exists" [Abs nm ty lm] -> do 
-            -- THIS CAN NOT BE CORRECT!
-            nm' <- lift $ getNewWith "@sle"
-            modify $ addToTail Exists nm' ty
-            left $ subst (nm |-> var nm') lm
+            p <- lift $ getNewWith "@p"
+            return (sub, \l -> Spine "#open#" 
+                               [result [], Abs nm' ty $ Abs p (subst (nm |-> var nm') lm) $ Spine p l])
 
           Spine _ _ -> do  
             sub <- unify $ goal :=: target
-            return (sub, [])
+            return (sub, \l -> Spine x l)
           _ -> error $ "λ does not have type atom: " ++ show target
         
         leftInit (x,target) = do
-          (sub,l) <- left target
-          return (sub, Spine x l)
+          (sub,l) <- left x target
+          return (sub, subst sub $ l [])
           
     F.msum $ leftInit <$> filter (sameFamily . snd) env
 
@@ -686,14 +693,19 @@ checkType sp ty = case sp of
 ------------------------------------
 genPutStrLn s = trace s $ return ()
 
+infixr 0 ~>
+(~>) = forall ""
+
 -- [(Name, [(Name,Type)] , Type)]
 -- convert this into something that typechecks it as "exists e : t . t'" then substitutes for 
 -- e, when the jig is up.
 checkAll :: [(Name, Type)] -> Either String ()
 checkAll defined = runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts) 0
   where consts = ("atom", atom)
-               : ("forall", forall "_" (forall "" atom atom) atom)
-               : ("exists", forall "_" (forall "" atom atom) atom)
+               : ("forall", (atom ~> atom) ~> atom)
+               : ("exists", (atom ~> atom) ~> atom)
+               : ("#pack#", exists "tp" atom $ exists "a" atom $  var "a" ~> var "tp" ~> forall "imp" (var "tp" ~> atom) $ exists "i" atom $ Spine "imp" [var "i"])
+               : ("#spack#", exists "tp" atom $ exists "a" atom $ exists "imp" (var "tp" ~> atom) $ var "a" ~> var "tp" ~> exists "i" atom $ Spine "imp" [var "i"])
                : defined 
         run = forM_ defined $ \(name,axiom) -> do
           constraint <- checkType axiom atom
