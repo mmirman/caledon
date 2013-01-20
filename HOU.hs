@@ -301,7 +301,7 @@ unify cons = do
       uniWhile l = do 
         (sub,l') <- uniOne l []
         modify $ subst sub
-        (sub ***) <$> uniWhile l'
+        (sub ***) <$> uniWhile l' 
       
   uniWhile constraints
 
@@ -311,7 +311,6 @@ unifyEq a b = let cons = a :=: b in case cons of
   Abs nm ty s :=: s' -> do
     return $ Just (mempty, Bind Forall nm ty $ s :=: rebuildSpine s' [var nm])
   s :=: s' | s == s' -> return $ Just (mempty, Top)
-  Spine x yl :=: s' | S.member x $ freeVariables s' -> throwError $ "occurs check: "++show cons 
   s@(Spine x yl) :=: s' -> do
     bind <- getElm "all" x
     let constCase = Just <$> case s' of
@@ -327,25 +326,30 @@ unifyEq a b = let cons = a :=: b in case cons of
           
     case bind of
       Right _ -> constCase
+      Left Binding{ elmQuant = Forall } | S.member x $ freeVariables yl -> throwError $ "occurs check: "++show (a :=: b)
       Left Binding{ elmQuant = Forall } -> constCase
       Left bind@Binding{ elmQuant = Exists } -> do
-        raiseToTop bind (Spine x yl) $ \(Spine x yl) ty -> 
+        raiseToTop bind (Spine x yl) $ \a@(Spine x yl) ty -> 
           case s' of 
             Spine x' y'l -> do
               bind' <- getElm "gvar-blah" x'
               case bind' of
                 Right ty' -> -- gvar-const
                   gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
-                Left Binding{ elmQuant = Exists, elmType = ty' } -> -- gvar-uvar-inside
+                Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> throwError $ "gvar-uvar-depends: "++show (a :=: b)
+                Left Binding{ elmQuant = Forall } | S.member x $ freeVariables yl -> throwError $ "occurs check: "++show (a :=: b)
+                Left Binding{ elmQuant = Forall, elmType = ty' } -> -- gvar-uvar-inside
                   gvar_uvar_inside (Spine x yl, ty) (Spine x' y'l, ty')
-                Left bind@Binding{ elmQuant = Forall, elmType = ty' } -> 
+                Left bind@Binding{ elmQuant = Exists, elmType = ty' } -> 
                   if not (allVars yl && allVars y'l) 
                   then return Nothing 
                   else if x == x' 
                        then -- gvar-gvar-same
                          gvar_gvar_same (Spine x yl, ty) (Spine x' y'l, ty')
                        else -- gvar-gvar-diff
-                         gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
+                         if S.member x $ freeVariables y'l 
+                         then throwError $ "occurs check: "++show (a :=: b)
+                         else gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
             _ -> return $ Just (x |-> makeFromType ty s',Top) -- gvar-abs?
             
 allVars = all (\c -> case c of
@@ -493,7 +497,8 @@ search goal = case goal of
     (sub,l) <- search lm
     modify $ removeFromContext nm
     return (sub, Abs nm ty l)
-  Spine nm args -> do
+  Spine nm args -> fail "" <|> do -- here we ensure that since this might run infinitely deep without different cases, we stop somewhere along the way 
+                                  -- to give other branches a fair shot at computation.
     env <- M.toList <$> getEnv
     
     let isSimilar (Spine nm' args) | nm == nm' =  True
@@ -501,27 +506,24 @@ search goal = case goal of
         isSimilar (Spine "exists" [Abs _ _ lm]) = isSimilar lm
         isSimilar _ = False
         
-        left x target = case target of 
+        left (x, target) = case target of 
           Spine "forall" [Abs nm ty lm] -> do
-            (sub, result)  <- left x target
+            (sub, result)  <- left (x, target)
             (sub', newArg) <- search $ subst sub ty
             return $ (sub *** sub', rebuildSpine result [newArg])
           Spine "exists" [Abs nm ty lm] -> do 
             -- THIS CAN NOT BE CORRECT!
-            (sub, result)  <- left x target
+            (sub, result)  <- left (x, target)
             (sub', newArg) <- search $ subst sub ty
             return $ (sub *** sub', rebuildSpine result [newArg])
           Spine _ _ -> do  
             sub <- unify $ goal :=: target
             return (sub, Spine x [])
           _ -> error $ "λ does not have type atom: " ++ show target
-          
-    F.msum [ left x tp | (x,tp) <- env, isSimilar tp]
+              
+    F.msum $ left <$> filter (isSimilar . snd) env
 
   _ -> error $ "Not a type: "++show goal
-
-          
-          
 
   
 -----------------------------
