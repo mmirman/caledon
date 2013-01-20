@@ -482,17 +482,17 @@ getEnv = do
   nmMapB <- (fmap elmType . ctxtMap) <$> get
   return $ M.union nmMapB nmMapA 
   
-search :: Type -> WithContext Term
-search target = case target of 
+search :: Type -> WithContext (Substitution, Term)
+search goal = case goal of 
   Spine "exists" [Abs nm ty lm] -> do 
     modify $ addToTail Exists nm ty
     -- The existential quantifier should get solved and thus removed from the context already!
     search lm -- THIS IS MAYBE WRONG? HOW DO I EVEN?  
   Spine "forall" [Abs nm ty lm] -> do
     modify $ addToTail Forall nm ty
-    l <- search lm
+    (sub,l) <- search lm
     modify $ removeFromContext nm
-    return $ Abs nm ty l
+    return (sub, Abs nm ty l)
   Spine nm args -> do
     env <- M.toList <$> getEnv
     
@@ -501,20 +501,24 @@ search target = case target of
         isSimilar (Spine "exists" [Abs _ _ lm]) = isSimilar lm
         isSimilar _ = False
         
-        right r = case r of 
+        left x target = case target of 
           Spine "forall" [Abs nm ty lm] -> do
-            arg <- search ty
-            undefined
+            (sub, result)  <- left x target
+            (sub', newArg) <- search $ subst sub ty
+            return $ (sub *** sub', rebuildSpine result [newArg])
+          Spine "exists" [Abs nm ty lm] -> do 
+            -- THIS CAN NOT BE CORRECT!
+            (sub, result)  <- left x target
+            (sub', newArg) <- search $ subst sub ty
+            return $ (sub *** sub', rebuildSpine result [newArg])
           Spine _ _ -> do  
-            sub <- unify $ target :=: r 
-            undefined
-          _ -> error $ "can not have abs type in env: " ++ show r  
-        try x tp = do
-          search undefined
+            sub <- unify $ goal :=: target
+            return (sub, Spine x [])
+          _ -> error $ "λ does not have type atom: " ++ show target
           
-    F.msum [ try x tp | (x,tp) <- env, isSimilar tp]
+    F.msum [ left x tp | (x,tp) <- env, isSimilar tp]
 
-  _ -> error $ "Not a type: "++show target
+  _ -> error $ "Not a type: "++show goal
 
           
           
