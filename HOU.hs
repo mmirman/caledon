@@ -376,6 +376,8 @@ gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
 
 getFamily (Spine "forall" [Abs _ _ lm]) = getFamily lm
 getFamily (Spine "exists" [Abs _ _ lm]) = getFamily lm
+getFamily (Spine "#sopen#" (c:l)) = getFamily c
+getFamily (Spine "#open#" (c:l)) = getFamily c
 getFamily (Spine nm' args) = nm'
 getFamily v = error $ "values don't have families: "++show v
                       

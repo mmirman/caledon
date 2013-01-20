@@ -36,7 +36,7 @@ type Term = Spine
 
 data Predicate = Predicate { predName :: Name, predType :: Type, predConstructors :: [(Name,Type)] }
                | Query { predName :: Name, predType ::  Type }
-               deriving Show
+               deriving (Eq)
 
 
 getNewWith s = (++s) <$> getNew
@@ -47,11 +47,19 @@ showWithParens t = if (case t of
                       ) then "("++show t++")" else show t 
 
 instance Show Spine where
-  show (Spine "forall" [Abs nm ty t]) = "Π "++nm++" : "++showWithParens ty++" . "++show t  
-  show (Spine "exists" [Abs nm ty t]) = "Σ "++nm++" : "++showWithParens ty++" . "++show t  
+  show (Spine "forall" [Abs nm t t']) | not (S.member nm (freeVariables t')) = showWithParens t++ " → " ++ show t'
+  show (Spine "forall" [Abs nm ty t]) = "∀ "++nm++" : "++showWithParens ty++" . "++show t  
+  show (Spine "exists" [Abs nm ty t]) = "∃ "++nm++" : "++showWithParens ty++" . "++show t  
   show (Spine h t) = h++concatMap (\s -> " "++showWithParens s) t
   show (Abs nm ty t) = "λ "++nm++" : "++showWithParens ty++" . "++show t
 
+instance Show Predicate where
+  show (Predicate nm ty []) = "defn " ++ nm ++ " : " ++ show ty ++ ";"
+  show (Predicate nm ty (a:cons)) =
+    "defn " ++ nm ++ " : " ++ show ty ++ "\n" ++ "  as " ++ showSingle a ++ concatMap (\x-> "\n   | " ++ showSingle x) cons ++ ";"
+      where showSingle (nm,ty) = nm ++ " = " ++ show ty
+  show (Query nm ty) = "query " ++ nm ++ " = " ++ show ty
+                                               
 var nm = Spine nm []
 atom = var "atom"
 forall x tyA v = Spine ("forall") [Abs x tyA v]

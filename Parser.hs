@@ -79,6 +79,8 @@ pAtom =  do reserved "_"
 
 trm :: Parser Term
 trm =     parens trm
+   <|> Spine "#sopen#" <$> (:[]) <$> angles trm
+          
    <|> do reservedOp "λ" <|> reservedOp "\\"
           (nm,tp) <- parens anonNamed <|> anonNamed
           reservedOp "."
@@ -151,9 +153,9 @@ tipe = buildExpressionParser table (
     <|> do (nm,tp) <- brackets anonNamed
            tp' <- tmpState nm tipe
            return $ forall nm tp tp'
-{-    <|> do (nm,tp) <- braces anonNamed
+    <|> do (nm,tp) <- braces anonNamed
            tp' <- tmpState nm tipe
-           return $ ForallImp nm tp tp' -}
+           return $ exists nm tp tp' 
     <|> do reservedOp "∀" <|> reserved "forall"
            (nm,tp) <- parens anonNamed <|> anonNamed
            reservedOp "."
@@ -172,9 +174,9 @@ mydef :: P.GenLanguageDef String ParseState Identity
 mydef = haskellDef
   { P.identStart = lower
   , P.identLetter = alphaNum <|> oneOf "_'-/"
-  , P.reservedNames = ["defn", "as", "query", "forall", "?forall", "_"]
+  , P.reservedNames = ["defn", "as", "query", "forall", "exists", "?forall", "_"]
   , P.caseSensitive = True
-  , P.reservedOpNames = ["->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", ":", "|", "\\","?\\", "λ","?λ","∀","?∀", "."]
+  , P.reservedOpNames = ["->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", ":", "|", "\\","?\\", "λ","?λ","∀","∃", "?∀", "."]
   }
 
 getId :: Parser Char -> Parser String
