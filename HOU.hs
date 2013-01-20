@@ -257,10 +257,11 @@ getBindings bind = do
   ctx <- get
   return $ getStart "IN: getBindings" bind ctx
 
-
+getTypes :: Spine -> [Type]
 getTypes (Spine "forall" [Abs _ ty l]) = ty:getTypes l
 getTypes _ = []
 
+flatten :: Constraint -> ([(Quant, Name, Type)], [(Spine, Spine)])
 flatten cons = case cons of
   Top -> ([],[])
   c1 :&: c2 -> let (binds1,c1') = flatten c1
@@ -278,12 +279,11 @@ isolate m = do
   s' <- get
   put s
   return (s',a)
-
+  
+unify :: Constraint -> Unification
 unify cons = do
   let (binds,constraints) = flatten cons
-      
-  addBinds binds
-  
+  addBinds binds      
   let uniOne [] r  = throwError "can not unify any further"
       uniOne ((a,b):l) r = do
         (newstate,choice) <- isolate $ unifyEq a b
@@ -476,16 +476,47 @@ gvar_fixed (Spine x yl, aty) (Spine x' y'l, bty) r = do
 --------------------
 --- proof search ---  
 --------------------
-
+getEnv :: WithContext Constants
+getEnv = do  
+  nmMapA <- lift $ ask  
+  nmMapB <- (fmap elmType . ctxtMap) <$> get
+  return $ M.union nmMapB nmMapA 
+  
 search :: Type -> WithContext Term
-search ty = case ty of 
-  Spine "exists" [Abs nm ty lm] -> addLam Exists nm ty lm
-  Spine "forall" [Abs nm ty lm] -> Abs nm ty <$> addLam Forall nm ty lm
-  Spine nm args -> undefined
-  _ -> error $ "Not a type: "++show ty
-  where addLam quant nm ty lm = do
-          modify $ addToTail quant nm ty
-          search lm
+search target = case target of 
+  Spine "exists" [Abs nm ty lm] -> do 
+    modify $ addToTail Exists nm ty
+    -- The existential quantifier should get solved and thus removed from the context already!
+    search lm -- THIS IS MAYBE WRONG? HOW DO I EVEN?  
+  Spine "forall" [Abs nm ty lm] -> do
+    modify $ addToTail Forall nm ty
+    l <- search lm
+    modify $ removeFromContext nm
+    return $ Abs nm ty l
+  Spine nm args -> do
+    env <- M.toList <$> getEnv
+    
+    let isSimilar (Spine nm' args) | nm == nm' =  True
+        isSimilar (Spine "forall" [Abs _ _ lm]) = isSimilar lm
+        isSimilar (Spine "exists" [Abs _ _ lm]) = isSimilar lm
+        isSimilar _ = False
+        
+        right r = case r of 
+          Spine "forall" [Abs nm ty lm] -> do
+            arg <- search ty
+            undefined
+          Spine _ _ -> do  
+            sub <- unify $ target :=: r 
+            undefined
+          _ -> error $ "can not have abs type in env: " ++ show r  
+        try x tp = do
+          search undefined
+          
+    F.msum [ try x tp | (x,tp) <- env, isSimilar tp]
+
+  _ -> error $ "Not a type: "++show target
+
+          
           
 
   
