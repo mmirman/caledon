@@ -246,7 +246,7 @@ type WithContext = StateT Context Env
 
 type Unification = WithContext Substitution
 
-getElm s x = do 
+getElm s x = do
   ty <- lookupConstant x
   case ty of
     Nothing -> Left <$> (\ctxt -> lookupWith ("looking up "++x++"\n\t in context: "++show ctxt++"\n\t"++s) x ctxt) <$> ctxtMap <$> get
@@ -479,11 +479,14 @@ gvar_fixed (Spine x yl, aty) (Spine x' y'l, bty) r = do
 
 search :: Type -> WithContext Term
 search ty = case ty of 
-  Spine "exists" [Abs nm ty lm] -> undefined
-  Spine "forall" [Abs nm ty lm] -> undefined
+  Spine "exists" [Abs nm ty lm] -> addLam Exists nm ty lm
+  Spine "forall" [Abs nm ty lm] -> Abs nm ty <$> addLam Forall nm ty lm
   Spine nm args -> undefined
   _ -> error $ "Not a type: "++show ty
-  
+  where addLam quant nm ty lm = do
+          modify $ addToTail quant nm ty
+          search lm
+          
 
   
 -----------------------------
