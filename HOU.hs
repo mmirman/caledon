@@ -45,6 +45,7 @@ showWithParens t = if (case t of
 
 instance Show Spine where
   show (Spine "forall" [Abs nm ty t]) = "Π "++nm++" : "++showWithParens ty++" . "++show t  
+  show (Spine "exists" [Abs nm ty t]) = "Σ "++nm++" : "++showWithParens ty++" . "++show t  
   show (Spine h t) = h++concatMap (\s -> " "++showWithParens s) t
   show (Abs nm ty t) = "λ "++nm++" : "++showWithParens ty++" . "++show t
 
@@ -563,6 +564,20 @@ checkType sp ty = case sp of
     cons2 <- checkType ty atom
     cons3 <- addToEnv x tyA $ checkType sp (Spine e [var x])
     return $ (∃) e (forall x tyA atom) $ cons1 :&: cons2 :&: (∀) x tyA cons3
+  Spine "pack" [e, tau, Abs imp tp interface] -> do
+    cons1 <- checkType e (subst (imp |-> tau) interface)
+    cons2 <- checkType tp atom
+    return $ cons1 
+         :&: cons2 
+         :&: ty :=: exists imp tp interface
+    
+  Spine "open" [closed, Abs imp tp (Abs p interface exp)] -> do
+    cons1 <- addToEnv imp tp $ checkType interface atom
+    cons2 <- checkType tp atom
+    
+    cons3 <- addToEnv imp tp $ addToEnv p interface $ checkType exp ty
+    cons4 <- checkType closed (exists imp tp interface)
+    return $ cons2 :&: cons4 :&: ((∃) imp tp $ cons1 :&: (∀) p interface cons3)
     
   Spine "forall" [Abs x tyA tyB] -> do
     cons1 <- checkType tyA atom
@@ -602,6 +617,7 @@ checkAll :: [(Name, Type)] -> Either String ()
 checkAll defined = runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts) 0
   where consts = ("atom", atom)
                : ("forall", forall "_" (forall "" atom atom) atom)
+               : ("exists", forall "_" (forall "" atom atom) atom)
                : defined 
         run = forM_ defined $ \(name,axiom) -> do
           constraint <- checkType axiom atom
@@ -609,8 +625,18 @@ checkAll defined = runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts
           substitution <- runStateT (unify constraint) emptyContext
           return ()
           
-test = [ ("example", forall "atx2" atom $ forall "sec" (var "atx2") atom) 
-       , ("eximp", exists "z" atom $ forall "atx" (var "z") $ forall "a" (var "atx") $ Spine "example" [var "atx", var "a"])
+test = [ ("example", exists "z2" atom $ forall "atx2" (var "z2") $ forall "sec" (var "atx2") atom) 
+       , ("eximp", forall "atx" atom $ forall "a" (var "atx") $ 
+                   Spine "open" [ Spine "example" []
+                                , Abs "z3" atom $ Abs "examp" (forall "atx2" (var "z3") $ forall "sec" (var "atx2") atom)
+                                  $ Spine "examp" [var "atx", var "a"] 
+                                ])
+       , ("eximp", forall "atx" atom $ forall "a" (var "atx") $ 
+                   exists "tp" (forall "_" atom atom) $ 
+                   Spine "open" [ Spine "example" []
+                                , Abs "z3" atom $ Abs "examp" (Spine "tp" [var "z3"])
+                                  $ Spine "examp" [var "atx", var "a"] 
+                                ])
        ]
 
 runTest = case checkAll test of
