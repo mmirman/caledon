@@ -63,51 +63,47 @@ defn =  do
                 return $ Predicate nm ty []
   more <|> none <?> "definition"
 
-pAtom :: Parser Tm
+pAtom :: Parser Spine
 pAtom =  do reserved "_"
             nm <- getNextVar
             mp <- currentSet <$> getState
-            return $ Spine (Var nm) $ Norm <$> Atom <$> var <$> S.toList mp
+            return $ Spine nm $ var <$> S.toList mp
      <|> do r <- idVar
             return $ var r
      <|> do r <- identifier
             mp <- currentSet <$> getState
-            return $ (if S.member r mp then var else cons) r
+            return $ var r
 
-     <|> (toTm <$> parens tipe)
+     <|> (parens tipe)
      <?> "atom"
 
-trm :: Parser Tm
+trm :: Parser Term
 trm =     parens trm
    <|> do reservedOp "λ" <|> reservedOp "\\"
           (nm,tp) <- parens anonNamed <|> anonNamed
           reservedOp "."
           tp' <- tmpState nm trm
           return $ Abs nm tp tp'
-   <|> do reservedOp "?λ" <|> reservedOp "?\\"
+{-   <|> do reservedOp "?λ" <|> reservedOp "?\\"
           (nm,tp) <- parens anonNamed <|> anonNamed
           reservedOp "."
           tp' <- tmpState nm trm
-          return $ AbsImp nm tp tp'
+          return $ AbsImp nm tp tp' -}
    <|> do t <- pAtom
-          tps <- many $ (Impl <$> braces tipe)
-                 <|> (Norm <$> (parens tipe <|> (Atom <$> pAtom)))
+          tps <- {- many $ (Impl <$> braces tipe)
+                 <|> (Norm <$> (parens tipe <|> (Atom <$> pAtom))) -}
+            many $ parens tipe <|> pAtom
           return $ rebuildSpine t tps
    <?> "term"
 
-fall :: Tp -> Tp -> Tp
-fall = Forall ""
 
-fallImp :: Tp -> Tp -> Tp
-fallImp = ForallImp ""
-
-table :: OperatorTable String ParseState Identity Tp
-table = [ [ binary (reservedOp "->" <|> reservedOp "→") fall AssocRight
-          , binary (reservedOp "=>" <|> reservedOp "⇒") fallImp AssocRight
+table :: OperatorTable String ParseState Identity Type
+table = [ [ binary (reservedOp "->" <|> reservedOp "→") (~>) AssocRight
+--          , binary (reservedOp "=>" <|> reservedOp "⇒") fallImp AssocRight
           ]
-        , [ binary (reservedOp "<-" <|> reservedOp "←") (flip fall) AssocLeft
-          , binary (reservedOp "<=" <|> reservedOp "⇐") (flip fallImp) AssocLeft ]
-        ]
+        , [ binary (reservedOp "<-" <|> reservedOp "←") (flip (~>)) AssocLeft
+--          , binary (reservedOp "<=" <|> reservedOp "⇐") (flip fallImp) AssocLeft ]
+          ]]
   where binary name fun = Infix (name >> return fun)
 
 decTipe :: (Parser String, String)
@@ -122,21 +118,22 @@ idVar = getId $ upper <|> char '\''
 decAnon :: (Parser String, String)
 decAnon = (getId $ letter <|> char '\'' , ":")
 
-named :: (Parser a, String) -> Parser (a, Tp)
+named :: (Parser a, String) -> Parser (a, Type)
 named (ident, sep) = do
   nm <- ident
   reservedOp sep
   ty <- tipe
   return (nm, ty)
 
-anonNamed :: Parser (String, Tp)
+anonNamed :: Parser (String, Type)
 anonNamed = do
   let (ident,sep) = decAnon
   nm <- ident
   ty <- optionMaybe $ reservedOp sep >> tipe
   nm' <- getNextVar
   mp <- currentSet <$> getState
-  return (nm,fromMaybe (Atom $ Spine (Var nm') $ Norm <$> Atom <$> var <$> S.toList mp) ty)
+--  return (nm,fromMaybe (Atom $ Spine (Var nm') $ Norm <$> Atom <$> var <$> S.toList mp) ty)
+  return (nm,fromMaybe (Spine nm' $ var <$> S.toList mp) ty)
 
 tmpState :: String -> Parser a -> Parser a
 tmpState nm m = do
@@ -147,26 +144,26 @@ tmpState nm m = do
   unless b $ modifyState $ modifySet $ S.delete nm
   return r
 
-tipe :: Parser Tp
+tipe :: Parser Type
 tipe = buildExpressionParser table (
         parens tipe
-    <|> (Atom <$> trm)
+    <|> trm
     <|> do (nm,tp) <- brackets anonNamed
            tp' <- tmpState nm tipe
-           return $ Forall nm tp tp'
-    <|> do (nm,tp) <- braces anonNamed
+           return $ forall nm tp tp'
+{-    <|> do (nm,tp) <- braces anonNamed
            tp' <- tmpState nm tipe
-           return $ ForallImp nm tp tp'
+           return $ ForallImp nm tp tp' -}
     <|> do reservedOp "∀" <|> reserved "forall"
            (nm,tp) <- parens anonNamed <|> anonNamed
            reservedOp "."
            tp' <- tmpState nm tipe
-           return $ Forall nm tp tp'
-    <|> do reservedOp "?∀" <|> reserved "?forall"
+           return $ forall nm tp tp'
+  {-  <|> do reservedOp "?∀" <|> reserved "?forall"
            (nm,tp) <- parens anonNamed <|> anonNamed
            reservedOp "."
            tp' <- tmpState nm tipe
-           return $ ForallImp nm tp tp'
+           return $ ForallImp nm tp tp' -}
     <?> "type")
 
 P.TokenParser{..} = P.makeTokenParser mydef

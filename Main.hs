@@ -2,7 +2,7 @@ module Main where
 
 import AST
 import Choice
-import Solver
+import HOU
 import Parser
 import System.Environment
 import Data.Functor
@@ -36,7 +36,7 @@ checkAndRun decs = do
 
   let allTypes c = (predName c, predType c):predConstructors c
   forM_ targets $ \target ->
-    case solver (first Cons <$> concatMap allTypes predicates) $ predType target of
+    case solver (concatMap allTypes predicates) $ predType target of
       Left e -> putStrLn $ "ERROR: "++e
       Right sub -> putStrLn $
                    "\nTARGET: \n"++show target

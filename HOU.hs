@@ -2,15 +2,16 @@
  DeriveFunctor,
  FlexibleInstances,
  PatternGuards,
- UnicodeSyntax
+ UnicodeSyntax,
+ TupleSections
  #-}
 module HOU where
 import Choice
 import AST
 import Control.Monad.State (StateT, runStateT, modify, get, put)
 import Control.Monad.RWS (RWST, runRWST, ask, withRWST)
-import Control.Monad.Error (throwError)
-import Control.Monad (unless, forM_, replicateM)
+import Control.Monad.Error (throwError, MonadError)
+import Control.Monad (unless, forM_, forM, replicateM)
 import Control.Monad.Trans (lift)
 import Control.Applicative
 import qualified Data.Foldable as F
@@ -289,6 +290,7 @@ gvar_gvar_same (Spine x yl, aty) (Spine x' y'l, bty) = do
       
       getBase 0 a = a
       getBase n (Spine "forall" [Abs _ ty r]) = getBase (n - 1) r
+      getBase n (Spine "exists" [Abs _ ty r]) = getBase (n - 1) r
       getBase _ a = a
       
       xNty = foldr (uncurry forall) (getBase n aty) perm
@@ -320,6 +322,7 @@ gvar_gvar_diff (Spine x yl, aty) (sp, _) bind = raiseToTop bind sp $ \(Spine x' 
       
       getBase 0 a = a
       getBase n (Spine "forall" [Abs _ ty r]) = getBase (n - 1) r
+      getBase n (Spine "exists" [Abs _ ty r]) = getBase (n - 1) r
       getBase _ a = a
       
       xNty = foldr (uncurry forall) (getBase n aty) (map fst perm)
@@ -371,6 +374,11 @@ gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
   
   return $ Just (sub, Top)
 
+getFamily (Spine "forall" [Abs _ _ lm]) = getFamily lm
+getFamily (Spine "exists" [Abs _ _ lm]) = getFamily lm
+getFamily (Spine nm' args) = nm'
+getFamily v = error $ "values don't have families: "++show v
+                      
 --------------------
 --- proof search ---  
 --------------------
@@ -404,11 +412,7 @@ search goal = case goal of
                                   -- to give other branches a fair shot at computation.
     env <- M.toList <$> getEnv
     
-    let sameFamily (Spine nm' args) | nm == nm' =  True
-        sameFamily (Spine "forall" [Abs _ _ lm]) = sameFamily lm
-        sameFamily (Spine "exists" [Abs _ _ lm]) = sameFamily lm
-        sameFamily _ = False
-
+    let sameFamily s = getFamily s == nm 
         left x target = case target of 
           Spine "forall" [Abs nm ty lm] -> do
             nm' <- lift $ getNewWith "@sla"
@@ -537,51 +541,40 @@ checkType sp ty = case sp of
               return $ (∃) tyA atom $ (∃) tyB' (forall x (var tyA) atom) 
                 $ cons1 :&: cons2 :&: cons3
 
-------------------------------------
---- type checking initialization ---
-------------------------------------
-genPutStrLn s = trace s $ return ()
+----------------------------
+--- the public interface ---
+----------------------------
 
-infixr 0 ~>
-(~>) = forall ""
-
--- [(Name, [(Name,Type)] , Type)]
--- convert this into something that typechecks it as "exists e : t . t'" then substitutes for 
--- e, when the jig is up.
-checkAll :: [(Name, Type)] -> Either String ()
-checkAll defined = runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts) 0
-  where consts = ("atom", atom)
-               : ("forall", (atom ~> atom) ~> atom)
-               : ("exists", (atom ~> atom) ~> atom)
-               : ("#pack#", exists "tp" atom $ exists "a" atom $  var "a" ~> var "tp" ~> forall "imp" (var "tp" ~> atom) $ exists "i" atom $ Spine "imp" [var "i"])
-               : ("#spack#", exists "tp" atom $ exists "a" atom $ exists "imp" (var "tp" ~> atom) $ var "a" ~> var "tp" ~> exists "i" atom $ Spine "imp" [var "i"])
-               : defined 
-        run = forM_ defined $ \(name,axiom) -> do
-          constraint <- checkType axiom atom
-          () <- genPutStrLn $ name ++" \n\t"++show constraint
-          substitution <- runStateT (unify constraint) emptyContext
-          return ()
-          
-test = [ ("example", exists "z2" atom $ forall "atx2" (var "z2") $ forall "sec" (var "atx2") atom) 
-       , ("eximp1", forall "atx" atom $ forall "a" (var "atx") $ 
-                    Spine "#open#" [ Spine "example" []
-                                   , Abs "z3" atom $ Abs "examp" (forall "atx2" (var "z3") $ forall "sec" (var "atx2") atom)
-                                   $ Spine "examp" [var "atx", var "a"] 
-                                   ])
-       , ("eximp2", forall "atx" atom $ forall "a" (var "atx") $ 
-                    exists "tp" (forall "_" atom atom) $ 
-                    Spine "#open#" [ Spine "example" []
-                                   , Abs "z3" atom $ Abs "examp" (Spine "tp" [var "z3"])
-                                   $ Spine "examp" [var "atx", var "a"] 
-                                   ])
-       , ("eximp3", forall "atx" atom $ forall "a" (var "atx") $ 
-                    Spine "#sopen#" [ Spine "example" []
-                                    , var "atx"
-                                    , var "a"
-                                    ])
-       ]
-
-runTest = case checkAll test of
-    Left a -> putStrLn a
-    Right () -> putStrLn "success"
+startTypeCheck :: Constants -> String -> Type -> Choice ()    
+startTypeCheck env str ty =  (\r -> (\(a,_,_) -> a) <$> runRWST r env 0) $ do 
+  unless (getFamily ty == str) $ throwError $ "not the right family: "++show str++" = "++show ty
+  constraint <- checkType ty atom
+  substitution <- runStateT (unify constraint) emptyContext
+  return ()
+    
+typeCheckPredicate :: Constants -> Predicate -> Choice Predicate
+typeCheckPredicate env (Query nm ty) = appendErr ("in query : "++show ty) $ do
+  startTypeCheck env "" ty
+  return $ Query nm ty
+typeCheckPredicate env pred@(Predicate pnm pty plst) = appendErr ("in\n"++show pred) $ do
+  pty' <- appendErr ("in name: "++ pnm ++" : "++show pty) $
+    startTypeCheck env "atom" pty
+  plst' <- forM plst $ \(nm,ty) ->
+    appendErr ("in case: " ++nm ++ " = "++show ty) $ (nm,) <$> startTypeCheck env pnm ty
+  return $ Predicate pnm pty plst
   
+typeCheckAll :: [Predicate] -> Choice [Predicate]
+typeCheckAll preds = forM preds $ typeCheckPredicate assumptions
+  where assumptions = M.fromList $ ("atom", atom)
+                      : ("forall", (atom ~> atom) ~> atom)
+                      : ("exists", (atom ~> atom) ~> atom)
+                      : ("#pack#", exists "tp" atom $ exists "a" atom $  var "a" ~> var "tp" ~> forall "imp" (var "tp" ~> atom) $ exists "i" atom $ Spine "imp" [var "i"])
+                      : ("#spack#", exists "tp" atom $ exists "a" atom $ exists "imp" (var "tp" ~> atom) $ var "a" ~> var "tp" ~> exists "i" atom $ Spine "imp" [var "i"])
+                      : concatMap (\st -> case st of
+                                    Query _ _ -> []
+                                    _ -> (predName st, predType st):predConstructors st) preds
+  
+solver :: [(Name,Type)] -> Type -> Either String [(Name, Term)]
+solver axioms tp = case runError $ runRWST (runStateT (search tp) emptyContext) (M.fromList axioms) 0 of
+  Right (((s,tm),_),_,_) -> Right $ ("query", tm):(map (\a -> (a,var a)) $ S.toList $ freeVariables tp)
+  Left s -> Left $ "reification not possible: "++s

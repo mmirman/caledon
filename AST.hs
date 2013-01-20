@@ -24,12 +24,20 @@ import Choice
 
 type Name = String
 
+infixr 0 ~>
+(~>) = forall ""
+
 data Spine = Spine Name [Type]
            | Abs Name Type Spine 
            deriving (Eq)
 
 type Type = Spine
 type Term = Spine
+
+data Predicate = Predicate { predName :: Name, predType :: Type, predConstructors :: [(Name,Type)] }
+               | Query { predName :: Name, predType ::  Type }
+               deriving Show
+
 
 getNewWith s = (++s) <$> getNew
 
@@ -170,3 +178,5 @@ instance RegenAbsVars Spine where
     return $ Abs a' ty' r'
   regenAbsVars (Spine a l) = Spine a <$> mapM regenAbsVars l
  
+  
+  
