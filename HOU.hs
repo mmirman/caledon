@@ -80,8 +80,10 @@ newName nm s = (nm',s')
 
 class Subst a where
   subst :: Substitution -> a -> a
-instance (Functor f , Subst a) => Subst (f a) where
+instance Subst a => Subst [a] where
   subst foo t = subst foo <$> t
+instance (Subst a, Subst b) => Subst (a,b) where
+  subst foo (a,b) = (subst foo a , subst foo b)
 instance Subst Spine where
   subst s (Abs nm tp rst) = Abs nm' (subst s tp) $ subst s' rst
     where (nm',s') = newName nm s
@@ -250,6 +252,7 @@ type WithContext = StateT Context Env
 
 type Unification = WithContext Substitution
 
+getElm :: Name -> Name -> WithContext (Either Binding Spine)
 getElm s x = do
   ty <- lookupConstant x
   case ty of
@@ -257,6 +260,7 @@ getElm s x = do
     Just a -> return $ Right a
 
 -- | This gets all the bindings outside of a given bind and returns them in a list.
+getBindings :: Binding -> WithContext [(Name,Type)]
 getBindings bind = do
   ctx <- get
   return $ getStart "IN: getBindings" bind ctx
@@ -275,6 +279,7 @@ flatten cons = case cons of
     where (binds, c') = flatten c
   a :=: b -> ([],[(a,b)])
   
+addBinds :: [(Quant, Name, Type)] -> WithContext ()
 addBinds binds = mapM_ (\(quant,nm,ty) -> modify $ addToTail quant nm ty) binds   
 
 isolate m = do
@@ -296,8 +301,8 @@ unify cons = do
             let (binds,constraints) = flatten cons
             put newstate
             addBinds binds
-            let l' = subst sub l
-                r' = subst sub $ reverse r
+            let l' = subst sub <$> l
+                r' = subst sub <$> reverse r
             return $ (sub,l'++constraints++r')
           Nothing -> uniOne l ((a,b):r)
      
@@ -305,10 +310,11 @@ unify cons = do
       uniWhile l = do 
         (sub,l') <- uniOne l []
         modify $ subst sub
-        (sub ***) <$> uniWhile l' 
+        (sub ***) <$> uniWhile l'
       
   uniWhile constraints
 
+unifyEq :: Spine -> Spine -> WithContext (Maybe (Substitution , Constraint))
 unifyEq a b = let cons = a :=: b in case cons of 
   Abs nm ty s :=: Abs nm' ty' s' -> do
     return $ Just (mempty, ty :=: ty' :&: (Bind Forall nm ty $ s :=: subst (nm' |-> var nm) s'))
@@ -316,7 +322,7 @@ unifyEq a b = let cons = a :=: b in case cons of
     return $ Just (mempty, Bind Forall nm ty $ s :=: rebuildSpine s' [var nm])
   s :=: s' | s == s' -> return $ Just (mempty, Top)
   s@(Spine x yl) :=: s' -> do
-    bind <- getElm "all" x
+    bind <- getElm ("all: "++show cons) x
     let constCase = Just <$> case s' of
           Spine x' _ | x /= x' -> do
             bind' <- getElm ("const case: "++show cons) x'
@@ -345,7 +351,7 @@ unifyEq a b = let cons = a :=: b in case cons of
                 Left Binding{ elmQuant = Forall, elmType = ty' } -> -- gvar-uvar-inside
                   gvar_uvar_inside (Spine x yl, ty) (Spine x' y'l, ty')
                 Left bind@Binding{ elmQuant = Exists, elmType = ty' } -> 
-                  if not (allVars yl && allVars y'l) 
+                  if not $ allElementsAreVariables yl && allElementsAreVariables y'l 
                   then return Nothing 
                   else if x == x' 
                        then -- gvar-gvar-same
@@ -356,9 +362,10 @@ unifyEq a b = let cons = a :=: b in case cons of
                          else gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
             _ -> return $ Just (x |-> makeFromType ty s',Top) -- gvar-abs?
             
-allVars = all (\c -> case c of
-               Spine a [] -> True
-               _ -> False)
+allElementsAreVariables :: [Spine] -> Bool
+allElementsAreVariables = all $ \c -> case c of
+  Spine a [] -> True
+  _ -> False
 
 makeFromType (Spine "forall" [Abs x ty z]) f = Abs x ty $ makeFromType z f
 makeFromType _ f = f
@@ -566,24 +573,35 @@ checkType sp ty = case sp of
         return $ cons1 :&: cons2
       _ -> do    
         valTy <- getNewWith "@vt"
-        depTy <- getNewWith "@vt"
-        r <- getNewWith "@vt"
-        cons1 <- checkType val $ var valTy
-        cons2 <- checkType dep $ var depTy
+        depTy <- getNewWith "@dt"
+        r <- getNewWith "@r"
+        let vdepTy = var depTy
+        cons1 <- addToEnv r vdepTy $ checkType val $ Spine valTy [var r]
+        cons2 <- checkType dep vdepTy
         
-        return $ (∃) depTy atom $ (∃) valTy atom 
+        return $ (∃) depTy atom $ (∃) valTy (forall "" vdepTy atom)
           $   cons1 
           :&: cons2 
-          :&: ty :=: exists r (var depTy) (var valTy)
+          :&: ty :=: exists r vdepTy (Spine valTy [var r])
           
+  Spine "#snd#" [e] -> do
+    r <- getNewWith "@rs"
+    valTy <- getNewWith "@vts"
+    depTy <- getNewWith "@dts"
+    let vdepTy = var depTy
+    cons1 <- checkType e $ exists r vdepTy $ Spine valTy [var r]
+    return $ (∃) depTy atom $ (∃) valTy (forall "" vdepTy atom)
+      $   cons1
+      :&: ty :=: Spine valTy [Spine "#fst#" [e]]
+
   Spine "forall" [Abs x tyA tyB] -> do
     cons1 <- checkType tyA atom
     cons2 <- addToEnv x tyA $ checkType tyB atom
-    return $ (atom :=: ty) :&: cons1 :&: (∀) x tyA cons2
+    return $ atom :=: ty :&: cons1 :&: (∀) x tyA cons2
   Spine "exists" [Abs x tyA tyB] -> do
     cons1 <- checkType tyA atom
     cons2 <- addToEnv x tyA $ checkType tyB atom
-    return $ (atom :=: ty) :&: cons1 :&: (∃) x tyA cons2    
+    return $ atom :=: ty :&: cons1 :&: (∃) x tyA cons2    
   Spine head args -> cty (head, reverse args) ty
     where cty (head,[]) ty = do
             mty <- (M.lookup head) <$> ask
@@ -622,7 +640,7 @@ checkAll defined = runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts
           return ()
           
 test = [ ("example", forall "atx2" atom $ forall "sec" (var "atx2") atom) 
-       , ("eximp", forall "atx" atom $ forall "a" (var "atx") $ Spine "example" [var "atx", var "a"])
+       , ("eximp", exists "z" atom $ forall "atx" (var "z") $ forall "a" (var "atx") $ Spine "example" [var "atx", var "a"])
        ]
 
 runTest = case checkAll test of
