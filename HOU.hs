@@ -33,7 +33,6 @@ data Spine = Spine Name [Type]
            deriving (Eq)
 
 type Type = Spine
-type Kind = Spine
 type Term = Spine
 
 getNewWith s = (++s) <$> getNew
