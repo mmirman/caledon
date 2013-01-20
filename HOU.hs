@@ -504,9 +504,8 @@ search goal = case goal of
     nm' <- lift $ getNewWith "@search"
     modify $ addToTail Exists nm' ty
     -- The existential quantifier should get solved and thus removed from the context already!
-    (sub, res) <- search $ subst (nm |-> var nm') lm -- THIS IS MAYBE WRONG? HOW DO I EVEN?  
+    search $ subst (nm |-> var nm') lm -- THIS IS MAYBE WRONG? HOW DO I EVEN?  
 
-    return (M.delete nm' sub, Spine "#pair#" [subst sub $ var nm' , res])
     
   Spine "forall" [Abs nm ty lm] -> do
     nm' <- lift $ getNewWith "@sr"
@@ -565,35 +564,6 @@ checkType sp ty = case sp of
     cons3 <- addToEnv x tyA $ checkType sp (Spine e [var x])
     return $ (∃) e (forall x tyA atom) $ cons1 :&: cons2 :&: (∀) x tyA cons3
     
-  Spine "#pair#" [dep, val] -> do
-    case ty of
-      Spine "exists" [Abs x depTy valTy] -> do
-        cons1 <- checkType val $ subst (x |-> dep) valTy
-        cons2 <- checkType dep depTy
-        return $ cons1 :&: cons2
-      _ -> do    
-        valTy <- getNewWith "@vt"
-        depTy <- getNewWith "@dt"
-        r <- getNewWith "@r"
-        let vdepTy = var depTy
-        cons1 <- addToEnv r vdepTy $ checkType val $ Spine valTy [var r]
-        cons2 <- checkType dep vdepTy
-        
-        return $ (∃) depTy atom $ (∃) valTy (forall "" vdepTy atom)
-          $   cons1 
-          :&: cons2 
-          :&: ty :=: exists r vdepTy (Spine valTy [var r])
-          
-  Spine "#snd#" [e] -> do
-    r <- getNewWith "@rs"
-    valTy <- getNewWith "@vts"
-    depTy <- getNewWith "@dts"
-    let vdepTy = var depTy
-    cons1 <- checkType e $ exists r vdepTy $ Spine valTy [var r]
-    return $ (∃) depTy atom $ (∃) valTy (forall "" vdepTy atom)
-      $   cons1
-      :&: ty :=: Spine valTy [Spine "#fst#" [e]]
-
   Spine "forall" [Abs x tyA tyB] -> do
     cons1 <- checkType tyA atom
     cons2 <- addToEnv x tyA $ checkType tyB atom
