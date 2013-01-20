@@ -150,6 +150,31 @@ instance Subst Constraint where
 (∃) = Bind Exists
 (∀) = Bind Forall
 
+
+class RegenAbsVars a where
+  regenAbsVars :: a -> Env a
+instance RegenAbsVars Constraint where  
+  regenAbsVars cons = case cons of
+    Bind q nm ty cons -> do
+      ty' <- regenAbsVars ty
+      Bind q nm ty' <$> regenAbsVars cons
+    a :=: b -> do
+      a' <- regenAbsVars a 
+      b' <- regenAbsVars b 
+      return $ a' :=: b'
+    a :&: b -> do  
+      a' <- regenAbsVars a 
+      b' <- regenAbsVars b 
+      return $ a' :&: b'
+    Top -> return Top
+instance RegenAbsVars Spine where  
+  regenAbsVars (Abs a ty r) = do
+    a' <- getNewWith "@new"
+    ty' <- regenAbsVars ty
+    r' <- regenAbsVars $ subst (a |-> var a') r
+    return $ Abs a' ty' r'
+  regenAbsVars (Spine a l) = Spine a <$> mapM regenAbsVars l
+  
 --------------------------------
 ---  constraint context list ---
 --------------------------------
@@ -283,6 +308,7 @@ flatten cons = case cons of
 addBinds :: [(Quant, Name, Type)] -> WithContext ()
 addBinds binds = mapM_ (\(quant,nm,ty) -> modify $ addToTail quant nm ty) binds   
 
+  
 isolate m = do
   s <- get
   a <- m
@@ -292,6 +318,7 @@ isolate m = do
   
 unify :: Constraint -> Unification
 unify cons = do
+  cons <- lift $ regenAbsVars cons
   let (binds,constraints) = flatten cons
   addBinds binds      
   let uniOne [] r  = throwError "can not unify any further"
@@ -331,7 +358,7 @@ unifyEq a b = let cons = a :=: b in case cons of
               Left Binding{ elmQuant = Exists } -> return $ (mempty,s' :=: s)
               _ -> throwError $ "two different universal equalities: "++show cons++" WITH BIND: "++show bind'
           Spine x' yl' | x == x' -> do -- const-const
-            unless (length yl == length yl') $ throwError "different numbers of arguments on constant"
+            unless (length yl == length yl') $ throwError $ "different numbers of arguments on constant: "++show cons
             return (mempty, foldl (:&:) Top $ zipWith (:=:) yl yl')
           _ -> throwError $ "uvar against a pi WITH CONS "++show cons
           
@@ -462,7 +489,7 @@ gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) =
 gvar_const a b@(Spine x' _, _) = gvar_fixed a b (const x')
 
 
-gvar_fixed (Spine x yl, aty) (Spine x' y'l, bty) action = do
+gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
   let m = length y'l
       n = length yl
                     
@@ -470,12 +497,18 @@ gvar_fixed (Spine x yl, aty) (Spine x' y'l, bty) action = do
   un <- replicateM n $ lift $ getNewWith "@un"
   let vun = var <$> un
       
-      toLterm (Spine "forall" [Abs _ ty r]) (ui:unr) = Abs ui ty $ toLterm r unr
-      toLterm _ [] = Spine (action un) $ map (\xi -> Spine xi vun) xm
-      toLterm _ _ = error "what the fuck"
-      
-      l = toLterm aty un
-      untylr = reverse $ zip un $ getTypes aty
+
+      toLterm (Spine "forall" [Abs _ ty r]) (ui:unr) = Abs ui ty <$> toLterm r unr
+      toLterm _ [] = return $ Spine (action un) $ map (\xi -> Spine xi vun) xm
+
+      toLterm s l = throwError $ "too many arguments for this type: "
+                    ++"\n\ts: "++show s
+                    ++"\n\taty: "++show aty
+                    ++"\n\tinitials: "++show l
+                    ++"\n\tcons: "++show (a :=: b)
+  l <- toLterm aty un
+  
+  let untylr = reverse $ zip un $ getTypes aty
       vbuild e = foldr (\(nm,ty) a -> forall nm ty a) e untylr
                     
 
@@ -564,20 +597,63 @@ checkType sp ty = case sp of
     cons2 <- checkType ty atom
     cons3 <- addToEnv x tyA $ checkType sp (Spine e [var x])
     return $ (∃) e (forall x tyA atom) $ cons1 :&: cons2 :&: (∀) x tyA cons3
-  Spine "pack" [e, tau, Abs imp tp interface] -> do
-    cons1 <- checkType e (subst (imp |-> tau) interface)
-    cons2 <- checkType tp atom
+
+  Spine "#spack#" [e, tau] -> do
+    tp <- getNewWith "@tp"
+    imp <- getNewWith "@imp"
+    iface <- getNewWith "@iface"
+    
+    let vtp = var tp
+        ifaceTp = forall "_" vtp atom
+        
+    cons1 <- addToEnv tp atom $ checkType tau vtp
+    
+    cons2 <- addToEnv tp atom
+             $ addToEnv iface ifaceTp
+             $ checkType e $ Spine iface [tau]
+    
+    return $ (∃) tp atom $ cons1
+         :&: ((∃) iface ifaceTp $ cons2 :&: ty :=: exists imp vtp (Spine iface [var imp]))
+      
+  Spine "#pack#" [e, tau, Abs imp tp interface] -> do
+    cons1 <- checkType tp atom    
+    cons2 <- checkType tau tp
+    cons3 <- checkType e (subst (imp |-> tau) interface)
     return $ cons1 
          :&: cons2 
+         :&: cons3
          :&: ty :=: exists imp tp interface
     
-  Spine "open" [closed, Abs imp tp (Abs p interface exp)] -> do
-    cons1 <- addToEnv imp tp $ checkType interface atom
-    cons2 <- checkType tp atom
+  Spine "#sopen#" (closed:l) -> do
+    tp <- getNewWith "@tp"
+    imp <- getNewWith "@imp"
+    iface <- getNewWith "@iface"
+    p <- getNewWith "@p"
     
-    cons3 <- addToEnv imp tp $ addToEnv p interface $ checkType exp ty
-    cons4 <- checkType closed (exists imp tp interface)
-    return $ cons2 :&: cons4 :&: ((∃) imp tp $ cons1 :&: (∀) p interface cons3)
+    let vimp = var imp
+        vtp = var tp
+        ifaceTp = forall "_" vtp atom
+        ifaceImp = Spine iface [vimp]
+
+    cons <- addToEnv tp atom $ addToEnv iface ifaceTp $ do
+      
+      cons1 <- checkType closed $ exists imp vtp $ ifaceImp
+      
+      cons2 <- addToEnv imp vtp $ addToEnv p ifaceImp $ checkType (Spine p l) ty
+        
+      return $ cons1 :&: ((∃) imp vtp $ (∀) p ifaceImp cons2 )
+
+    return $ (∃) tp atom $ (∃) iface ifaceTp $ cons 
+  
+  Spine "#open#" [closed, Abs imp tp (Abs p interface exp)] -> do
+    cons1 <- checkType tp atom
+    cons2 <- checkType closed $ exists imp tp interface
+    cons3 <- addToEnv imp tp $ do
+      cons1 <- checkType interface atom
+      cons2 <- addToEnv p interface $ checkType exp ty    
+      return $ cons1 :&: (∀) p interface cons2
+      
+    return $ cons1 :&: cons2 :&: (∃) imp tp cons3 
     
   Spine "forall" [Abs x tyA tyB] -> do
     cons1 <- checkType tyA atom
@@ -626,17 +702,22 @@ checkAll defined = runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts
           return ()
           
 test = [ ("example", exists "z2" atom $ forall "atx2" (var "z2") $ forall "sec" (var "atx2") atom) 
-       , ("eximp", forall "atx" atom $ forall "a" (var "atx") $ 
-                   Spine "open" [ Spine "example" []
-                                , Abs "z3" atom $ Abs "examp" (forall "atx2" (var "z3") $ forall "sec" (var "atx2") atom)
-                                  $ Spine "examp" [var "atx", var "a"] 
-                                ])
-       , ("eximp", forall "atx" atom $ forall "a" (var "atx") $ 
-                   exists "tp" (forall "_" atom atom) $ 
-                   Spine "open" [ Spine "example" []
-                                , Abs "z3" atom $ Abs "examp" (Spine "tp" [var "z3"])
-                                  $ Spine "examp" [var "atx", var "a"] 
-                                ])
+       , ("eximp1", forall "atx" atom $ forall "a" (var "atx") $ 
+                    Spine "#open#" [ Spine "example" []
+                                   , Abs "z3" atom $ Abs "examp" (forall "atx2" (var "z3") $ forall "sec" (var "atx2") atom)
+                                   $ Spine "examp" [var "atx", var "a"] 
+                                   ])
+       , ("eximp2", forall "atx" atom $ forall "a" (var "atx") $ 
+                    exists "tp" (forall "_" atom atom) $ 
+                    Spine "#open#" [ Spine "example" []
+                                   , Abs "z3" atom $ Abs "examp" (Spine "tp" [var "z3"])
+                                   $ Spine "examp" [var "atx", var "a"] 
+                                   ])
+       , ("eximp3", forall "atx" atom $ forall "a" (var "atx") $ 
+                    Spine "#sopen#" [ Spine "example" []
+                                    , var "atx"
+                                    , var "a"
+                                    ])
        ]
 
 runTest = case checkAll test of
