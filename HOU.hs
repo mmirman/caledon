@@ -51,6 +51,7 @@ instance Show Spine where
 var nm = Spine nm []
 atom = var "atom"
 forall x tyA v = Spine ("forall") [Abs x tyA v]
+exists x tyA v = Spine ("exists") [Abs x tyA v]
 
 
 ---------------------
@@ -120,6 +121,9 @@ instance Show Quant where
   show Exists = "∃"
 
 -- as ineficient as it is, I'll make this the constraint representation.
+infixr 2 :=:  
+infixr 1 :&:
+
 data Constraint = Top
                 | Spine :=: Spine
                 | Constraint :&: Constraint
@@ -450,7 +454,7 @@ gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) =
 gvar_const a b@(Spine x' _, _) = gvar_fixed a b (const x')
 
 
-gvar_fixed (Spine x yl, aty) (Spine x' y'l, bty) r = do
+gvar_fixed (Spine x yl, aty) (Spine x' y'l, bty) action = do
   let m = length y'l
       n = length yl
                     
@@ -459,7 +463,7 @@ gvar_fixed (Spine x yl, aty) (Spine x' y'l, bty) r = do
   let vun = var <$> un
       
       toLterm (Spine "forall" [Abs _ ty r]) (ui:unr) = Abs ui ty $ toLterm r unr
-      toLterm _ [] = Spine (r un) $ map (\xi -> Spine xi vun) xm
+      toLterm _ [] = Spine (action un) $ map (\xi -> Spine xi vun) xm
       toLterm _ _ = error "what the fuck"
       
       l = toLterm aty un
@@ -488,43 +492,59 @@ getEnv = do
   
 search :: Type -> WithContext (Substitution, Term)
 search goal = case goal of 
-  Spine "exists" [Abs nm ty lm] -> do 
-    modify $ addToTail Exists nm ty
+  Spine "exists" [Abs nm ty lm] -> do -- my current theory is that existential quantifiers just don't need proof terms, 
+                                      -- either in elimination or introduction.  This needs some thought.
+    nm' <- lift $ getNewWith "@search"
+    modify $ addToTail Exists nm' ty
     -- The existential quantifier should get solved and thus removed from the context already!
-    search lm -- THIS IS MAYBE WRONG? HOW DO I EVEN?  
+    (sub, res) <- search $ subst (nm |-> var nm') lm -- THIS IS MAYBE WRONG? HOW DO I EVEN?  
+
+    return (M.delete nm' sub, Spine "#pair#" [subst sub $ var nm' , res])
+    
   Spine "forall" [Abs nm ty lm] -> do
-    modify $ addToTail Forall nm ty
-    (sub,l) <- search lm
-    modify $ removeFromContext nm
-    return (sub, Abs nm ty l)
+    nm' <- lift $ getNewWith "@sr"
+    modify $ addToTail Forall nm' ty
+    (sub,l) <- search $ subst (nm |-> var nm') lm
+    modify $ removeFromContext nm'
+    return (sub, Abs nm' (subst sub ty) l)
   Spine nm args -> fail "" <|> do -- here we ensure that since this might run infinitely deep without different cases, we stop somewhere along the way 
                                   -- to give other branches a fair shot at computation.
     env <- M.toList <$> getEnv
     
-    let isSimilar (Spine nm' args) | nm == nm' =  True
-        isSimilar (Spine "forall" [Abs _ _ lm]) = isSimilar lm
-        isSimilar (Spine "exists" [Abs _ _ lm]) = isSimilar lm
-        isSimilar _ = False
+    let sameFamily (Spine nm' args) | nm == nm' =  True
+        sameFamily (Spine "forall" [Abs _ _ lm]) = sameFamily lm
+        sameFamily (Spine "exists" [Abs _ _ lm]) = sameFamily lm
+        sameFamily _ = False
         
-        left (x, target) = case target of 
+        left target = case target of 
           Spine "forall" [Abs nm ty lm] -> do
-            (sub, result)  <- left (x, target)
+            nm' <- lift $ getNewWith "@sla"
+            
+            modify $ addToTail Forall nm' ty
+            (sub, result)  <- left $ subst (nm |-> var nm') lm
+            modify $ removeFromContext nm'
+            
             (sub', newArg) <- search $ subst sub ty
-            return $ (sub *** sub', rebuildSpine result [newArg])
+            return $ (sub *** sub', newArg:subst sub' result)
           Spine "exists" [Abs nm ty lm] -> do 
             -- THIS CAN NOT BE CORRECT!
-            (sub, result)  <- left (x, target)
-            (sub', newArg) <- search $ subst sub ty
-            return $ (sub *** sub', rebuildSpine result [newArg])
+            nm' <- lift $ getNewWith "@sle"
+            modify $ addToTail Exists nm' ty
+            left $ subst (nm |-> var nm') lm
+
           Spine _ _ -> do  
             sub <- unify $ goal :=: target
-            return (sub, Spine x [])
+            return (sub, [])
           _ -> error $ "λ does not have type atom: " ++ show target
-              
-    F.msum $ left <$> filter (isSimilar . snd) env
+        
+        leftInit (x,target) = do
+          (sub,l) <- left target
+          return (sub, Spine x l)
+          
+    F.msum $ leftInit <$> filter (sameFamily . snd) env
 
   _ -> error $ "Not a type: "++show goal
-
+  
   
 -----------------------------
 --- constraint generation ---
@@ -537,6 +557,25 @@ checkType sp ty = case sp of
     cons2 <- checkType ty atom
     cons3 <- addToEnv x tyA $ checkType sp (Spine e [var x])
     return $ (∃) e (forall x tyA atom) $ cons1 :&: cons2 :&: (∀) x tyA cons3
+    
+  Spine "#pair#" [dep, val] -> do
+    case ty of
+      Spine "exists" [Abs x depTy valTy] -> do
+        cons1 <- checkType val $ subst (x |-> dep) valTy
+        cons2 <- checkType dep depTy
+        return $ cons1 :&: cons2
+      _ -> do    
+        valTy <- getNewWith "@vt"
+        depTy <- getNewWith "@vt"
+        r <- getNewWith "@vt"
+        cons1 <- checkType val $ var valTy
+        cons2 <- checkType dep $ var depTy
+        
+        return $ (∃) depTy atom $ (∃) valTy atom 
+          $   cons1 
+          :&: cons2 
+          :&: ty :=: exists r (var depTy) (var valTy)
+          
   Spine "forall" [Abs x tyA tyB] -> do
     cons1 <- checkType tyA atom
     cons2 <- addToEnv x tyA $ checkType tyB atom
