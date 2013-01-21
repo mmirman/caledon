@@ -47,9 +47,9 @@ showWithParens t = if (case t of
                       ) then "("++show t++")" else show t 
 
 instance Show Spine where
-  show (Spine "forall" [Abs nm t t']) | not (S.member nm (freeVariables t')) = showWithParens t++ " → " ++ show t'
-  show (Spine "forall" [Abs nm ty t]) = "∀ "++nm++" : "++showWithParens ty++" . "++show t  
-  show (Spine "exists" [Abs nm ty t]) = "∃ "++nm++" : "++showWithParens ty++" . "++show t  
+  show (Spine "forall" [_,Abs nm t t']) | not (S.member nm (freeVariables t')) = showWithParens t++ " → " ++ show t'
+  show (Spine "forall" [_,Abs nm ty t]) = "∀ "++nm++" : "++showWithParens ty++" . "++show t  
+  show (Spine "exists" [_,Abs nm ty t]) = "∃ "++nm++" : "++showWithParens ty++" . "++show t  
   show (Spine h t) = h++concatMap (\s -> " "++showWithParens s) t
   show (Abs nm ty t) = "λ "++nm++" : "++showWithParens ty++" . "++show t
 
@@ -62,8 +62,8 @@ instance Show Predicate where
                                                
 var nm = Spine nm []
 atom = var "atom"
-forall x tyA v = Spine ("forall") [Abs x tyA v]
-exists x tyA v = Spine ("exists") [Abs x tyA v]
+forall x tyA v = Spine ("forall") [tyA, Abs x tyA v]
+exists x tyA v = Spine ("exists") [tyA, Abs x tyA v]
 
 
 ---------------------
@@ -147,6 +147,7 @@ data Constraint = Top
 instance Show Constraint where
   show (a :=: b) = show a ++" ≐ "++show b
   show (a :&: b) = show a ++" ∧ "++show b
+  show Top = " ⊤ "
   show (Bind q n ty c) = show q++" "++ n++" : "++show ty++" . "++showWithParens c
     where showWithParens Bind{} = show c
           showWithParens _ = "( "++show c++" )"

@@ -142,7 +142,7 @@ getBindings bind = do
   return $ getStart "IN: getBindings" bind ctx
 
 getTypes :: Spine -> [Type]
-getTypes (Spine "forall" [Abs _ ty l]) = ty:getTypes l
+getTypes (Spine "forall" [_, Abs _ ty l]) = ty:getTypes l
 getTypes _ = []
 
 flatten :: Constraint -> ([(Quant, Name, Type)], [(Spine, Spine)])
@@ -158,6 +158,13 @@ flatten cons = case cons of
 addBinds :: [(Quant, Name, Type)] -> WithContext ()
 addBinds binds = mapM_ (\(quant,nm,ty) -> modify $ addToTail quant nm ty) binds   
 
+getAllBindings :: WithContext [(Name,Type)]
+getAllBindings = do
+  ctx <- get
+  case ctxtTail ctx of 
+    Nothing -> return []
+    Just _ -> return $ (\i -> (elmName i, elmType i)) (getTail ctx)
+              :getStart "IN: getAllbindings" (getTail ctx) ctx
   
 isolate m = do
   s <- get
@@ -171,22 +178,31 @@ unify cons = do
   cons <- lift $ regenAbsVars cons
   let (binds,constraints) = flatten cons
   addBinds binds      
-  let uniOne [] r  = throwError "can not unify any further"
+  let with l r newstate sub cons = do
+        let (binds,constraints) = flatten cons
+            
+        put newstate
+        addBinds binds
+        let l' = subst sub <$> l
+            r' = subst sub <$> reverse r
+            res = (sub,l'++constraints++r')
+            
+        return res
+      uniOne [] r  = throwError "can not unify any further"
       uniOne ((a,b):l) r = do
         (newstate,choice) <- isolate $ unifyEq a b
         case choice of
-          Just (sub,cons) -> do
-            let (binds,constraints) = flatten cons
-            put newstate
-            addBinds binds
-            let l' = subst sub <$> l
-                r' = subst sub <$> reverse r
-            return $ (sub,l'++constraints++r')
-          Nothing -> uniOne l ((a,b):r)
+          Just (sub,cons) -> with l r newstate sub cons
+          Nothing -> do 
+            (newstate,choice) <- isolate $ unifyEq b a 
+            case choice of
+              Just (sub, cons) -> with l r newstate sub cons
+              Nothing -> uniOne l ((a,b):r)
      
       uniWhile [] = return mempty
       uniWhile l = do 
-        (sub,l') <- uniOne l []
+        binds <- getAllBindings
+        (sub,l') <- trace ("LIST: "++show (reverse binds)++"\nIN: "++show l) $ uniOne l []
         modify $ subst sub
         (sub ***) <$> uniWhile l'
       
@@ -238,15 +254,13 @@ unifyEq a b = let cons = a :=: b in case cons of
                          if S.member x $ freeVariables y'l 
                          then throwError $ "occurs check: "++show (a :=: b)
                          else gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
-            _ -> return $ Just (x |-> makeFromType ty s',Top) -- gvar-abs?
+            _ -> return Nothing
+
             
 allElementsAreVariables :: [Spine] -> Bool
 allElementsAreVariables = all $ \c -> case c of
   Spine a [] -> True
   _ -> False
-
-makeFromType (Spine "forall" [Abs x ty z]) f = Abs x ty $ makeFromType z f
-makeFromType _ f = f
 
 makeFromList eb hl = foldr (\(nm,ty) a -> forall nm ty a) eb hl
 
@@ -273,7 +287,7 @@ raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
   return l
 
 -- TODO: make sure this is correct.  its now just a modification of gvar_gvar_diff!
-gvar_gvar_same (Spine x yl, aty) (Spine x' y'l, bty) = do
+gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) = do
   let n = length yl
       m = length y'l
                     
@@ -289,8 +303,8 @@ gvar_gvar_same (Spine x yl, aty) (Spine x' y'l, bty) = do
       l = makeBind uNl atyl $ map fst perm
       
       getBase 0 a = a
-      getBase n (Spine "forall" [Abs _ ty r]) = getBase (n - 1) r
-      getBase n (Spine "exists" [Abs _ ty r]) = getBase (n - 1) r
+      getBase n (Spine "forall" [_, Abs _ ty r]) = getBase (n - 1) r
+      getBase n (Spine "exists" [_, Abs _ ty r]) = getBase (n - 1) r
       getBase _ a = a
       
       xNty = foldr (uncurry forall) (getBase n aty) perm
@@ -298,10 +312,10 @@ gvar_gvar_same (Spine x yl, aty) (Spine x' y'l, bty) = do
       sub = x |-> l
       
   modify $ addToHead Exists xN xNty
-  return $ Just (sub, Top)
+  return $ Just (sub, subst sub $ a :=: b)
 
   
-gvar_gvar_diff (Spine x yl, aty) (sp, _) bind = raiseToTop bind sp $ \(Spine x' y'l) bty -> do
+gvar_gvar_diff (a@(Spine x yl), aty) (sp, _) bind = raiseToTop bind sp $ \(Spine x' y'l) bty -> do
   
   -- now x' comes before x 
   -- but we no longer care since I tested it, and switching them twice reduces to original
@@ -321,8 +335,8 @@ gvar_gvar_diff (Spine x yl, aty) (sp, _) bind = raiseToTop bind sp $ \(Spine x' 
       l' = makeBind vNl btyl $ map snd perm
       
       getBase 0 a = a
-      getBase n (Spine "forall" [Abs _ ty r]) = getBase (n - 1) r
-      getBase n (Spine "exists" [Abs _ ty r]) = getBase (n - 1) r
+      getBase n (Spine "forall" [_, Abs _ ty r]) = getBase (n - 1) r
+      getBase n (Spine "exists" [_, Abs _ ty r]) = getBase (n - 1) r
       getBase _ a = a
       
       xNty = foldr (uncurry forall) (getBase n aty) (map fst perm)
@@ -330,7 +344,7 @@ gvar_gvar_diff (Spine x yl, aty) (sp, _) bind = raiseToTop bind sp $ \(Spine x' 
       sub = (x |-> l) *** (x' |-> l')
       
   modify $ addToHead Exists xN xNty
-  return $ Just (sub, Top)
+  return $ Just (sub, subst sub $ a :=: sp)
   
   
 gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) = 
@@ -338,7 +352,7 @@ gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) =
     Nothing -> return Nothing
     Just i -> gvar_fixed a b (!! i)
 
-gvar_const a b@(Spine x' _, _) = gvar_fixed a b (const x')
+gvar_const a b@(Spine x' _, _) = trace ("-gc-") $ gvar_fixed a b (const x')
 
 
 gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
@@ -349,8 +363,7 @@ gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
   un <- replicateM n $ lift $ getNewWith "@un"
   let vun = var <$> un
       
-
-      toLterm (Spine "forall" [Abs _ ty r]) (ui:unr) = Abs ui ty <$> toLterm r unr
+      toLterm (Spine "forall" [_, Abs _ ty r]) (ui:unr) = Abs ui ty <$> toLterm r unr
       toLterm _ [] = return $ Spine (action un) $ map (\xi -> Spine xi vun) xm
 
       toLterm s l = throwError $ "too many arguments for this type: "
@@ -364,18 +377,18 @@ gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
       vbuild e = foldr (\(nm,ty) a -> forall nm ty a) e untylr
                     
 
-      substBty sub (Spine "forall" [Abs vi bi r]) (xi:xmr) = (xi,vbuild $ subst sub bi)
-                                                             :substBty (M.insert vi (Spine xi vun) sub) r xmr
+      substBty sub (Spine "forall" [_, Abs vi bi r]) (xi:xmr) = (xi,vbuild $ subst sub bi)
+                                                                :substBty (M.insert vi (Spine xi vun) sub) r xmr
       substBty _ _ [] = []
       substBty _ _ _ = error $ "s is not well typed"
       sub = x |-> l          
   
   modify $ flip (foldr ($)) $ uncurry (addToHead Exists) <$> substBty mempty bty xm
   
-  return $ Just (sub, Top)
+  return $ Just (sub, subst sub (a :=: b) )
 
-getFamily (Spine "forall" [Abs _ _ lm]) = getFamily lm
-getFamily (Spine "exists" [Abs _ _ lm]) = getFamily lm
+getFamily (Spine "forall" [_, Abs _ _ lm]) = getFamily lm
+getFamily (Spine "exists" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#sopen#" (c:l)) = getFamily c
 getFamily (Spine "#open#" (c:l)) = getFamily c
 getFamily (Spine nm' args) = nm'
@@ -404,7 +417,7 @@ search goal = case goal of
     (sub, e) <- search $ subst (nm |-> var nm') lm 
     return $ (sub, Spine "#pack#" [e, subst sub $ var nm', Abs nm ty lm])
     
-  Spine "forall" [Abs nm ty lm] -> do
+  Spine "forall" [_, Abs nm ty lm] -> do
     nm' <- lift $ getNewWith "@sr"
     modify $ addToTail Forall nm' ty
     (sub,l) <- search $ subst (nm |-> var nm') lm
@@ -416,14 +429,14 @@ search goal = case goal of
     
     let sameFamily s = getFamily s == nm 
         left x target = case target of 
-          Spine "forall" [Abs nm ty lm] -> do
+          Spine "forall" [_, Abs nm ty lm] -> do
             nm' <- lift $ getNewWith "@sla"
             -- by using existential quantification we can defer search implicitly
             modify $ addToTail Exists nm' ty
             (sub, result)  <- left x $ subst (nm |-> var nm') lm
             return $ (sub, \l -> result $ (subst sub $ var nm'):l )
             
-          Spine "exists" [Abs nm ty lm] -> do 
+          Spine "exists" [_, Abs nm ty lm] -> do 
             nm' <- lift $ getNewWith "@sle"
             -- universal quantification as information hiding
             modify $ addToTail Forall nm' ty
@@ -517,7 +530,7 @@ checkType sp ty = case sp of
       
     return $ cons1 :&: cons2 :&: (∃) imp tp cons3 
     
-  Spine "forall" [Abs x tyA tyB] -> do
+  Spine "forall" [_, Abs x tyA tyB] -> do
     cons1 <- checkType tyA atom
     cons2 <- addToEnv x tyA $ checkType tyB atom
     return $ atom :=: ty :&: cons1 :&: (∀) x tyA cons2
@@ -543,6 +556,24 @@ checkType sp ty = case sp of
               return $ (∃) tyA atom $ (∃) tyB' (forall x (var tyA) atom) 
                 $ cons1 :&: cons2 :&: cons3
 
+consts = [ ("atom", atom)
+         , ("forall", forall "a" atom $ (var "a" ~> atom) ~> atom)
+         , ("exists", forall "a" atom $ (var "a" ~> atom) ~> atom)
+         , ("#pack#", exists "tp" atom $ exists "a" atom $  var "a" ~> var "tp" ~> forall "imp" (var "tp" ~> atom) $ exists "i" atom $ Spine "imp" [var "i"])
+         , ("#spack#", exists "tp" atom $ exists "a" atom $ exists "imp" (var "tp" ~> atom) $ var "a" ~> var "tp" ~> exists "i" atom $ Spine "imp" [var "i"])
+         ]
+         
+test :: IO ()
+test = case runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts) 0 of
+  Left a -> putStrLn a
+  Right sub -> putStrLn $ "success: "++show sub
+  where run = do
+          let constraint = (∃) "5" atom
+                         $ (var "5") :=: (var "5" ~> atom)
+                       :&: (var "5") :=: (atom ~> atom)
+          runStateT (unify constraint) emptyContext
+
+
 ----------------------------
 --- the public interface ---
 ----------------------------
@@ -552,7 +583,7 @@ startTypeCheck env str ty =  (\r -> (\(a,_,_) -> a) <$> runRWST r env 0) $ do
   unless (getFamily ty == str) $ throwError $ "not the right family: "++show str++" = "++show ty
   constraint <- checkType ty atom
   substitution <- runStateT (unify constraint) emptyContext
-  return ()
+  trace (show constraint) $ return ()
     
 typeCheckPredicate :: Constants -> Predicate -> Choice Predicate
 typeCheckPredicate env (Query nm ty) = appendErr ("in query : "++show ty) $ do
@@ -567,12 +598,8 @@ typeCheckPredicate env pred@(Predicate pnm pty plst) = appendErr ("in\n"++show p
   
 typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = forM preds $ typeCheckPredicate assumptions
-  where assumptions = M.fromList $ ("atom", atom)
-                      : ("forall", (atom ~> atom) ~> atom)
-                      : ("exists", (atom ~> atom) ~> atom)
-                      : ("#pack#", exists "tp" atom $ exists "a" atom $  var "a" ~> var "tp" ~> forall "imp" (var "tp" ~> atom) $ exists "i" atom $ Spine "imp" [var "i"])
-                      : ("#spack#", exists "tp" atom $ exists "a" atom $ exists "imp" (var "tp" ~> atom) $ var "a" ~> var "tp" ~> exists "i" atom $ Spine "imp" [var "i"])
-                      : concatMap (\st -> case st of
+  where assumptions = M.fromList $ consts++
+                      concatMap (\st -> case st of
                                     Query _ _ -> []
                                     _ -> (predName st, predType st):predConstructors st) preds
   
