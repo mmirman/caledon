@@ -22,6 +22,7 @@ import Data.Functor
 import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
+import Debug.Trace
 
   
 --------------------------------
@@ -201,7 +202,7 @@ unify cons = do
       uniWhile [] = return mempty
       uniWhile l = do 
         binds <- getAllBindings
-        (sub,l') <- uniOne l []
+        (sub,l') <- trace ("LIST: "++show (reverse binds)++"\nIN: "++show l) $ uniOne l []
         modify $ subst sub
         (sub ***) <$> uniWhile l'
       
@@ -351,7 +352,7 @@ gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) =
     Nothing -> return Nothing
     Just i -> gvar_fixed a b (!! i)
 
-gvar_const a b@(Spine x' _, _) = gvar_fixed a b (const x')
+gvar_const a b@(Spine x' _, _) = trace ("-gc-") $ gvar_fixed a b (const x')
 
 
 gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
@@ -582,7 +583,7 @@ startTypeCheck env str ty =  (\r -> (\(a,_,_) -> a) <$> runRWST r env 0) $ do
   unless (getFamily ty == str) $ throwError $ "not the right family: "++show str++" = "++show ty
   constraint <- checkType ty atom
   substitution <- runStateT (unify constraint) emptyContext
-  return ()
+  trace (show constraint) $ return ()
     
 typeCheckPredicate :: Constants -> Predicate -> Choice Predicate
 typeCheckPredicate env (Query nm ty) = appendErr ("in query : "++show ty) $ do
