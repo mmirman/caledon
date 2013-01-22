@@ -141,8 +141,7 @@ getElm s x = do
 getBindings :: Binding -> WithContext [(Name,Type)]
 getBindings bind = do
   ctx <- get
-  -- consts <- M.toList <$> lift ask
-  return $ getBefore "IN: getBindings" bind ctx -- ++consts
+  return $ getBefore "IN: getBindings" bind ctx
 
 flatten :: Constraint -> ([(Quant, Name, Type)], [(Spine, Spine)])
 flatten cons = case cons of
@@ -340,13 +339,21 @@ gvar_gvar_diff (a@(Spine x yl), aty) (sp, _) bind = raiseToTop bind sp $ \(Spine
   return $ Just (sub, subst sub $ a :=: sp)
   
   
-gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y y'l, _) = 
-  case elemIndex (var y) yl of
+gvar_uvar_inside a@(Spine x yl, _) b@(Spine y y'l, _) = 
+  case elemIndex (var y) $ reverse yl of
     Nothing -> return Nothing
-    Just i -> gvar_fixed a b (!! i)
+    Just i -> gvar_fixed a b $ lookup . reverse 
+      where lookup list = case length list <= i of
+              True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
+              False -> list !! i
       
 
-gvar_const a b@(Spine x' _, _) = trace ("-gc-") $ gvar_fixed a b (const x')
+gvar_const a@(Spine x yl, _) b@(Spine y y'l, _) = case elemIndex (var y) $ reverse yl of 
+  Nothing -> trace ("-gc-") $ gvar_fixed a b (const y)
+  Just i -> trace ("-ic-") $ gvar_fixed a b $ lookup . reverse
+      where lookup list = case length list <= i of
+              True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
+              False -> list !! i
 
 
 gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
@@ -354,7 +361,7 @@ gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
       n = length yl
                     
   xm <- replicateM m $ lift $ getNewWith "@xm"
-  let getArgs (Spine "forall" [ty, Abs ui _ r]) = ui:getArgs r
+  let getArgs (Spine "forall" [_, Abs ui _ r]) = ui:getArgs r
       getArgs _ = []
       
       un = getArgs aty
@@ -387,7 +394,7 @@ gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
   
   modify $ flip (foldr ($)) $ uncurry (addToHead Exists) <$> substBty mempty bty xm
   
-  return $ Just (sub, subst sub (a :=: b) )
+  return $ Just (sub, subst sub $ a :=: b)
 
 getFamily (Spine "forall" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "exists" [_, Abs _ _ lm]) = getFamily lm
