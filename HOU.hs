@@ -22,13 +22,11 @@ import Data.Functor
 import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
-import Debug.Trace
 
   
 --------------------------------
 ---  constraint context list ---
 --------------------------------
-
 data Binding = Binding { elmQuant :: Quant
                        , elmName :: Name
                        , elmType :: Type
@@ -156,14 +154,7 @@ flatten cons = case cons of
 addBinds :: [(Quant, Name, Type)] -> WithContext ()
 addBinds binds = mapM_ (\(quant,nm,ty) -> modify $ addToTail quant nm ty) binds   
 
-getAllBindings = do
-  ctx <- get
-  case ctxtTail ctx of 
-    Nothing -> return []
-    Just _ -> return $ (\i -> (elmQuant i, (elmName i, elmType i))) tl
-              :getBefore "IN: getAllbindings" tl ctx
-      where tl = getTail ctx
-  
+
 isolate m = do
   s <- get
   a <- m
@@ -199,8 +190,7 @@ unify cons = do
      
       uniWhile [] = return mempty
       uniWhile l = do 
-        binds <- getAllBindings
-        (sub,l') <- trace ("BINDINGS: "++show (reverse binds)++"\nCONS: "++show l) $ uniOne l []
+        (sub,l') <- uniOne l []
         modify $ subst sub
         (sub ***) <$> uniWhile l'
       
@@ -306,7 +296,6 @@ gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) = do
 
   
 gvar_gvar_diff (a@(Spine x yl), aty) (sp, _) bind = raiseToTop bind sp $ \(Spine x' y'l) bty -> do
-  
   -- now x' comes before x 
   -- but we no longer care since I tested it, and switching them twice reduces to original
   let n = length yl
@@ -344,7 +333,7 @@ gvar_uvar_inside a@(Spine x yl, _) b@(Spine y y'l, _) =
       
 
 gvar_const a@(Spine x yl, _) b@(Spine y y'l, _) = case elemIndex (var y) $ reverse yl of 
-  Nothing -> trace "-gc-" $ gvar_fixed a b $ var . const y
+  Nothing -> gvar_fixed a b $ var . const y
   Just i -> gvar_uvar_outside a b <|> gvar_fixed a b (var . const y)
 
 gvar_uvar_outside a@(Spine x yl,aty) b@(Spine y y'l,bty) = do
@@ -593,7 +582,7 @@ startTypeCheck :: Constants -> String -> Type -> Choice ()
 startTypeCheck env str ty =  (\r -> (\(a,_,_) -> a) <$> runRWST r env 0) $ do 
   unless (getFamily ty == str) $ throwError $ "not the right family: "++show str++" = "++show ty
   constraint <- checkType ty atom
-  substitution <- trace (show constraint) $ runStateT (unify constraint) emptyContext
+  substitution <- runStateT (unify constraint) emptyContext
   return ()
     
 typeCheckPredicate :: Constants -> Predicate -> Choice Predicate
