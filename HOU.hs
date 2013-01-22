@@ -218,7 +218,6 @@ unifyEq a b = let cons = a :=: b in case cons of
     bind <- getElm ("all: "++show cons) x
     case bind of
       Left bind@Binding{ elmQuant = Exists } -> do
-        
         raiseToTop bind (Spine x yl) $ \a@(Spine x yl) ty -> 
           case s' of 
             Spine x' y'l -> do
@@ -342,20 +341,29 @@ gvar_gvar_diff (a@(Spine x yl), aty) (sp, _) bind = raiseToTop bind sp $ \(Spine
 gvar_uvar_inside a@(Spine x yl, _) b@(Spine y y'l, _) = 
   case elemIndex (var y) $ reverse yl of
     Nothing -> return Nothing
-    Just i -> gvar_fixed a b $ lookup . reverse 
-      where lookup list = case length list <= i of
-              True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
-              False -> list !! i
+    Just i -> gvar_uvar_outside a b
       
 
 gvar_const a@(Spine x yl, _) b@(Spine y y'l, _) = case elemIndex (var y) $ reverse yl of 
-  Nothing -> trace ("-gc-") $ gvar_fixed a b (const y)
-  Just i -> trace ("-ic-") $ gvar_fixed a b $ lookup . reverse
+  Nothing -> trace "-gc-" $ gvar_fixed a b $ var . const y
+  Just i -> gvar_uvar_outside a b
+
+gvar_uvar_outside a@(Spine x yl,aty) b@(Spine y y'l,bty) = 
+  case [i | (i,y') <- zip [0..] yl , y' == var y] of
+    [i] -> trace ("-ic-") $ gvar_fixed a b $ lookup
       where lookup list = case length list <= i of
               True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
-              False -> list !! i
-
-
+              False -> var $ list !! i
+    ilst -> do
+      defered <- lift $ getNewWith "@def"
+      
+      res <- gvar_fixed a b $ \ui_list -> 
+        Spine defered $ var <$> (ui_list !!) <$> ilst
+        
+      modify $ addToHead Exists defered $ foldr (\_ a -> bty ~> a) bty ilst
+      
+      return res
+      
 gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
   let m = length y'l
       n = length yl
@@ -369,7 +377,7 @@ gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
       vun = var <$> un
       
       toLterm (Spine "forall" [ty, Abs _ _ r]) (ui:unr) = Abs ui ty <$> toLterm r unr
-      toLterm _ [] = return $ Spine (action un) $ map (\xi -> Spine xi vun) xm
+      toLterm _ [] = return $ rebuildSpine (action un) $ map (\xi -> Spine xi vun) xm
 
       toLterm s l = throwError $ "too many arguments for this type: "
                     ++"\n\ts: "++show s
