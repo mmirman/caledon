@@ -111,7 +111,7 @@ getAfter s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
 
 -- gets the list of bindings before (above) a given binding
 getBefore s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
-  where gb (Binding _ nm ty p _) = (nm,ty):case p of
+  where gb (Binding quant nm ty p _) = (quant, (nm,ty)):case p of
           Nothing -> []
           Just p -> gb $ case M.lookup p ctxt of 
             Nothing -> error $ "element "++show p++" not in map \n\twith ctxt: "++show ctx++" \n\t for bind: "++show bind++"\n\t"++s
@@ -141,7 +141,7 @@ getElm s x = do
 getBindings :: Binding -> WithContext [(Name,Type)]
 getBindings bind = do
   ctx <- get
-  return $ getBefore "IN: getBindings" bind ctx
+  return $ snd <$> getBefore "IN: getBindings" bind ctx
 
 flatten :: Constraint -> ([(Quant, Name, Type)], [(Spine, Spine)])
 flatten cons = case cons of
@@ -156,12 +156,11 @@ flatten cons = case cons of
 addBinds :: [(Quant, Name, Type)] -> WithContext ()
 addBinds binds = mapM_ (\(quant,nm,ty) -> modify $ addToTail quant nm ty) binds   
 
-getAllBindings :: WithContext [(Name,Type)]
 getAllBindings = do
   ctx <- get
   case ctxtTail ctx of 
     Nothing -> return []
-    Just _ -> return $ (\i -> (elmName i, elmType i)) tl
+    Just _ -> return $ (\i -> (elmQuant i, (elmName i, elmType i))) tl
               :getBefore "IN: getAllbindings" tl ctx
       where tl = getTail ctx
   
@@ -346,24 +345,19 @@ gvar_uvar_inside a@(Spine x yl, _) b@(Spine y y'l, _) =
 
 gvar_const a@(Spine x yl, _) b@(Spine y y'l, _) = case elemIndex (var y) $ reverse yl of 
   Nothing -> trace "-gc-" $ gvar_fixed a b $ var . const y
-  Just i -> gvar_uvar_outside a b
+  Just i -> gvar_uvar_outside a b <|> gvar_fixed a b (var . const y)
 
-gvar_uvar_outside a@(Spine x yl,aty) b@(Spine y y'l,bty) = 
-  case [i | (i,y') <- zip [0..] yl , y' == var y] of
-    [i] -> trace ("-ic-") $ gvar_fixed a b $ lookup
-      where lookup list = case length list <= i of
-              True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
-              False -> var $ list !! i
-    ilst -> do
-      defered <- lift $ getNewWith "@def"
-      
-      res <- gvar_fixed a b $ \ui_list -> 
-        Spine defered $ var <$> (ui_list !!) <$> ilst
-        
-      modify $ addToHead Exists defered $ foldr (\_ a -> bty ~> a) bty ilst
-      
-      return res
-      
+gvar_uvar_outside a@(Spine x yl,aty) b@(Spine y y'l,bty) = do
+
+  let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
+
+  i <- F.asum $ return <$> ilst
+  gvar_fixed a b $ \list -> case length list <= i of
+    True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
+    False -> var $ list !! i  
+
+
+
 gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
   let m = length y'l
       n = length yl
@@ -473,7 +467,7 @@ search goal = case goal of
           (sub,l) <- left x target
           return (sub, subst sub $ l [])
           
-    F.msum $ leftInit <$> filter (sameFamily . snd) env
+    F.asum $ leftInit <$> filter (sameFamily . snd) env
 
   _ -> error $ "Not a type: "++show goal
   
