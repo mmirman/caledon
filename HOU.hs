@@ -101,14 +101,16 @@ removeTail ctxt = case ctxtTail ctxt of
 getTail (Context _ ctx (Just t)) = lookupWith "getting tail" t ctx
 getHead (Context (Just h) ctx _) = lookupWith "getting head" h ctx
 
-getEnd s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
+-- gets the list of bindings after (below) a given binding
+getAfter s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
   where gb (Binding _ nm ty _ n) = (nm,ty):case n of
           Nothing -> []
           Just n -> gb $ case M.lookup n ctxt of 
             Nothing -> error $ "element "++show n++" not in map \n\twith ctxt: "++show ctx++" \n\t for bind: "++show bind++"\n\t"++s
             Just c -> c
 
-getStart s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
+-- gets the list of bindings before (above) a given binding
+getBefore s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
   where gb (Binding _ nm ty p _) = (nm,ty):case p of
           Nothing -> []
           Just p -> gb $ case M.lookup p ctxt of 
@@ -117,8 +119,8 @@ getStart s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
             
 checkContext s c@(Context Nothing _ Nothing) = c
 checkContext s ctx = foldr seq ctx $ zip st ta
-  where st = getStart s (getTail ctx) ctx
-        ta = getEnd s (getHead ctx) ctx
+  where st = getBefore s (getTail ctx) ctx
+        ta = getAfter s (getHead ctx) ctx
 
 -----------------------------------------------
 ---  the higher order unification algorithm ---
@@ -135,15 +137,11 @@ getElm s x = do
     Nothing -> Left <$> (\ctxt -> lookupWith ("looking up "++x++"\n\t in context: "++show ctxt++"\n\t"++s) x ctxt) <$> ctxtMap <$> get
     Just a -> return $ Right a
 
--- | This gets all the bindings outside of a given bind and returns them in a list.
+-- | This gets all the bindings outside of a given bind and returns them in a list (not including that binding).
 getBindings :: Binding -> WithContext [(Name,Type)]
 getBindings bind = do
   ctx <- get
-  return $ getStart "IN: getBindings" bind ctx
-
-getTypes :: Spine -> [Type]
-getTypes (Spine "forall" [_, Abs _ ty l]) = ty:getTypes l
-getTypes _ = []
+  return $ getBefore "IN: getBindings" bind ctx
 
 flatten :: Constraint -> ([(Quant, Name, Type)], [(Spine, Spine)])
 flatten cons = case cons of
@@ -163,8 +161,9 @@ getAllBindings = do
   ctx <- get
   case ctxtTail ctx of 
     Nothing -> return []
-    Just _ -> return $ (\i -> (elmName i, elmType i)) (getTail ctx)
-              :getStart "IN: getAllbindings" (getTail ctx) ctx
+    Just _ -> return $ (\i -> (elmName i, elmType i)) tl
+              :getBefore "IN: getAllbindings" tl ctx
+      where tl = getTail ctx
   
 isolate m = do
   s <- get
@@ -176,7 +175,7 @@ isolate m = do
 unify :: Constraint -> Unification
 unify cons = do
 --  cons <- lift $ regenAbsVars cons
-  let (binds,constraints) = trace (show cons) $ flatten cons
+  let (binds,constraints) = flatten cons
   addBinds binds      
   let with l r newstate sub cons = do
         let (binds,constraints) = flatten cons
@@ -202,7 +201,7 @@ unify cons = do
       uniWhile [] = return mempty
       uniWhile l = do 
         binds <- getAllBindings
-        (sub,l') <- trace ("LIST: "++show (reverse binds)++"\nIN: "++show l) $ uniOne l []
+        (sub,l') <- trace ("BINDINGS: "++show (reverse binds)++"\nCONS: "++show l) $ uniOne l []
         modify $ subst sub
         (sub ***) <$> uniWhile l'
       
@@ -217,21 +216,7 @@ unifyEq a b = let cons = a :=: b in case cons of
   s :=: s' | s == s' -> return $ Just (mempty, Top)
   s@(Spine x yl) :=: s' -> do
     bind <- getElm ("all: "++show cons) x
-    let constCase = Just <$> case s' of
-          Spine x' _ | x /= x' -> do
-            bind' <- getElm ("const case: "++show cons) x'
-            case bind' of
-              Left Binding{ elmQuant = Exists } -> return $ (mempty,s' :=: s)
-              _ -> throwError $ "two different universal equalities: "++show cons
-          Spine x' yl' | x == x' -> do -- const-const
-            unless (length yl == length yl') $ throwError $ "different numbers of arguments on constant: "++show cons
-            return (mempty, foldl (:&:) Top $ zipWith (:=:) yl yl')
-          _ -> throwError $ "uvar against a pi WITH CONS "++show cons
-    
     case bind of
-      Right _ -> constCase
-      Left Binding{ elmQuant = Forall } | S.member x $ freeVariables yl -> throwError $ "occurs check: "++show (a :=: b)
-      Left Binding{ elmQuant = Forall } -> constCase
       Left bind@Binding{ elmQuant = Exists } -> do
         
         raiseToTop bind (Spine x yl) $ \a@(Spine x yl) ty -> 
@@ -256,35 +241,41 @@ unifyEq a b = let cons = a :=: b in case cons of
                          then throwError $ "occurs check: "++show (a :=: b)
                          else gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
             _ -> return Nothing
-
+      _ -> Just <$> case s' of 
+        Spine x' _ | x /= x' -> do
+          bind' <- getElm ("const case: "++show cons) x'
+          case bind' of
+            Left Binding{ elmQuant = Exists } -> return $ (mempty,s' :=: s) -- uvar-gvar
+            _ -> throwError $ "two different universal equalities: "++show cons -- uvar-uvar
+        Spine x' yl' | x == x' -> do -- uvar-uvar-eq
+          unless (length yl == length yl') $ throwError $ "different numbers of arguments on constant: "++show cons
+          return (mempty, foldl (:&:) Top $ zipWith (:=:) yl yl')
+        _ -> throwError $ "uvar against a pi WITH CONS "++show cons
             
 allElementsAreVariables :: [Spine] -> Bool
 allElementsAreVariables = all $ \c -> case c of
   Spine a [] -> True
   _ -> False
 
-makeFromList eb hl = foldr (\(nm,ty) a -> forall nm ty a) eb hl
-
 typeToListOfTypes (Spine _ _) = []
 typeToListOfTypes (Abs x ty l) = (x,ty):typeToListOfTypes l
-
 
 raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
   hl <- getBindings bind
   let newx_args = (map (var . fst) hl)
       sub = x |-> Spine x newx_args
-      ty' = makeFromList (elmType bind) hl
-            
+      
+      ty' = foldr (\(nm,ty) a -> forall nm ty a) ty hl            
+      
       addSub Nothing = Nothing
       addSub (Just (sub',cons)) = case M.lookup x sub' of
         Nothing -> Just (sub *** sub', cons)
         Just xv -> Just (M.insert x (rebuildSpine xv newx_args) sub', cons)
-              
-  modify $ addToHead Exists x ty' . removeFromContext x
+      
+  modify $ removeFromContext x
   modify $ subst sub
   -- now we can match against the right hand side
   l <- addSub <$> m (subst sub sp) ty'
-  modify $ removeFromContext x
   return l
 
 -- TODO: make sure this is correct.  its now just a modification of gvar_gvar_diff!
@@ -348,12 +339,21 @@ gvar_gvar_diff (a@(Spine x yl), aty) (sp, _) bind = raiseToTop bind sp $ \(Spine
   return $ Just (sub, subst sub $ a :=: sp)
   
   
-gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) = 
-  case elemIndex (var y) yl of
+gvar_uvar_inside a@(Spine x yl, _) b@(Spine y y'l, _) = 
+  case elemIndex (var y) $ reverse yl of
     Nothing -> return Nothing
-    Just i -> gvar_fixed a b (!! i)
+    Just i -> gvar_fixed a b $ lookup . reverse 
+      where lookup list = case length list <= i of
+              True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
+              False -> list !! i
+      
 
-gvar_const a b@(Spine x' _, _) = trace ("-gc-") $ gvar_fixed a b (const x')
+gvar_const a@(Spine x yl, _) b@(Spine y y'l, _) = case elemIndex (var y) $ reverse yl of 
+  Nothing -> trace ("-gc-") $ gvar_fixed a b (const y)
+  Just i -> trace ("-ic-") $ gvar_fixed a b $ lookup . reverse
+      where lookup list = case length list <= i of
+              True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
+              False -> list !! i
 
 
 gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
@@ -361,10 +361,14 @@ gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
       n = length yl
                     
   xm <- replicateM m $ lift $ getNewWith "@xm"
-  un <- replicateM n $ lift $ getNewWith "@un"
-  let vun = var <$> un
+  let getArgs (Spine "forall" [_, Abs ui _ r]) = ui:getArgs r
+      getArgs _ = []
       
-      toLterm (Spine "forall" [_, Abs _ ty r]) (ui:unr) = Abs ui ty <$> toLterm r unr
+      un = getArgs aty
+      
+      vun = var <$> un
+      
+      toLterm (Spine "forall" [ty, Abs _ _ r]) (ui:unr) = Abs ui ty <$> toLterm r unr
       toLterm _ [] = return $ Spine (action un) $ map (\xi -> Spine xi vun) xm
 
       toLterm s l = throwError $ "too many arguments for this type: "
@@ -374,19 +378,23 @@ gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
                     ++"\n\tcons: "++show (a :=: b)
   l <- toLterm aty un
   
-  let untylr = reverse $ zip un $ getTypes aty
+  let getTypes (Spine "forall" [ty, Abs _ _ l]) = ty:getTypes l
+      getTypes _ = []
+
+    
+      untylr = zip un $ getTypes aty
       vbuild e = foldr (\(nm,ty) a -> forall nm ty a) e untylr
                     
 
-      substBty sub (Spine "forall" [_, Abs vi bi r]) (xi:xmr) = (xi,vbuild $ subst sub bi)
-                                                                :substBty (M.insert vi (Spine xi vun) sub) r xmr
+      substBty sub (Spine "forall" [_, Abs vi bi r]) (xi:xmr) = (xi,vbuild $ subst sub bi):substBty (M.insert vi (Spine xi vun) sub) r xmr
       substBty _ _ [] = []
       substBty _ _ _ = error $ "s is not well typed"
+      
       sub = x |-> l          
   
   modify $ flip (foldr ($)) $ uncurry (addToHead Exists) <$> substBty mempty bty xm
   
-  return $ Just (sub, subst sub (a :=: b) )
+  return $ Just (sub, subst sub $ a :=: b)
 
 getFamily (Spine "forall" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "exists" [_, Abs _ _ lm]) = getFamily lm
@@ -535,7 +543,7 @@ checkType sp ty = case sp of
     cons1 <- checkType tyA atom
     cons2 <- addToEnv x tyA $ checkType tyB atom
     return $ atom :=: ty :&: cons1 :&: (∀) x tyA cons2
-  Spine "exists" [Abs x tyA tyB] -> do
+  Spine "exists" [_, Abs x tyA tyB] -> do
     cons1 <- checkType tyA atom
     cons2 <- addToEnv x tyA $ checkType tyB atom
     return $ atom :=: ty :&: cons1 :&: (∃) x tyA cons2    
@@ -548,7 +556,7 @@ checkType sp ty = case sp of
                 return $ ty' :=: ty
           cty (head,arg:rest) tyB = do
             x <- getNew
-            tyB' <- getNewWith "@tyB'"
+            tyB' <- getNewWith $ "@tyB'"
             tyA <- getNewWith "@tyA"
             addToEnv tyA atom $ do
               let cons1 = Spine tyB' [arg] :=: tyB
@@ -559,9 +567,9 @@ checkType sp ty = case sp of
 
 consts = [ ("atom", atom)
          , ("forall", forall "a" atom $ (var "a" ~> atom) ~> atom)
-         , ("exists", forall "a" atom $ (var "a" ~> atom) ~> atom)
-         , ("#pack#", exists "tp" atom $ exists "a" atom $  var "a" ~> var "tp" ~> forall "imp" (var "tp" ~> atom) $ exists "i" atom $ Spine "imp" [var "i"])
-         , ("#spack#", exists "tp" atom $ exists "a" atom $ exists "imp" (var "tp" ~> atom) $ var "a" ~> var "tp" ~> exists "i" atom $ Spine "imp" [var "i"])
+--         , ("exists", forall "a" atom $ (var "a" ~> atom) ~> atom)
+--         , ("#pack#", exists "tp" atom $ exists "a" atom $  var "a" ~> var "tp" ~> forall "imp" (var "tp" ~> atom) $ exists "i" atom $ Spine "imp" [var "i"])
+--         , ("#spack#", exists "tp" atom $ exists "a" atom $ exists "imp" (var "tp" ~> atom) $ var "a" ~> var "tp" ~> exists "i" atom $ Spine "imp" [var "i"])
          ]
          
 test :: IO ()
@@ -583,7 +591,7 @@ startTypeCheck :: Constants -> String -> Type -> Choice ()
 startTypeCheck env str ty =  (\r -> (\(a,_,_) -> a) <$> runRWST r env 0) $ do 
   unless (getFamily ty == str) $ throwError $ "not the right family: "++show str++" = "++show ty
   constraint <- checkType ty atom
-  substitution <- runStateT (unify constraint) emptyContext
+  substitution <- trace (show constraint) $ runStateT (unify constraint) emptyContext
   return ()
     
 typeCheckPredicate :: Constants -> Predicate -> Choice Predicate
