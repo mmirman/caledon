@@ -164,7 +164,7 @@ isolate m = do
   
 unify :: Constraint -> Unification
 unify cons = do
---  cons <- lift $ regenAbsVars cons
+  cons <- lift $ regenAbsVars cons
   let (binds,constraints) = flatten cons
   addBinds binds      
   let with l r newstate sub cons = do
