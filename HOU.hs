@@ -175,8 +175,8 @@ isolate m = do
   
 unify :: Constraint -> Unification
 unify cons = do
-  cons <- lift $ regenAbsVars cons
-  let (binds,constraints) = flatten cons
+--  cons <- lift $ regenAbsVars cons
+  let (binds,constraints) = trace (show cons) $ flatten cons
   addBinds binds      
   let with l r newstate sub cons = do
         let (binds,constraints) = flatten cons
@@ -222,17 +222,18 @@ unifyEq a b = let cons = a :=: b in case cons of
             bind' <- getElm ("const case: "++show cons) x'
             case bind' of
               Left Binding{ elmQuant = Exists } -> return $ (mempty,s' :=: s)
-              _ -> throwError $ "two different universal equalities: "++show cons++" WITH BIND: "++show bind'
+              _ -> throwError $ "two different universal equalities: "++show cons
           Spine x' yl' | x == x' -> do -- const-const
             unless (length yl == length yl') $ throwError $ "different numbers of arguments on constant: "++show cons
             return (mempty, foldl (:&:) Top $ zipWith (:=:) yl yl')
           _ -> throwError $ "uvar against a pi WITH CONS "++show cons
-          
+    
     case bind of
       Right _ -> constCase
       Left Binding{ elmQuant = Forall } | S.member x $ freeVariables yl -> throwError $ "occurs check: "++show (a :=: b)
       Left Binding{ elmQuant = Forall } -> constCase
       Left bind@Binding{ elmQuant = Exists } -> do
+        
         raiseToTop bind (Spine x yl) $ \a@(Spine x yl) ty -> 
           case s' of 
             Spine x' y'l -> do
@@ -583,7 +584,7 @@ startTypeCheck env str ty =  (\r -> (\(a,_,_) -> a) <$> runRWST r env 0) $ do
   unless (getFamily ty == str) $ throwError $ "not the right family: "++show str++" = "++show ty
   constraint <- checkType ty atom
   substitution <- runStateT (unify constraint) emptyContext
-  trace (show constraint) $ return ()
+  return ()
     
 typeCheckPredicate :: Constants -> Predicate -> Choice Predicate
 typeCheckPredicate env (Query nm ty) = appendErr ("in query : "++show ty) $ do

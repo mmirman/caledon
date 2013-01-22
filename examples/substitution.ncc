@@ -1,2 +1,23 @@
 defn example : [ax : atom] ax -> atom
-  as eximp = [atx : atom] example atom atx
+  as eximp = example atom atom
+
+{-
+∃ 3@tyA : atom . 
+∃ 2@tyB' : 3@tyA → atom . 
+∃ 5@tyB' : 6@tyA → atom . 
+-----------------------
+ 2@tyB' atom ≐ atom 
+ 5@tyB' atom ≐ ∀ 1 : 3@tyA . 2@tyB' 1 
+ (\ax : atom . ax → atom) ≐ (\4 : atom . 5@tyB' 4 )
+ atom ≐ 3@tyA 
+
+
+
+∃ 2@tyB' : atom → atom . 
+∃ 5@tyB' : atom → atom . 
+-----------------------
+ 2@tyB' atom ≐ atom 
+ 5@tyB' atom ≐ forall atom (\1 : atom . 2@tyB' 1 )
+ (\ax : atom . ax → atom) ≐ (\4 : atom . 5@tyB' 4 )
+
+-}
