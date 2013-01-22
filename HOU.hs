@@ -558,9 +558,9 @@ checkType sp ty = case sp of
 
 consts = [ ("atom", atom)
          , ("forall", forall "a" atom $ (var "a" ~> atom) ~> atom)
---         , ("exists", forall "a" atom $ (var "a" ~> atom) ~> atom)
---         , ("#pack#", exists "tp" atom $ exists "a" atom $  var "a" ~> var "tp" ~> forall "imp" (var "tp" ~> atom) $ exists "i" atom $ Spine "imp" [var "i"])
---         , ("#spack#", exists "tp" atom $ exists "a" atom $ exists "imp" (var "tp" ~> atom) $ var "a" ~> var "tp" ~> exists "i" atom $ Spine "imp" [var "i"])
+         , ("exists", forall "a" atom $ (var "a" ~> atom) ~> atom)
+         , ("#pack#", exists "tp" atom $ exists "a" atom $  var "a" ~> var "tp" ~> forall "imp" (var "tp" ~> atom) $ exists "i" atom $ Spine "imp" [var "i"])
+         , ("#spack#", exists "tp" atom $ exists "a" atom $ exists "imp" (var "tp" ~> atom) $ var "a" ~> var "tp" ~> exists "i" atom $ Spine "imp" [var "i"])
          ]
          
 test :: IO ()
