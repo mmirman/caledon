@@ -191,6 +191,8 @@ unify cons = do
       uniWhile [] = return mempty
       uniWhile l = do 
         (sub,l') <- uniOne l []
+        
+        
         modify $ subst sub
         (sub ***) <$> uniWhile l'
       
@@ -330,15 +332,15 @@ gvar_uvar_inside a@(Spine x yl, _) b@(Spine y y'l, _) =
     Nothing -> return Nothing
     Just i -> gvar_uvar_outside a b
 
-gvar_const a@(Spine x yl, _) b@(Spine y y'l, _) = case elemIndex (var y) $ reverse yl of 
+gvar_const a@(Spine x yl, _) b@(Spine y y'l, _) = case elemIndex (var y) $ yl of 
   Nothing -> gvar_fixed a b $ var . const y
-  Just i -> gvar_fixed a b (var . const y) <|> gvar_uvar_outside a b
+  Just i -> gvar_uvar_outside a b <|> gvar_fixed a b (var . const y)
 
 gvar_uvar_outside a@(Spine x yl,aty) b@(Spine y y'l,bty) = do
 
   let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
 
-  i <- F.asum $ return <$> ilst
+  i <- F.asum $ fail ("NO MORE OPTIONS: "++show a++" = "++show b):(return <$> ilst)
   gvar_fixed a b $ \list -> case length list <= i of
     True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
     False -> var $ list !! i  
@@ -537,14 +539,14 @@ checkType sp ty = case sp of
               Just ty' -> do
                 return $ ty' :=: ty
           cty (head,arg:rest) tyB = do
-            x <- getNew
-            tyB' <- getNewWith $ "@tyB'"
-            tyA <- getNewWith "@tyA"
+            x <- getNewWith "@xin"
+            tyB' <- getNewWith "@tyB'"
+            tyA  <- getNewWith "@tyA"
             let tyB'ty = forall x (var tyA) atom
             addToEnv (∃) tyA atom $ addToEnv (∃) tyB' tyB'ty $ do
               let cons1 = Spine tyB' [arg] :=: tyB
               cons2 <- cty (head,rest) $ forall x (var tyA) $ Spine tyB' [var x]
-              cons3 <- checkType arg (var tyA)
+              cons3 <- checkType arg $ var tyA
               return $ cons1 :&: cons2 :&: cons3
 
 
