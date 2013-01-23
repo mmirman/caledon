@@ -466,10 +466,11 @@ checkType :: Spine -> Type -> Env Constraint
 checkType sp ty = case sp of
   Abs x tyA sp -> do
     e <- getNewWith "@e"
-    let cons1 = forall x tyA (Spine e [var x]) :=: ty
-    cons2 <- checkType ty atom
-    cons3 <- addToEnv x tyA $ checkType sp (Spine e [var x])
-    return $ (∃) e (forall x tyA atom) $ cons1 :&: cons2 :&: (∀) x tyA cons3
+    cons1 <- checkType ty atom
+    cons2 <- addToEnv (∃) e (forall x tyA atom) $ do
+      cons2 <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
+      return $ cons2 :&: forall x tyA (Spine e [var x]) :=: ty
+    return $ cons1 :&: cons2
 
   Spine "#spack#" [e, tau] -> do
     tp <- getNewWith "@tp"
@@ -479,14 +480,12 @@ checkType sp ty = case sp of
     let vtp = var tp
         ifaceTp = forall "_" vtp atom
         
-    cons1 <- addToEnv tp atom $ checkType tau vtp
-    
-    cons2 <- addToEnv tp atom
-             $ addToEnv iface ifaceTp
+    addToEnv (∃) tp atom $ do
+      cons1 <- checkType tau vtp
+      cons2 <- addToEnv (∃) iface ifaceTp
              $ checkType e $ Spine iface [tau]
-    
-    return $ (∃) tp atom $ cons1
-         :&: ((∃) iface ifaceTp $ cons2 :&: ty :=: exists imp vtp (Spine iface [var imp]))
+      return $ cons1 :&: cons2 :&: ty :=: exists imp vtp (Spine iface [var imp])
+
       
   Spine "#pack#" [e, tau, Abs imp tp interface] -> do
     cons1 <- checkType tp atom    
@@ -508,34 +507,28 @@ checkType sp ty = case sp of
         ifaceTp = forall "_" vtp atom
         ifaceImp = Spine iface [vimp]
 
-    cons <- addToEnv tp atom $ addToEnv iface ifaceTp $ do
-      
+    addToEnv (∃) tp atom $ addToEnv (∃) iface ifaceTp $ do
       cons1 <- checkType closed $ exists imp vtp $ ifaceImp
-      
-      cons2 <- addToEnv imp vtp $ addToEnv p ifaceImp $ checkType (Spine p l) ty
-        
-      return $ cons1 :&: ((∃) imp vtp $ (∀) p ifaceImp cons2 )
-
-    return $ (∃) tp atom $ (∃) iface ifaceTp $ cons 
+      cons2 <- addToEnv (∃) imp vtp $ addToEnv (∀) p ifaceImp $ checkType (Spine p l) ty
+      return $ cons1 :&: cons2 
   
   Spine "#open#" [closed, Abs imp tp (Abs p interface exp)] -> do
     cons1 <- checkType tp atom
     cons2 <- checkType closed $ exists imp tp interface
-    cons3 <- addToEnv imp tp $ do
+    cons3 <- addToEnv (∃) imp tp $ do
       cons1 <- checkType interface atom
-      cons2 <- addToEnv p interface $ checkType exp ty    
-      return $ cons1 :&: (∀) p interface cons2
-      
-    return $ cons1 :&: cons2 :&: (∃) imp tp cons3 
+      cons2 <- addToEnv (∀) p interface $ checkType exp ty    
+      return $ cons1 :&: cons2
+    return $ cons1 :&: cons2 :&: cons3 
     
   Spine "forall" [_, Abs x tyA tyB] -> do
     cons1 <- checkType tyA atom
-    cons2 <- addToEnv x tyA $ checkType tyB atom
-    return $ atom :=: ty :&: cons1 :&: (∀) x tyA cons2
+    cons2 <- addToEnv (∀) x tyA $ checkType tyB atom
+    return $ atom :=: ty :&: cons1 :&: cons2
   Spine "exists" [_, Abs x tyA tyB] -> do
     cons1 <- checkType tyA atom
-    cons2 <- addToEnv x tyA $ checkType tyB atom
-    return $ atom :=: ty :&: cons1 :&: (∃) x tyA cons2    
+    cons2 <- addToEnv (∃) x tyA $ checkType tyB atom
+    return $ atom :=: ty :&: cons1 :&: cons2    
   Spine head args -> cty (head, reverse args) ty
     where cty (head,[]) ty = do
             mty <- (M.lookup head) <$> ask
@@ -548,12 +541,12 @@ checkType sp ty = case sp of
             tyB' <- getNewWith $ "@tyB'"
             tyA <- getNewWith "@tyA"
             let tyB'ty = forall x (var tyA) atom
-            addToEnv tyA atom $ addToEnv tyB' tyB'ty $ do
+            addToEnv (∃) tyA atom $ addToEnv (∃) tyB' tyB'ty $ do
               let cons1 = Spine tyB' [arg] :=: tyB
               cons2 <- cty (head,rest) $ forall x (var tyA) $ Spine tyB' [var x]
               cons3 <- checkType arg (var tyA)
-              return $ (∃) tyA atom $ (∃) tyB' tyB'ty
-                $ cons1 :&: cons2 :&: cons3
+              return $ cons1 :&: cons2 :&: cons3
+
 
 consts = [ ("atom", atom)
          , ("forall", forall "a" atom $ (var "a" ~> atom) ~> atom)

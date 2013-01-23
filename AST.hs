@@ -122,7 +122,8 @@ type Env = RWST Constants () Integer Choice
 
 lookupConstant x = (M.lookup x) <$> lift ask 
 
-addToEnv x ty = withRWST $ \r s -> (M.insert x ty r, s) 
+addToEnv e x ty m = e x ty <$> withRWST (\r s -> (M.insert x ty r, s)) m
+
 
 -------------------------
 ---  Constraint types ---
