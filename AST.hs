@@ -47,7 +47,7 @@ showWithParens t = if (case t of
                       ) then "("++show t++")" else show t 
 
 instance Show Spine where
-  show (Spine "forall" [_,Abs nm t t']) | not (S.member nm (freeVariables t')) = showWithParens t++ " → " ++ show t'
+  show (Spine "forall" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " → " ++ show t'
   show (Spine "forall" [_,Abs nm ty t]) = "∀ "++nm++" : "++showWithParens ty++" . "++show t  
   show (Spine "exists" [_,Abs nm ty t]) = "∃ "++nm++" : "++showWithParens ty++" . "++show t  
   show (Spine h t) = h++concatMap (\s -> " "++showWithParens s) t

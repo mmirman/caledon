@@ -22,7 +22,7 @@ import Data.Functor
 import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
-
+import Debug.Trace
   
 --------------------------------
 ---  constraint context list ---
@@ -165,7 +165,7 @@ isolate m = do
 unify :: Constraint -> Unification
 unify cons = do
   cons <- lift $ regenAbsVars cons
-  let (binds,constraints) = flatten cons
+  let (binds,constraints) = trace (show cons) $ flatten cons
   addBinds binds      
   let with l r newstate sub cons = do
         let (binds,constraints) = flatten cons
@@ -325,16 +325,14 @@ gvar_gvar_diff (a@(Spine x yl), aty) (sp, _) bind = raiseToTop bind sp $ \(Spine
   modify $ addToHead Exists xN xNty
   return $ Just (sub, subst sub $ a :=: sp)
   
-  
 gvar_uvar_inside a@(Spine x yl, _) b@(Spine y y'l, _) = 
   case elemIndex (var y) $ reverse yl of
     Nothing -> return Nothing
     Just i -> gvar_uvar_outside a b
-      
 
 gvar_const a@(Spine x yl, _) b@(Spine y y'l, _) = case elemIndex (var y) $ reverse yl of 
   Nothing -> gvar_fixed a b $ var . const y
-  Just i -> gvar_uvar_outside a b <|> gvar_fixed a b (var . const y)
+  Just i -> gvar_fixed a b (var . const y) <|> gvar_uvar_outside a b
 
 gvar_uvar_outside a@(Spine x yl,aty) b@(Spine y y'l,bty) = do
 
@@ -549,11 +547,12 @@ checkType sp ty = case sp of
             x <- getNew
             tyB' <- getNewWith $ "@tyB'"
             tyA <- getNewWith "@tyA"
-            addToEnv tyA atom $ do
+            let tyB'ty = forall x (var tyA) atom
+            addToEnv tyA atom $ addToEnv tyB' tyB'ty $ do
               let cons1 = Spine tyB' [arg] :=: tyB
               cons2 <- cty (head,rest) $ forall x (var tyA) $ Spine tyB' [var x]
               cons3 <- checkType arg (var tyA)
-              return $ (∃) tyA atom $ (∃) tyB' (forall x (var tyA) atom) 
+              return $ (∃) tyA atom $ (∃) tyB' tyB'ty
                 $ cons1 :&: cons2 :&: cons3
 
 consts = [ ("atom", atom)
