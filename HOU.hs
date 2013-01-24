@@ -190,9 +190,8 @@ unify cons = do
      
       uniWhile [] = return mempty
       uniWhile l = do 
-        (sub,l') <- uniOne l []
-        
-        
+        (sub,l') <- trace ("CONSTS: "++show l) $ uniOne l []
+          
         modify $ subst sub
         (sub ***) <$> uniWhile l'
       
@@ -334,56 +333,45 @@ gvar_uvar_inside a@(Spine x yl, _) b@(Spine y y'l, _) =
 
 gvar_const a@(Spine x yl, _) b@(Spine y y'l, _) = case elemIndex (var y) $ yl of 
   Nothing -> gvar_fixed a b $ var . const y
-  Just i -> gvar_uvar_outside a b <|> gvar_fixed a b (var . const y)
+  Just i -> gvar_fixed a b (var . const y) -- <|> gvar_uvar_outside a b
 
 gvar_uvar_outside a@(Spine x yl,aty) b@(Spine y y'l,bty) = do
 
   let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
 
-  i <- F.asum $ fail ("NO MORE OPTIONS: "++show a++" = "++show b):(return <$> ilst)
-  gvar_fixed a b $ \list -> case length list <= i of
-    True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
-    False -> var $ list !! i  
+  i <- F.asum $ return <$> ilst
+  gvar_fixed a b $ var . (!! i)
 
 
 
 gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
   let m = length y'l
       n = length yl
-                    
   xm <- replicateM m $ lift $ getNewWith "@xm"
-  let getArgs (Spine "forall" [_, Abs ui _ r]) = ui:getArgs r
+  
+  let getArgs (Spine "forall" [ty, Abs ui _ r]) = (ui,ty):getArgs r
       getArgs _ = []
       
-      un = getArgs aty
+      untylr = getArgs aty
+      (un,_) = unzip untylr 
       
       vun = var <$> un
       
-      toLterm (Spine "forall" [ty, Abs _ _ r]) (ui:unr) = Abs ui ty <$> toLterm r unr
-      toLterm _ [] = return $ rebuildSpine (action un) $ map (\xi -> Spine xi vun) xm
-
-      toLterm s l = throwError $ "too many arguments for this type: "
-                    ++"\n\ts: "++show s
-                    ++"\n\taty: "++show aty
-                    ++"\n\tinitials: "++show l
-                    ++"\n\tcons: "++show (a :=: b)
-  l <- toLterm aty un
-  
-  let getTypes (Spine "forall" [ty, Abs _ _ l]) = ty:getTypes l
-      getTypes _ = []
-
-    
-      untylr = zip un $ getTypes aty
-      vbuild e = foldr (\(nm,ty) a -> forall nm ty a) e untylr
-                    
-
-      substBty sub (Spine "forall" [_, Abs vi bi r]) (xi:xmr) = (xi,vbuild $ subst sub bi):substBty (M.insert vi (Spine xi vun) sub) r xmr
-      substBty _ _ [] = []
-      substBty _ _ _ = error $ "s is not well typed"
+      toLterm (Spine "forall" [ty, Abs ui _ r]) = Abs ui ty $ toLterm r
+      toLterm _ = rebuildSpine (action un) $ (flip Spine vun) <$> xm
       
-      sub = x |-> l          
+      l = toLterm aty
   
-  modify $ flip (foldr ($)) $ uncurry (addToHead Exists) <$> substBty mempty bty xm
+  let vbuild e = foldr (\(nm,ty) a -> forall nm ty a) e untylr
+
+      substBty sub (Spine "forall" [_, Abs vi bi r]) (xi:xmr) = (xi,vbuild $ subst sub bi)
+                                                                :substBty (M.insert vi (Spine xi vun) sub) r xmr
+      substBty _ _ [] = []
+      substBty _ _ _  = error $ "s is not well typed"
+      
+      sub = x |-> l
+  
+  modify $ flip (foldr ($)) $ uncurry (addToHead Exists) <$> substBty mempty bty xm  
   
   return $ Just (sub, subst sub $ a :=: b)
 
