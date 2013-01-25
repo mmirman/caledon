@@ -22,8 +22,8 @@ import Data.Functor
 import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
-import Debug.Trace
-  
+import Debug.Trace 
+
 --------------------------------
 ---  constraint context list ---
 --------------------------------
@@ -141,6 +141,11 @@ getBindings bind = do
   ctx <- get
   return $ snd <$> getBefore "IN: getBindings" bind ctx
 
+
+getAllBindings = do
+  ctx <- get
+  getBindings $ getTail ctx
+  
 flatten :: Constraint -> ([(Quant, Name, Type)], [(Spine, Spine)])
 flatten cons = case cons of
   Top -> ([],[])
@@ -190,53 +195,58 @@ unify cons = do
      
       uniWhile [] = return mempty
       uniWhile l = do 
-        (sub,l') <- trace ("CONSTS: "++show l) $ uniOne l []
+--        binds <- getAllBindings
+        (sub,l') <- {- trace ("\nBINDS: "++show (reverse binds)
+                          ++"\nCONSTS: "++show l
+                          ) $ -} uniOne l []
           
         modify $ subst sub
         (sub ***) <$> uniWhile l'
       
   uniWhile constraints
 
+traceName s = id
+
 unifyEq :: Spine -> Spine -> WithContext (Maybe (Substitution , Constraint))
 unifyEq a b = let cons = a :=: b in case cons of 
-  Abs nm ty s :=: Abs nm' ty' s' -> do
+  Abs nm ty s :=: Abs nm' ty' s' -> traceName "-aa-" $ do
     return $ Just (mempty, ty :=: ty' :&: (Bind Forall nm ty $ s :=: subst (nm' |-> var nm) s'))
-  Abs nm ty s :=: s' -> do
-    return $ Just (mempty, Bind Forall nm ty $ s :=: rebuildSpine s' [var nm])
-  s :=: s' | s == s' -> return $ Just (mempty, Top)
+  Abs nm ty s :=: s' -> traceName "-as-" $ do
+    return $ Just (mempty, Bind Forall nm ty $  s :=: rebuildSpine s' [var nm])
+  s :=: s' | s == s' -> traceName "-eq-" $ return $ Just (mempty, Top)
   s@(Spine x yl) :=: s' -> do
     bind <- getElm ("all: "++show cons) x
     case bind of
       Left bind@Binding{ elmQuant = Exists } -> do
-        raiseToTop bind (Spine x yl) $ \a@(Spine x yl) ty -> 
-          case s' of 
+        raiseToTop bind (Spine x yl) $ \(a@(Spine x yl),ty) sub ->
+          case subst sub s' of
             Spine x' y'l -> do
               bind' <- getElm "gvar-blah" x'
               case bind' of
-                Right ty' -> -- gvar-const
+                Right ty' -> traceName "-gc-" $ -- gvar-const
                   gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
-                Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> throwError $ "gvar-uvar-depends: "++show (a :=: b)
-                Left Binding{ elmQuant = Forall } | S.member x $ freeVariables yl -> throwError $ "occurs check: "++show (a :=: b)
-                Left Binding{ elmQuant = Forall, elmType = ty' } -> -- gvar-uvar-inside
+                Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> traceName "-gu-dep-" $ throwError $ "gvar-uvar-depends: "++show (a :=: b)
+                Left Binding{ elmQuant = Forall } | S.member x $ freeVariables yl -> traceName "-occ-" $ throwError $ "occurs check: "++show (a :=: b)
+                Left Binding{ elmQuant = Forall, elmType = ty' } ->traceName "-gui-" $  -- gvar-uvar-inside
                   gvar_uvar_inside (Spine x yl, ty) (Spine x' y'l, ty')
                 Left bind@Binding{ elmQuant = Exists, elmType = ty' } -> 
                   if not $ allElementsAreVariables yl && allElementsAreVariables y'l 
                   then return Nothing 
                   else if x == x' 
-                       then -- gvar-gvar-same
+                       then traceName "-ggs-" $ -- gvar-gvar-same
                          gvar_gvar_same (Spine x yl, ty) (Spine x' y'l, ty')
                        else -- gvar-gvar-diff
                          if S.member x $ freeVariables y'l 
-                         then throwError $ "occurs check: "++show (a :=: b)
-                         else gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
-            _ -> return Nothing
+                         then traceName "-ggd-occ-" $ throwError $ "occurs check: "++show (a :=: b)
+                         else traceName "-ggd-" $ gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
+            _ -> traceName "-ggs-" $ return Nothing
       _ -> Just <$> case s' of 
         Spine x' _ | x /= x' -> do
           bind' <- getElm ("const case: "++show cons) x'
           case bind' of
-            Left Binding{ elmQuant = Exists } -> return $ (mempty,s' :=: s) -- uvar-gvar
-            _ -> throwError $ "two different universal equalities: "++show cons -- uvar-uvar
-        Spine x' yl' | x == x' -> do -- uvar-uvar-eq
+            Left Binding{ elmQuant = Exists } -> traceName "-ug-" $ return $ (mempty,s' :=: s) -- uvar-gvar
+            _ -> traceName "-uud-" $ throwError $ "two different universal equalities: "++show cons -- uvar-uvar
+        Spine x' yl' | x == x' -> traceName "-uue-" $ do -- uvar-uvar-eq
           unless (length yl == length yl') $ throwError $ "different numbers of arguments on constant: "++show cons
           return (mempty, foldl (:&:) Top $ zipWith (:=:) yl yl')
         _ -> throwError $ "uvar against a pi WITH CONS "++show cons
@@ -249,23 +259,31 @@ allElementsAreVariables = all $ \c -> case c of
 typeToListOfTypes (Spine _ _) = []
 typeToListOfTypes (Abs x ty l) = (x,ty):typeToListOfTypes l
 
+-- the problem WAS (hopefully) here that the binds were getting
+-- a different number of substitutions than the constraints were.
+-- make sure to check that this is right in the future.
 raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
-  hl <- getBindings bind
-  let newx_args = (map (var . fst) hl)
+  hl <- reverse <$> getBindings bind
+  
+  let newx_args = map (var . fst) hl
       sub = x |-> Spine x newx_args
       
-      ty' = foldr (\(nm,ty) a -> forall nm ty a) ty hl            
-      
-      addSub Nothing = Nothing
-      addSub (Just (sub',cons)) = case M.lookup x sub' of
-        Nothing -> Just (sub *** sub', cons)
-        Just xv -> Just (M.insert x (rebuildSpine xv newx_args) sub', cons)
-      
+      ty' = foldr (\(nm,ty) a -> forall nm ty a) ty hl
+        
+      addSub Nothing = return $ Nothing
+      addSub (Just (sub',cons)) = do
+        let sub'' = case M.lookup x sub' of
+              Nothing -> sub *** sub'
+              Just xv -> sub' *** (x |-> rebuildSpine xv newx_args)
+        modify $ subst sub'                
+        return $ Just (sub'', subst sub'' cons)
+  
   modify $ removeFromContext x
-  modify $ subst sub
+  modify $ subst sub  
+  
+    
   -- now we can match against the right hand side
-  l <- addSub <$> m (subst sub sp) ty'
-  return l
+  addSub =<< m (subst sub sp, ty') sub
 
 -- TODO: make sure this is correct.  its now just a modification of gvar_gvar_diff!
 gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) = do
@@ -295,8 +313,10 @@ gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) = do
   modify $ addToHead Exists xN xNty
   return $ Just (sub, subst sub $ a :=: b)
 
-  
-gvar_gvar_diff (a@(Spine x yl), aty) (sp, _) bind = raiseToTop bind sp $ \(Spine x' y'l) bty -> do
+
+gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(sp@(Spine x' y'l), bty) subO -> do
+  let (a@(Spine x yl), aty) = (subst subO a', subst subO aty')
+      
   -- now x' comes before x 
   -- but we no longer care since I tested it, and switching them twice reduces to original
   let n = length yl
@@ -333,7 +353,7 @@ gvar_uvar_inside a@(Spine x yl, _) b@(Spine y y'l, _) =
 
 gvar_const a@(Spine x yl, _) b@(Spine y y'l, _) = case elemIndex (var y) $ yl of 
   Nothing -> gvar_fixed a b $ var . const y
-  Just i -> gvar_fixed a b (var . const y) -- <|> gvar_uvar_outside a b
+  Just i -> gvar_fixed a b (var . const y) <|> gvar_uvar_outside a b
 
 gvar_uvar_outside a@(Spine x yl,aty) b@(Spine y y'l,bty) = do
 
@@ -369,11 +389,14 @@ gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
       substBty _ _ [] = []
       substBty _ _ _  = error $ "s is not well typed"
       
-      sub = x |-> l
+      sub = x |-> l  -- THIS IS THAT STRANGE BUG WHERE WE CAN'T use x in the output substitution!
   
   modify $ flip (foldr ($)) $ uncurry (addToHead Exists) <$> substBty mempty bty xm  
-  
   return $ Just (sub, subst sub $ a :=: b)
+
+--------------------
+--- proof search ---  
+--------------------
 
 getFamily (Spine "forall" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "exists" [_, Abs _ _ lm]) = getFamily lm
@@ -382,9 +405,7 @@ getFamily (Spine "#open#" (c:l)) = getFamily c
 getFamily (Spine nm' args) = nm'
 getFamily v = error $ "values don't have families: "++show v
                       
---------------------
---- proof search ---  
---------------------
+
 getEnv :: WithContext Constants
 getEnv = do  
   nmMapA <- lift $ ask  
