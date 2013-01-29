@@ -168,9 +168,15 @@ class RegenAbsVars a where
   regenAbsVars :: a -> Env a
 instance RegenAbsVars Constraint where  
   regenAbsVars cons = case cons of
+    
     Bind q nm ty cons -> do
       ty' <- regenAbsVars ty
-      Bind q nm ty' <$> regenAbsVars cons
+      case nm of
+        "" -> do
+          nm' <- getNewWith "@newer"
+          let sub = nm |-> var nm'
+          Bind q nm' ty' <$> regenAbsVars (subst sub cons)
+        _ -> Bind q nm ty' <$> regenAbsVars cons
     a :=: b -> do
       a' <- regenAbsVars a 
       b' <- regenAbsVars b 
