@@ -6,3 +6,11 @@ defn mu : [x : atom] (atom -> atom) -> atom
 defn nat : atom -> atom
 
 defn ismu : mu atom nat -> atom
+
+{-
+(20@xm 19@xm (λ 0/ : (∀ 0/ : atom . ∀ 1/ : atom . ∀ 8@new : 0/ . (forall (20@xm 19@xm 18@xm 19@xm 18@xm 0/) (21@xm 19@xm 18@xm 19@xm 18@xm 0/) 1/ 8@new) → atom) . λ 1/ : (∀ 1/ : atom . atom → 1/ → atom) . atom) atom (forall atom (19@xm 17@xm (λ 0/ : atom . λ 1/ : atom . λ 0/ : 0/ . forall (20@xm 19@xm (λ 0/ : (∀ 0/ : atom . ∀ 1/ : atom . ∀ 8@new : 0/ . (forall (20@xm 19@xm 18@xm 19@xm 18@xm 0/) (21@xm 19@xm 18@xm 19@xm 18@xm 0/) 1/ 8@new) → atom) . λ 1/ : (∀ 1/ : atom . atom → 1/ → atom) . atom) 0/ 1/ 0/) (21@xm 19@xm (λ 0/ : (∀ 0/ : atom . ∀ 1/ : atom . ∀ 8@new : 0/ . (forall (20@xm 19@xm 18@xm 19@xm 18@xm 0/) (21@xm 19@xm 18@xm 19@xm 18@xm 0/) 1/ 8@new) → atom) . λ 1/ : (∀ 1/ : atom . atom → 1/ → atom) . atom) 0/ 1/ 0/)))) atom
+  ,
+  (∀ 0/ : (∀ 0/ : atom . ∀ 1/ : atom . ∀ 8@new : 0/ . (forall (20@xm 19@xm atom 0/ 1/ 8@new) (21@xm 19@xm atom 0/ 1/ 8@new)) → atom) . ∀ 1/ : (∀ 1/ : atom . atom → 1/ → atom) . (atom 0/ 1/) → atom) → ((∀ 1/ : atom . ∀ 2/ : atom . ∀ 8@new : 1/ . (forall (20@xm 19@xm atom 1/ 2/ 8@new) (21@xm 19@xm atom 1/ 2/ 8@new)) → atom) → (∀ 2/ : atom . atom → 2/ → atom) → atom) → ∀ 2/ : atom . atom → 2/ → atom) 
+= (atom,atom)
+
+-}
