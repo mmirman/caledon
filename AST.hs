@@ -14,7 +14,7 @@ import Data.Functor
 import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
-import Control.Monad.RWS (RWST, runRWST, ask, withRWST)
+import Control.Monad.RWS (RWST, ask, withRWST)
 import Control.Monad.Trans (lift)
 import Choice
 
@@ -154,6 +154,7 @@ instance Show Constraint where
           showWithParens _ = "( "++show c++" )"
 
 instance Subst Constraint where
+  subst _ Top = Top
   subst s (s1 :=: s2) = subst s s1 :=: subst s s2
   subst s (c1 :&: c2) = subst s c1 :&: subst s c2
   subst s (Bind q nm t c) = Bind q nm' (subst s t) $ subst s' c
