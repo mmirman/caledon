@@ -11,18 +11,15 @@ import Choice
 import AST
 import Context
 import Control.Monad.State (StateT, runStateT, modify, get, put)
-import Control.Monad.RWS (RWST, runRWST, ask, withRWST)
+import Control.Monad.RWS (RWST, runRWST, ask)
 import Control.Monad.Error (throwError, MonadError)
-import Control.Monad (unless, forM_, forM, replicateM)
+import Control.Monad (unless, forM, replicateM)
 import Control.Monad.Trans (lift)
 import Control.Applicative
 import qualified Data.Foldable as F
 import Data.List
-import Data.Maybe
 import Data.Monoid
-import Data.Functor
 import qualified Data.Map as M
-import Data.Map (Map)
 import qualified Data.Set as S
 import Debug.Trace 
 
@@ -58,7 +55,7 @@ flatten cons = case cons of
   Top -> ([],[])
   c1 :&: c2 -> let (binds1,c1') = flatten c1
                    (binds2,c2') = flatten c2
-               in (binds1++binds2,c1'++c2')
+               in  (binds1++binds2,c1'++c2')
   Bind quant nm ty c -> ((quant,nm,ty):binds,c')
     where (binds, c') = flatten c
   a :=: b -> ([],[(a,b)])
@@ -89,7 +86,7 @@ unify cons = do
             res = (sub,l'++constraints++r')
             
         return res
-      uniOne [] r  = throwError "can not unify any further"
+      uniOne [] _  = throwError "can not unify any further"
       uniOne ((a,b):l) r = do
         (newstate,choice) <- isolate $ unifyEq a b
         case choice of
@@ -112,16 +109,16 @@ unify cons = do
       
   uniWhile constraints
 
-traceName s = id
+traceName _ = id
 
 unifyEq :: Spine -> Spine -> WithContext (Maybe (Substitution , Constraint))
-unifyEq a b = let cons = a :=: b in case cons of 
-  Abs nm ty s :=: Abs nm' ty' s' -> traceName "-aa-" $ do
+unifyEq a b = let cons = a :=: b in case (a,b) of 
+  (Abs nm ty s , Abs nm' ty' s') -> traceName "-aa-" $ do
     return $ Just (mempty, ty :=: ty' :&: (Bind Forall nm ty $ s :=: subst (nm' |-> var nm) s'))
-  Abs nm ty s :=: s' -> traceName "-as-" $ do
+  (Abs nm ty s , s') -> traceName "-as-" $ do
     return $ Just (mempty, Bind Forall nm ty $  s :=: rebuildSpine s' [var nm])
-  s :=: s' | s == s' -> traceName "-eq-" $ return $ Just (mempty, Top)
-  s@(Spine x yl) :=: s' -> do
+  (s , s') | s == s' -> traceName "-eq-" $ return $ Just (mempty, Top)
+  (s@(Spine x yl), s') -> do
     bind <- getElm ("all: "++show cons) x
     case bind of
       Left bind@Binding{ elmQuant = Exists } -> do
@@ -160,7 +157,7 @@ unifyEq a b = let cons = a :=: b in case cons of
             
 allElementsAreVariables :: [Spine] -> Bool
 allElementsAreVariables = all $ \c -> case c of
-  Spine a [] -> True
+  Spine _ [] -> True
   _ -> False
 
 typeToListOfTypes (Spine _ _) = []
@@ -192,13 +189,19 @@ raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
   -- now we can match against the right hand side
   addSub =<< m (subst sub sp, ty') sub
 
+
+      
+getBase 0 a = a
+getBase n (Spine "forall" [_, Abs _ _ r]) = getBase (n - 1) r
+getBase n (Spine "exists" [_, Abs _ _ r]) = getBase (n - 1) r
+getBase _ a = a
+
 -- TODO: make sure this is correct.  its now just a modification of gvar_gvar_diff!
-gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) = do
+gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine _ y'l), _) = do
   let n = length yl
-      m = length y'l
                     
       (uNl,atyl) = unzip $ take n $ typeToListOfTypes aty
-      (vNl,btyl) = unzip $ take m $ typeToListOfTypes bty
+
       
   xN <- lift $ getNewWith "@x'"
   
@@ -207,11 +210,7 @@ gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) = do
       makeBind us tyl arg = foldr (uncurry Abs) (Spine xN $ map var arg) $ zip us tyl
       
       l = makeBind uNl atyl $ map fst perm
-      
-      getBase 0 a = a
-      getBase n (Spine "forall" [_, Abs _ ty r]) = getBase (n - 1) r
-      getBase n (Spine "exists" [_, Abs _ ty r]) = getBase (n - 1) r
-      getBase _ a = a
+
       
       xNty = foldr (uncurry forall) (getBase n aty) perm
       
@@ -219,7 +218,7 @@ gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) = do
       
   modify $ addToHead Exists xN xNty
   return $ Just (sub, subst sub $ a :=: b)
-
+gvar_gvar_same _ _ = error "gvar-gvar-same is not made for this case"
 
 gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(sp@(Spine x' y'l), bty) subO -> do
   let (a@(Spine x yl), aty) = (subst subO a', subst subO aty')
@@ -241,11 +240,6 @@ gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(sp@(Spine x' y'l)
       l = makeBind uNl atyl $ map (fst . fst) perm
       l' = makeBind vNl btyl $ map snd perm
       
-      getBase 0 a = a
-      getBase n (Spine "forall" [_, Abs _ ty r]) = getBase (n - 1) r
-      getBase n (Spine "exists" [_, Abs _ ty r]) = getBase (n - 1) r
-      getBase _ a = a
-      
       xNty = foldr (uncurry forall) (getBase n aty) (map fst perm)
       
       sub = (x |-> l) *** (x' |-> l')
@@ -253,27 +247,25 @@ gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(sp@(Spine x' y'l)
   modify $ addToHead Exists xN xNty
   return $ Just (sub, subst sub $ a :=: sp)
   
-gvar_uvar_inside a@(Spine x yl, _) b@(Spine y y'l, _) = 
+gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) = 
   case elemIndex (var y) $ reverse yl of
     Nothing -> return Nothing
-    Just i -> gvar_uvar_outside a b
-
-gvar_const a@(Spine x yl, _) b@(Spine y y'l, _) = case elemIndex (var y) $ yl of 
+    Just _ -> gvar_uvar_outside a b
+gvar_uvar_inside _ _ = error "gvar-uvar-inside is not made for this case"
+  
+gvar_const a@(Spine _ yl, _) b@(Spine y _, _) = case elemIndex (var y) $ yl of 
   Nothing -> gvar_fixed a b $ var . const y
-  Just i -> gvar_fixed a b (var . const y) <|> gvar_uvar_outside a b
+  Just _ -> gvar_fixed a b (var . const y) <|> gvar_uvar_outside a b
+gvar_const _ _ = error "gvar-const is not made for this case"
 
-gvar_uvar_outside a@(Spine x yl,aty) b@(Spine y y'l,bty) = do
-
+gvar_uvar_outside a@(Spine _ yl,_) b@(Spine y _,_) = do
   let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
-
   i <- F.asum $ return <$> ilst
   gvar_fixed a b $ var . (!! i)
+gvar_uvar_outside _ _ = error "gvar-uvar-outside is not made for this case"
 
-
-
-gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
+gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
   let m = length y'l
-      n = length yl
   xm <- replicateM m $ lift $ getNewWith "@xm"
   
   let getArgs (Spine "forall" [ty, Abs ui _ r]) = (ui,ty):getArgs r
@@ -301,15 +293,17 @@ gvar_fixed (a@(Spine x yl), aty) (b@(Spine x' y'l), bty) action = do
   modify $ flip (foldr ($)) $ uncurry (addToHead Exists) <$> substBty mempty bty xm  
   return $ Just (sub, subst sub $ a :=: b)
 
+gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
+
 --------------------
 --- proof search ---  
 --------------------
 
 getFamily (Spine "forall" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "exists" [_, Abs _ _ lm]) = getFamily lm
-getFamily (Spine "#sopen#" (c:l)) = getFamily c
-getFamily (Spine "#open#" (c:l)) = getFamily c
-getFamily (Spine nm' args) = nm'
+getFamily (Spine "#sopen#" (c:_)) = getFamily c
+getFamily (Spine "#open#" (c:_)) = getFamily c
+getFamily (Spine nm' _) = nm'
 getFamily v = error $ "values don't have families: "++show v
                       
 
@@ -339,8 +333,8 @@ search goal = case goal of
     (sub,l) <- search $ subst (nm |-> var nm') lm
     modify $ removeFromContext nm'
     return (sub, Abs nm' (subst sub ty) l)
-  Spine nm args -> fail "" <|> do -- here we ensure that since this might run infinitely deep without different cases, we stop somewhere along the way 
-                                  -- to give other branches a fair shot at computation.
+  Spine nm _ -> fail "" <|> do -- here we ensure that since this might run infinitely deep without different cases, we stop somewhere along the way 
+                               -- to give other branches a fair shot at computation.
     env <- M.toList <$> getEnv
     
     let sameFamily s = getFamily s == nm 
