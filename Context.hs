@@ -56,9 +56,9 @@ removeFromContext :: Name -> Context -> Context
 removeFromContext nm ctxt@(Context h cmap t) = case M.lookup nm cmap of
   Nothing -> checkContext "removing: nothing" $ ctxt
   Just Binding{ elmPrev = Nothing, elmNext = Nothing } -> emptyContext
-  Just Binding{ elmPrev = Nothing, elmNext = Just n } | Just nm == h -> checkContext "removing: N J" $ Context (Just n) (M.insert n h' $ M.delete nm cmap) t
+  Just Binding{ elmPrev = Nothing, elmNext = Just n } -> isSane (Just nm == h) $ checkContext "removing: N J" $ Context (Just n) (M.insert n h' $ M.delete nm cmap) t
     where h' = (lookupWith "attempting to find new head" n cmap) { elmPrev = Nothing }
-  Just Binding{ elmPrev = Just p, elmNext = Nothing } | Just nm == t -> checkContext "removing: J N" $ Context h (M.insert p t' $ M.delete nm cmap) (Just p)
+  Just Binding{ elmPrev = Just p, elmNext = Nothing } -> isSane (Just nm == t) $ checkContext "removing: J N" $ Context h (M.insert p t' $ M.delete nm cmap) (Just p)
     where t' = (lookupWith "attempting to find new tail" p cmap) { elmNext = Nothing }
   Just Binding{elmPrev = Just cp, elmNext = Just cn } -> case () of
     _ | h == t -> checkContext "removing: J J | h == t " $ Context Nothing mempty Nothing
@@ -67,7 +67,8 @@ removeFromContext nm ctxt@(Context h cmap t) = case M.lookup nm cmap of
     _ -> checkContext ("removing: J J | h /= t \n\t"++show ctxt) $ Context h (n' $ p' $ M.delete nm cmap) t
     where n' = M.insert cn $ (lookupWith "looking up a cmap for n'" cn cmap) { elmPrev = Just cp }
           p' = M.insert cp $ (lookupWith "looking up a cmap for p'" cp cmap ) { elmNext = Just cn }
-          
+  where isSane bool a = if bool then a else error "This doesn't match intended binding"
+
 addToHead quant nm tp ctxt = addToContext ctxt $ Binding quant nm tp Nothing (ctxtHead ctxt)
 addToTail quant nm tp ctxt = addToContext ctxt $ Binding quant nm tp (ctxtTail ctxt) Nothing
 

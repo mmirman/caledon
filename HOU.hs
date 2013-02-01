@@ -32,6 +32,8 @@ type WithContext = StateT Context Env
 
 type Unification = WithContext Substitution
 
+
+
 getElm :: Name -> Name -> WithContext (Either Binding Spine)
 getElm s x = do
   ty <- lookupConstant x
@@ -44,7 +46,6 @@ getBindings :: Binding -> WithContext [(Name,Type)]
 getBindings bind = do
   ctx <- get
   return $ snd <$> getBefore "IN: getBindings" bind ctx
-
 
 getAllBindings = do
   ctx <- get
@@ -99,10 +100,7 @@ unify cons = do
      
       uniWhile [] = return mempty
       uniWhile l = do 
---        binds <- getAllBindings
-        (sub,l') <- {- trace ("\nBINDS: "++show (reverse binds)
-                          ++"\nCONSTS: "++show l
-                          ) $ -} uniOne l []
+        (sub,l') <- uniOne l []
           
         modify $ subst sub
         (sub ***) <$> uniWhile l'
@@ -193,7 +191,6 @@ raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
       
 getBase 0 a = a
 getBase n (Spine "forall" [_, Abs _ _ r]) = getBase (n - 1) r
-getBase n (Spine "exists" [_, Abs _ _ r]) = getBase (n - 1) r
 getBase _ a = a
 
 -- TODO: make sure this is correct.  its now just a modification of gvar_gvar_diff!
@@ -201,7 +198,6 @@ gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine _ y'l), _) = do
   let n = length yl
                     
       (uNl,atyl) = unzip $ take n $ typeToListOfTypes aty
-
       
   xN <- lift $ getNewWith "@x'"
   
@@ -281,7 +277,7 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
       
       l = toLterm aty
   
-  let vbuild e = foldr (\(nm,ty) a -> forall nm ty a) e untylr
+      vbuild e = foldr (\(nm,ty) a -> forall nm ty a) e untylr
 
       substBty sub (Spine "forall" [_, Abs vi bi r]) (xi:xmr) = (xi,vbuild $ subst sub bi)
                                                                 :substBty (M.insert vi (Spine xi vun) sub) r xmr
@@ -300,9 +296,7 @@ gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
 --------------------
 
 getFamily (Spine "forall" [_, Abs _ _ lm]) = getFamily lm
-getFamily (Spine "exists" [_, Abs _ _ lm]) = getFamily lm
-getFamily (Spine "#sopen#" (c:_)) = getFamily c
-getFamily (Spine "#open#" (c:_)) = getFamily c
+getFamily (Spine "#open#" (_:_:c:_)) = getFamily c
 getFamily (Spine nm' _) = nm'
 getFamily v = error $ "values don't have families: "++show v
                       
@@ -325,7 +319,7 @@ search goal = case goal of
     modify $ addToTail Exists nm' ty
     
     (sub, e) <- search $ subst (nm |-> var nm') lm 
-    return $ (sub, Spine "#pack#" [e, subst sub $ var nm', Abs nm ty lm])
+    return $ (sub, pack e (subst sub $ var nm') nm ty lm)
     
   Spine "forall" [_, Abs nm ty lm] -> do
     nm' <- lift $ getNewWith "@sr"
@@ -333,44 +327,44 @@ search goal = case goal of
     (sub,l) <- search $ subst (nm |-> var nm') lm
     modify $ removeFromContext nm'
     return (sub, Abs nm' (subst sub ty) l)
-  Spine nm _ -> fail "" <|> do -- here we ensure that since this might run infinitely deep without different cases, we stop somewhere along the way 
-                               -- to give other branches a fair shot at computation.
+  Spine nm _ -> fail "" <|> do 
+    -- here we ensure that since this might run infinitely deep without different cases, we stop somewhere along the way 
+    -- to give other branches a fair shot at computation.
     env <- M.toList <$> getEnv
+    let sameFamily s = getFamily s == nm
+    F.asum $ left goal <$> filter (sameFamily . snd) env
     
-    let sameFamily s = getFamily s == nm 
-        left x target = case target of 
-          Spine "forall" [_, Abs nm ty lm] -> do
-            nm' <- lift $ getNewWith "@sla"
-            -- by using existential quantification we can defer search implicitly
-            modify $ addToTail Exists nm' ty
-            (sub, result)  <- left x $ subst (nm |-> var nm') lm
-            return $ (sub, \l -> result $ (subst sub $ var nm'):l )
-            
-          Spine "exists" [_, Abs nm ty lm] -> do 
-            nm' <- lift $ getNewWith "@sle"
-            -- universal quantification as information hiding
-            modify $ addToTail Forall nm' ty
-            (sub,result) <- left x $ subst (nm |-> var nm') lm
-            modify $ removeFromContext nm'
-            
-            p <- lift $ getNewWith "@p"
-            return (sub, \l -> Spine "#open#" 
-                               [result [], Abs nm' ty $ Abs p (subst (nm |-> var nm') lm) $ Spine p l])
-
-          Spine _ _ -> do  
-            sub <- unify $ goal :=: target
-            return (sub, \l -> Spine x l)
-          _ -> error $ "λ does not have type atom: " ++ show target
-        
-        leftInit (x,target) = do
-          (sub,l) <- left x target
-          return (sub, subst sub $ l [])
-          
-    F.asum $ leftInit <$> filter (sameFamily . snd) env
-
   _ -> error $ "Not a type: "++show goal
   
-  
+left goal (x,target) = do
+  let leftCont x target = case target of 
+        Spine "forall" [_, Abs nm ty lm] -> do
+          nm' <- lift $ getNewWith "@sla"
+          -- by using existential quantification we can defer search implicitly
+          modify $ addToTail Exists nm' ty
+          (sub, result)  <- leftCont x $ subst (nm |-> var nm') lm
+          return $ (sub, \l -> result $ (subst sub $ var nm'):l )
+            
+        Spine "exists" [_, Abs nm ty lm] -> do 
+          nm' <- lift $ getNewWith "@sle"
+          -- universal quantification as information hiding
+          modify $ addToTail Forall nm' ty
+          (sub,result) <- leftCont x $ subst (nm |-> var nm') lm
+          modify $ removeFromContext nm'
+            
+          p <- lift $ getNewWith "@p"
+          return (sub, \l -> open (result []) (nm', ty) (p , subst (nm |-> var nm') lm) 
+                             goal -- the goal never changes when we do left only substitution
+                             $ Spine p l)
+
+        Spine _ _ -> do  
+          sub <- unify $ goal :=: target
+          return (sub, \l -> Spine x l)
+        _ -> error $ "λ does not have type atom: " ++ show target
+  (sub,l) <- leftCont x target
+  return (sub, subst sub $ l [])         
+
+          
 -----------------------------
 --- constraint generation ---
 -----------------------------
@@ -383,53 +377,27 @@ checkType sp ty = case sp of
       cons2 <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
       return $ cons2 :&: forall x tyA (Spine e [var x]) :=: ty
     return $ cons1 :&: cons2
-
-  Spine "#spack#" [e, tau] -> do
-    tp <- getNewWith "@tp"
-    imp <- getNewWith "@imp"
-    iface <- getNewWith "@iface"
-    
-    let vtp = var tp
-        ifaceTp = forall "_" vtp atom
-        
-    addToEnv (∃) tp atom $ do
-      cons1 <- checkType tau vtp
-      cons2 <- addToEnv (∃) iface ifaceTp
-             $ checkType e $ Spine iface [tau]
-      return $ cons1 :&: cons2 :&: ty :=: exists imp vtp (Spine iface [var imp])
-
       
-  Spine "#pack#" [e, tau, Abs imp tp interface] -> do
+  Spine "#pack#" [tp, Abs imp _ interface, tau, e] -> do
     cons1 <- checkType tp atom    
     cons2 <- checkType tau tp
-    cons3 <- checkType e (subst (imp |-> tau) interface)
+    cons3 <- addToEnv (∀) imp tp $ checkType interface atom
+    cons4 <- checkType e (subst (imp |-> tau) interface)
     return $ cons1 
          :&: cons2 
-         :&: cons3
+         :&: cons3 
+         :&: cons4
          :&: ty :=: exists imp tp interface
-    
-  Spine "#sopen#" (closed:l) -> do
-    tp <- getNewWith "@tp"
-    imp <- getNewWith "@imp"
-    iface <- getNewWith "@iface"
-    p <- getNewWith "@p"
-    
-    let vimp = var imp
-        vtp = var tp
-        ifaceTp = forall "_" vtp atom
-        ifaceImp = Spine iface [vimp]
-
-    addToEnv (∃) tp atom $ addToEnv (∃) iface ifaceTp $ do
-      cons1 <- checkType closed $ exists imp vtp $ ifaceImp
-      cons2 <- addToEnv (∃) imp vtp $ addToEnv (∀) p ifaceImp $ checkType (Spine p l) ty
-      return $ cons1 :&: cons2 
-  
-  Spine "#open#" [closed, Abs imp tp (Abs p interface exp)] -> do
+  Spine "#open#" [tp, Abs imp _ interface, closed, Abs _ _ (Abs _ _ c), Abs _ _ (Abs p _ exp)] -> do
     cons1 <- checkType tp atom
     cons2 <- checkType closed $ exists imp tp interface
-    cons3 <- addToEnv (∃) imp tp $ do
+    cons3 <- addToEnv (∀) imp tp $ do
       cons1 <- checkType interface atom
-      cons2 <- addToEnv (∀) p interface $ checkType exp ty    
+      cons2 <- addToEnv (∀) p interface $ do
+        cons1 <- checkType exp ty    
+        let cip = rebuildSpine c [var imp, var p]
+        cons2 <- checkType cip atom
+        return $ cons1 :&: cons2 :&: (cip :=: ty)
       return $ cons1 :&: cons2
     return $ cons1 :&: cons2 :&: cons3 
     
@@ -459,12 +427,31 @@ checkType sp ty = case sp of
               cons3 <- checkType arg $ var tyA
               return $ cons1 :&: cons2 :&: cons3
 
+{-
+open :: ∀ T : atom . 
+        ∀ Af : T -> atom .
+        ∀ cls : (∃ x : T . Af x) . 
+        ∀ CtF : (∀ x : T . ∀ p : Af x . atom) .
+        ∀ out : (∀ x : T . ∀ p : Af x . CtF x p) . 
+        open T Af cls (\x:T.\p:Af x. atom) (\x:T.\p:Af x.CtF)
+-}
 
 consts = [ ("atom", atom)
          , ("forall", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("exists", forall "a" atom $ (var "a" ~> atom) ~> atom)
-         , ("#pack#", exists "tp" atom $ exists "a" atom $  var "a" ~> var "tp" ~> forall "imp" (var "tp" ~> atom) $ exists "i" atom $ Spine "imp" [var "i"])
-         , ("#spack#", exists "tp" atom $ exists "a" atom $ exists "imp" (var "tp" ~> atom) $ var "a" ~> var "tp" ~> exists "i" atom $ Spine "imp" [var "i"])
+         , ("#pack#", forall "tp" atom 
+                    $ forall "iface" (var "tp" ~> atom) 
+                    $ forall "tau" (var "tp") 
+                    $ forall "e" (Spine "iface" [var "tau"]) 
+                    $ exists "imp" (var "tp") (Spine "iface" [var "imp"]))
+         , ("#open#", forall "tp" atom 
+                    $ forall "iface" (var "tp" ~> atom) 
+                    $ forall "closed" (exists "imp" (var "tp") $ Spine "iface" [var "imp"])
+                    $ forall "cty" (forall "imp" (var "tp") $ forall "p" (Spine "iface" [var "imp"]) $ atom)
+                    $ forall "exp" (forall "imp" (var "tp") $ forall "p" (Spine "iface" [var "imp"]) $ Spine "cty" [var "imp", var "p"])
+                    $ open (var "closed") ("imp" ,var "tp") ("p",Spine "iface" [var "imp"]) atom (Spine "cty" [var "imp", var "p"])
+                    )    
+                    
          ]
          
 test :: IO ()

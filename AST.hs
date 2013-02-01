@@ -64,8 +64,8 @@ var nm = Spine nm []
 atom = var "atom"
 forall x tyA v = Spine ("forall") [tyA, Abs x tyA v]
 exists x tyA v = Spine ("exists") [tyA, Abs x tyA v]
-
-
+pack e tau imp tp interface = Spine "#pack#" [tp, Abs imp tp interface, tau, e]
+open cl (imp,ty) (p,iface) cty inexp = Spine "#open#" [cl, ty,Abs imp ty iface, Abs imp ty (Abs p iface cty), Abs imp ty (Abs p iface inexp)] 
 ---------------------
 ---  substitution ---
 ---------------------
