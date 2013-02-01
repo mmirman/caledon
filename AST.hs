@@ -167,7 +167,12 @@ instance Show Constraint where
 
 instance Monoid Constraint where
   mempty = Top
-  mappend = (:&:)
+  
+  mappend Top b = b
+  mappend a Top = a
+  mappend (Spine a [] :=: Spine b []) c | a == b = c
+  mappend c (Spine a [] :=: Spine b []) | a == b = c
+  mappend a b = a :&: b
 
 instance Subst Constraint where
   subst _ Top = Top
@@ -180,12 +185,10 @@ instance Subst Constraint where
 (∃) = Bind Exists
 (∀) = Bind Forall
 
-
 class RegenAbsVars a where
   regenAbsVars :: a -> Env a
 instance RegenAbsVars Constraint where  
   regenAbsVars cons = case cons of
-    
     Bind q nm ty cons -> do
       ty' <- regenAbsVars ty
       case nm of
@@ -194,6 +197,7 @@ instance RegenAbsVars Constraint where
           let sub = nm |-> var nm'
           Bind q nm' ty' <$> regenAbsVars (subst sub cons)
         _ -> Bind q nm ty' <$> regenAbsVars cons
+    Spine a [] :=: Spine b [] | a == b -> return Top
     a :=: b -> do
       a' <- regenAbsVars a 
       b' <- regenAbsVars b 
