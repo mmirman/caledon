@@ -10,6 +10,7 @@ module HOU where
 import Choice
 import AST
 import Context
+import TopoSortAxioms
 import Control.Monad.State (StateT, runStateT, modify, get, put)
 import Control.Monad.RWS (RWST, runRWST, ask, tell)
 import Control.Monad.Error (throwError, MonadError)
@@ -441,23 +442,6 @@ checkType sp ty = case sp of
               checkType arg $ var tyA
               Spine tyB' [arg] =.= tyB
 
-
-consts = [ ("atom", atom)
-         , ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
-         , ("#exists#", forall "a" atom $ (var "a" ~> atom) ~> atom)
-         , ("#pack#", forall "tp" atom 
-                    $ forall "iface" (var "tp" ~> atom) 
-                    $ forall "tau" (var "tp") 
-                    $ forall "e" (Spine "iface" [var "tau"]) 
-                    $ exists "imp" (var "tp") (Spine "iface" [var "imp"]))
-         , ("#open#", forall "tp" atom 
-                    $ forall "iface" (var "tp" ~> atom) 
-                    $ forall "closed" (exists "imp" (var "tp") $ Spine "iface" [var "imp"])
-                    $ forall "cty" (forall "imp" (var "tp") $ forall "p" (Spine "iface" [var "imp"]) $ atom)
-                    $ forall "exp" (forall "imp" (var "tp") $ forall "p" (Spine "iface" [var "imp"]) $ Spine "cty" [var "imp", var "p"])
-                    $ open (var "closed") ("imp" ,var "tp") ("p",Spine "iface" [var "imp"]) atom (Spine "cty" [var "imp", var "p"])
-                    )    
-         ]
          
 test :: IO ()
 test = case runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts) 0 of
