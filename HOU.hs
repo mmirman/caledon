@@ -11,7 +11,7 @@ import Choice
 import AST
 import Context
 import Control.Monad.State (StateT, runStateT, modify, get, put)
-import Control.Monad.RWS (RWST, runRWST, ask)
+import Control.Monad.RWS (RWST, runRWST, ask, tell)
 import Control.Monad.Error (throwError, MonadError)
 import Control.Monad (unless, forM, replicateM)
 import Control.Monad.Trans (lift)
@@ -368,73 +368,62 @@ left goal (x,target) = do
 -----------------------------
 --- constraint generation ---
 -----------------------------
-checkType :: Spine -> Type -> Env Constraint
+(=.=) a b = tell $ a :=: b
+
+checkType :: Spine -> Type -> TypeChecker
 checkType sp ty = case sp of
   Abs x tyA sp -> do
     e <- getNewWith "@e"
-    cons1 <- checkType ty atom
-    cons2 <- addToEnv (∃) e (forall x tyA atom) $ do
-      cons2 <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
-      return $ cons2 :&: forall x tyA (Spine e [var x]) :=: ty
-    return $ cons1 :&: cons2
-      
+    checkType ty atom
+    addToEnv (∃) e (forall x tyA atom) $ do
+      addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
+      forall x tyA (Spine e [var x]) =.= ty
+
   Spine "#pack#" [tp, Abs imp _ interface, tau, e] -> do
-    cons1 <- checkType tp atom    
-    cons2 <- checkType tau tp
-    cons3 <- addToEnv (∀) imp tp $ checkType interface atom
-    cons4 <- checkType e (subst (imp |-> tau) interface)
-    return $ cons1 
-         :&: cons2 
-         :&: cons3 
-         :&: cons4
-         :&: ty :=: exists imp tp interface
+    checkType tp atom    
+    checkType tau tp
+    addToEnv (∀) imp tp $ checkType interface atom
+    checkType e (subst (imp |-> tau) interface)
+    ty =.= exists imp tp interface
+
   Spine "#open#" [tp, Abs imp _ interface, closed, Abs _ _ (Abs _ _ c), Abs _ _ (Abs p _ exp)] -> do
-    cons1 <- checkType tp atom
-    cons2 <- checkType closed $ exists imp tp interface
-    cons3 <- addToEnv (∀) imp tp $ do
-      cons1 <- checkType interface atom
-      cons2 <- addToEnv (∀) p interface $ do
-        cons1 <- checkType exp ty    
+    checkType tp atom
+    checkType closed $ exists imp tp interface
+    addToEnv (∀) imp tp $ do
+      checkType interface atom
+      addToEnv (∀) p interface $ do
+        checkType exp ty    
         let cip = rebuildSpine c [var imp, var p]
-        cons2 <- checkType cip atom
-        return $ cons1 :&: cons2 :&: (cip :=: ty)
-      return $ cons1 :&: cons2
-    return $ cons1 :&: cons2 :&: cons3 
-    
+        checkType cip atom
+        cip =.= ty
+
   Spine "forall" [_, Abs x tyA tyB] -> do
-    cons1 <- checkType tyA atom
-    cons2 <- addToEnv (∀) x tyA $ checkType tyB atom
-    return $ atom :=: ty :&: cons1 :&: cons2
+    checkType tyA atom
+    addToEnv (∀) x tyA $ checkType tyB atom
+    atom =.= ty
+
   Spine "exists" [_, Abs x tyA tyB] -> do
-    cons1 <- checkType tyA atom
-    cons2 <- addToEnv (∃) x tyA $ checkType tyB atom
-    return $ atom :=: ty :&: cons1 :&: cons2    
+    checkType tyA atom
+    addToEnv (∀) x tyA $ checkType tyB atom
+    atom =.= ty
+
   Spine head args -> cty (head, reverse args) ty
     where cty (head,[]) ty = do
             mty <- (M.lookup head) <$> ask
             case mty of
               Nothing  -> throwError $ "variable: "++show head++" not found in the environment."
-              Just ty' -> do
-                return $ ty' :=: ty
+              Just ty' -> ty' =.= ty
+              
           cty (head,arg:rest) tyB = do
             x <- getNewWith "@xin"
             tyB' <- getNewWith "@tyB'"
             tyA  <- getNewWith "@tyA"
             let tyB'ty = forall x (var tyA) atom
             addToEnv (∃) tyA atom $ addToEnv (∃) tyB' tyB'ty $ do
-              let cons1 = Spine tyB' [arg] :=: tyB
-              cons2 <- cty (head,rest) $ forall x (var tyA) $ Spine tyB' [var x]
-              cons3 <- checkType arg $ var tyA
-              return $ cons1 :&: cons2 :&: cons3
+              cty (head,rest) $ forall x (var tyA) $ Spine tyB' [var x]
+              checkType arg $ var tyA
+              Spine tyB' [arg] =.= tyB
 
-{-
-open :: ∀ T : atom . 
-        ∀ Af : T -> atom .
-        ∀ cls : (∃ x : T . Af x) . 
-        ∀ CtF : (∀ x : T . ∀ p : Af x . atom) .
-        ∀ out : (∀ x : T . ∀ p : Af x . CtF x p) . 
-        open T Af cls (\x:T.\p:Af x. atom) (\x:T.\p:Af x.CtF)
--}
 
 consts = [ ("atom", atom)
          , ("forall", forall "a" atom $ (var "a" ~> atom) ~> atom)
@@ -451,7 +440,6 @@ consts = [ ("atom", atom)
                     $ forall "exp" (forall "imp" (var "tp") $ forall "p" (Spine "iface" [var "imp"]) $ Spine "cty" [var "imp", var "p"])
                     $ open (var "closed") ("imp" ,var "tp") ("p",Spine "iface" [var "imp"]) atom (Spine "cty" [var "imp", var "p"])
                     )    
-                    
          ]
          
 test :: IO ()
@@ -472,7 +460,7 @@ test = case runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts) 0 of
 startTypeCheck :: Constants -> String -> Type -> Choice ()    
 startTypeCheck env str ty =  (\r -> (\(a,_,_) -> a) <$> runRWST r env 0) $ do 
   unless (getFamily ty == str) $ throwError $ "not the right family: "++show str++" = "++show ty
-  constraint <- checkType ty atom
+  constraint <- typeCheckToEnv $ checkType ty atom
   substitution <- runStateT (unify constraint) emptyContext
   return ()
     

@@ -14,7 +14,7 @@ import Data.Functor
 import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
-import Control.Monad.RWS (RWST, ask, withRWST)
+import Control.Monad.RWS (RWST, RWS, ask, withRWST, censor, execRWST, get, put)
 import Control.Monad.Trans (lift)
 import Choice
 
@@ -122,9 +122,20 @@ type Env = RWST Constants () Integer Choice
 
 lookupConstant x = (M.lookup x) <$> lift ask 
 
-addToEnv e x ty m = e x ty <$> withRWST (\r s -> (M.insert x ty r, s)) m
 
+type TypeChecker = RWST Constants Constraint Integer Choice ()
 
+typeCheckToEnv :: TypeChecker -> Env Constraint
+typeCheckToEnv m = do
+  r <- ask
+  s <- get
+  (s',w) <- lift $ execRWST m r s 
+  put s'
+  return w
+
+addToEnv :: (Name -> Spine -> Constraint -> Constraint) -> Name  -> Spine -> TypeChecker -> TypeChecker
+addToEnv e x ty m = do
+  censor (e x ty) $ withRWST (\r s -> (M.insert x ty r, s)) m
 -------------------------
 ---  Constraint types ---
 -------------------------
@@ -152,6 +163,10 @@ instance Show Constraint where
   show (Bind q n ty c) = show q++" "++ n++" : "++show ty++" . "++showWithParens c
     where showWithParens Bind{} = show c
           showWithParens _ = "( "++show c++" )"
+
+instance Monoid Constraint where
+  mempty = Top
+  mappend = (:&:)
 
 instance Subst Constraint where
   subst _ Top = Top
