@@ -14,7 +14,7 @@ import Data.Functor
 import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
-import Control.Monad.RWS (RWST, RWS, ask, withRWST, censor, execRWST, get, put)
+import Control.Monad.RWS (RWST, ask, withRWST, censor, execRWST, get, put)
 import Control.Monad.Trans (lift)
 import Choice
 
@@ -47,9 +47,9 @@ showWithParens t = if (case t of
                       ) then "("++show t++")" else show t 
 
 instance Show Spine where
-  show (Spine "forall" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " → " ++ show t'
-  show (Spine "forall" [_,Abs nm ty t]) = "∀ "++nm++" : "++showWithParens ty++" . "++show t  
-  show (Spine "exists" [_,Abs nm ty t]) = "∃ "++nm++" : "++showWithParens ty++" . "++show t  
+  show (Spine "#forall#" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " → " ++ show t'
+  show (Spine "#forall#" [_,Abs nm ty t]) = "∀ "++nm++" : "++showWithParens ty++" . "++show t  
+  show (Spine "#exists#" [_,Abs nm ty t]) = "∃ "++nm++" : "++showWithParens ty++" . "++show t  
   show (Spine h t) = h++concatMap (\s -> " "++showWithParens s) t
   show (Abs nm ty t) = "λ "++nm++" : "++showWithParens ty++" . "++show t
 
@@ -62,10 +62,11 @@ instance Show Predicate where
                                                
 var nm = Spine nm []
 atom = var "atom"
-forall x tyA v = Spine ("forall") [tyA, Abs x tyA v]
-exists x tyA v = Spine ("exists") [tyA, Abs x tyA v]
+forall x tyA v = Spine ("#forall#") [tyA, Abs x tyA v]
+exists x tyA v = Spine ("#exists#") [tyA, Abs x tyA v]
 pack e tau imp tp interface = Spine "#pack#" [tp, Abs imp tp interface, tau, e]
 open cl (imp,ty) (p,iface) cty inexp = Spine "#open#" [cl, ty,Abs imp ty iface, Abs imp ty (Abs p iface cty), Abs imp ty (Abs p iface inexp)] 
+infer x tyA v = Spine ("#infer#") [Abs x tyA v]
 ---------------------
 ---  substitution ---
 ---------------------
@@ -80,7 +81,6 @@ m1 *** m2 = M.union m2 $ subst m2 <$> m1
 
 rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
---rebuildSpine (Spine "forall" [a]) apps' = rebuildSpine a apps'
 rebuildSpine (Spine c apps) apps' = Spine c (apps ++ apps')
 rebuildSpine (Abs nm _ rst) (a:apps') = rebuildSpine (subst (nm |-> a) $ rst) apps'
 
@@ -136,6 +136,7 @@ typeCheckToEnv m = do
 addToEnv :: (Name -> Spine -> Constraint -> Constraint) -> Name  -> Spine -> TypeChecker -> TypeChecker
 addToEnv e x ty m = do
   censor (e x ty) $ withRWST (\r s -> (M.insert x ty r, s)) m
+  
 -------------------------
 ---  Constraint types ---
 -------------------------

@@ -6,4 +6,3 @@ defn mu : [x : atom] (x -> x) -> atom
 defn nat : atom -> atom
 
 defn ismu : mu atom nat -> atom
-

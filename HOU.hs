@@ -107,6 +107,7 @@ unify cons = do
       
   uniWhile constraints
 
+           
 traceName _ = id
 
 unifyEq :: Spine -> Spine -> WithContext (Maybe (Substitution , Constraint))
@@ -123,7 +124,7 @@ unifyEq a b = let cons = a :=: b in case (a,b) of
         raiseToTop bind (Spine x yl) $ \(a@(Spine x yl),ty) sub ->
           case subst sub s' of
             Spine x' y'l -> do
-              bind' <- getElm "gvar-blah" x'
+              bind' <- getElm ("gvar-blah: "++show cons) x'
               case bind' of
                 Right ty' -> traceName "-gc-" $ -- gvar-const
                   gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
@@ -158,8 +159,9 @@ allElementsAreVariables = all $ \c -> case c of
   Spine _ [] -> True
   _ -> False
 
+typeToListOfTypes (Spine "#forall#" [_, Abs x ty l]) = (x,ty):typeToListOfTypes l
 typeToListOfTypes (Spine _ _) = []
-typeToListOfTypes (Abs x ty l) = (x,ty):typeToListOfTypes l
+typeToListOfTypes a@(Abs _ _ _) = error $ "not a type" ++ show a
 
 -- the problem WAS (hopefully) here that the binds were getting
 -- a different number of substitutions than the constraints were.
@@ -167,34 +169,36 @@ typeToListOfTypes (Abs x ty l) = (x,ty):typeToListOfTypes l
 raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
   hl <- reverse <$> getBindings bind
   
+  x' <- lift $ getNewWith "@newx"
+  
   let newx_args = map (var . fst) hl
-      sub = x |-> Spine x newx_args
+      sub = x |-> Spine x' newx_args
       
       ty' = foldr (\(nm,ty) a -> forall nm ty a) ty hl
         
-      addSub Nothing = return $ Nothing
+      addSub Nothing = return Nothing
       addSub (Just (sub',cons)) = do
-        let sub'' = case M.lookup x sub' of
-              Nothing -> sub *** sub'
-              Just xv -> sub' *** (x |-> rebuildSpine xv newx_args)
-        modify $ subst sub'                
-        return $ Just (sub'', subst sub'' cons)
+        let sub'' = sub *** sub'
+
+        modify $ subst sub'
+        return $ Just (sub'', cons)
   
-  modify $ removeFromContext x
+  modify $ addToHead Exists x' ty' . removeFromContext x
   modify $ subst sub  
-  
     
   -- now we can match against the right hand side
-  addSub =<< m (subst sub sp, ty') sub
-
+  r <- addSub =<< m (subst sub sp, ty') sub
+  
+  modify $ removeFromContext x'
+  return r
 
       
 getBase 0 a = a
-getBase n (Spine "forall" [_, Abs _ _ r]) = getBase (n - 1) r
+getBase n (Spine "#forall#" [_, Abs _ _ r]) = getBase (n - 1) r
 getBase _ a = a
 
 -- TODO: make sure this is correct.  its now just a modification of gvar_gvar_diff!
-gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine _ y'l), _) = do
+gvar_gvar_same (Spine x yl, aty) (Spine _ y'l, _) = do
   let n = length yl
                     
       (uNl,atyl) = unzip $ take n $ typeToListOfTypes aty
@@ -206,21 +210,22 @@ gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine _ y'l), _) = do
       makeBind us tyl arg = foldr (uncurry Abs) (Spine xN $ map var arg) $ zip us tyl
       
       l = makeBind uNl atyl $ map fst perm
-
       
       xNty = foldr (uncurry forall) (getBase n aty) perm
       
       sub = x |-> l
       
   modify $ addToHead Exists xN xNty
-  return $ Just (sub, subst sub $ a :=: b)
+  
+  return $ Just (sub, Top)
+  
 gvar_gvar_same _ _ = error "gvar-gvar-same is not made for this case"
 
-gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(sp@(Spine x' y'l), bty) subO -> do
-  let (a@(Spine x yl), aty) = (subst subO a', subst subO aty')
+gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(Spine x' y'l, bty) subO -> do
+  let (Spine x yl, aty) = (subst subO a', subst subO aty')
       
-  -- now x' comes before x 
-  -- but we no longer care since I tested it, and switching them twice reduces to original
+      -- now x' comes before x 
+      -- but we no longer care since I tested it, and switching them twice reduces to original
   let n = length yl
       m = length y'l
                     
@@ -229,7 +234,10 @@ gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(sp@(Spine x' y'l)
       
   xN <- lift $ getNewWith "@x'"
   
-  let perm = [(iyt,i') | (iyt,y) <- zip (zip uNl atyl) yl, (i',_) <- filter (\(_,y') -> y == y') $ zip vNl y'l ]
+  let perm = do
+        (iyt,y) <- zip (zip uNl atyl) yl
+        (i',_) <- filter (\(_,y') -> y == y') $ zip vNl y'l 
+        return (iyt,i')
       
       makeBind us tyl arg = foldr (uncurry Abs) (Spine xN $ map var arg) $ zip us tyl
       
@@ -238,10 +246,11 @@ gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(sp@(Spine x' y'l)
       
       xNty = foldr (uncurry forall) (getBase n aty) (map fst perm)
       
-      sub = (x |-> l) *** (x' |-> l')
+      sub = M.fromList [(x ,l), (x',l')]
       
   modify $ addToHead Exists xN xNty
-  return $ Just (sub, subst sub $ a :=: sp)
+  
+  return $ Just (sub,Top)
   
 gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) = 
   case elemIndex (var y) $ reverse yl of
@@ -264,7 +273,7 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
   let m = length y'l
   xm <- replicateM m $ lift $ getNewWith "@xm"
   
-  let getArgs (Spine "forall" [ty, Abs ui _ r]) = (ui,ty):getArgs r
+  let getArgs (Spine "#forall#" [ty, Abs ui _ r]) = (ui,ty):getArgs r
       getArgs _ = []
       
       untylr = getArgs aty
@@ -272,14 +281,14 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
       
       vun = var <$> un
       
-      toLterm (Spine "forall" [ty, Abs ui _ r]) = Abs ui ty $ toLterm r
+      toLterm (Spine "#forall#" [ty, Abs ui _ r]) = Abs ui ty $ toLterm r
       toLterm _ = rebuildSpine (action un) $ (flip Spine vun) <$> xm
       
       l = toLterm aty
   
       vbuild e = foldr (\(nm,ty) a -> forall nm ty a) e untylr
 
-      substBty sub (Spine "forall" [_, Abs vi bi r]) (xi:xmr) = (xi,vbuild $ subst sub bi)
+      substBty sub (Spine "#forall#" [_, Abs vi bi r]) (xi:xmr) = (xi,vbuild $ subst sub bi)
                                                                 :substBty (M.insert vi (Spine xi vun) sub) r xmr
       substBty _ _ [] = []
       substBty _ _ _  = error $ "s is not well typed"
@@ -287,6 +296,8 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
       sub = x |-> l  -- THIS IS THAT STRANGE BUG WHERE WE CAN'T use x in the output substitution!
   
   modify $ flip (foldr ($)) $ uncurry (addToHead Exists) <$> substBty mempty bty xm  
+  modify $ subst sub
+  
   return $ Just (sub, subst sub $ a :=: b)
 
 gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
@@ -295,7 +306,7 @@ gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
 --- proof search ---  
 --------------------
 
-getFamily (Spine "forall" [_, Abs _ _ lm]) = getFamily lm
+getFamily (Spine "#forall#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#open#" (_:_:c:_)) = getFamily c
 getFamily (Spine nm' _) = nm'
 getFamily v = error $ "values don't have families: "++show v
@@ -309,7 +320,7 @@ getEnv = do
   
 search :: Type -> WithContext (Substitution, Term)
 search goal = case goal of 
-  Spine "exists" [Abs nm ty lm] -> do
+  Spine "#exists#" [Abs nm ty lm] -> do
     
     -- this case is a bit strange as we rely on unification, either now
     -- OR in the FUTURE in order to find the actual value for tau/nm'
@@ -321,7 +332,7 @@ search goal = case goal of
     (sub, e) <- search $ subst (nm |-> var nm') lm 
     return $ (sub, pack e (subst sub $ var nm') nm ty lm)
     
-  Spine "forall" [_, Abs nm ty lm] -> do
+  Spine "#forall#" [_, Abs nm ty lm] -> do
     nm' <- lift $ getNewWith "@sr"
     modify $ addToTail Forall nm' ty
     (sub,l) <- search $ subst (nm |-> var nm') lm
@@ -338,14 +349,14 @@ search goal = case goal of
   
 left goal (x,target) = do
   let leftCont x target = case target of 
-        Spine "forall" [_, Abs nm ty lm] -> do
+        Spine "#forall#" [_, Abs nm ty lm] -> do
           nm' <- lift $ getNewWith "@sla"
           -- by using existential quantification we can defer search implicitly
           modify $ addToTail Exists nm' ty
           (sub, result)  <- leftCont x $ subst (nm |-> var nm') lm
           return $ (sub, \l -> result $ (subst sub $ var nm'):l )
             
-        Spine "exists" [_, Abs nm ty lm] -> do 
+        Spine "#exists#" [_, Abs nm ty lm] -> do 
           nm' <- lift $ getNewWith "@sle"
           -- universal quantification as information hiding
           modify $ addToTail Forall nm' ty
@@ -397,16 +408,22 @@ checkType sp ty = case sp of
         checkType cip atom
         cip =.= ty
 
-  Spine "forall" [_, Abs x tyA tyB] -> do
+  Spine "#forall#" [_, Abs x tyA tyB] -> do
     checkType tyA atom
     addToEnv (∀) x tyA $ checkType tyB atom
     atom =.= ty
 
-  Spine "exists" [_, Abs x tyA tyB] -> do
+  Spine "#exists#" [_, Abs x tyA tyB] -> do
     checkType tyA atom
     addToEnv (∀) x tyA $ checkType tyB atom
     atom =.= ty
 
+  -- the magic inference!
+  -- this existential quantifier should get reduced out
+  Spine "#infer#" [ Abs x tyA tyB ] -> do
+    checkType tyA atom
+    addToEnv (∃) x tyA $ checkType tyB ty
+    
   Spine head args -> cty (head, reverse args) ty
     where cty (head,[]) ty = do
             mty <- (M.lookup head) <$> ask
@@ -426,8 +443,8 @@ checkType sp ty = case sp of
 
 
 consts = [ ("atom", atom)
-         , ("forall", forall "a" atom $ (var "a" ~> atom) ~> atom)
-         , ("exists", forall "a" atom $ (var "a" ~> atom) ~> atom)
+         , ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
+         , ("#exists#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#pack#", forall "tp" atom 
                     $ forall "iface" (var "tp" ~> atom) 
                     $ forall "tau" (var "tp") 
@@ -447,9 +464,12 @@ test = case runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts) 0 of
   Left a -> putStrLn a
   Right sub -> putStrLn $ "success: "++show sub
   where run = do
-          let constraint = (∃) "5" atom
-                         $ (var "5") :=: (var "5" ~> atom)
-                       :&: (var "5") :=: (atom ~> atom)
+          let constraint = (∀) "nat" atom
+                         $ (∀) "z" (var "nat")
+                         $ (∃) "v3" atom
+                         $ (∃) "v5" (var "nat" ~> atom)
+                         $ (Spine "v5" [var "z"]) :=: var "v3"
+
           runStateT (unify constraint) emptyContext
 
 
