@@ -79,7 +79,7 @@ pAtom =  do reserved "_"
 
 trm :: Parser Term
 trm =     parens trm
-   <|> Spine "#sopen#" <$> (:[]) <$> angles trm
+--   <|> Spine "#open#" <$> (:[]) <$> angles trm
           
    <|> do reservedOp "λ" <|> reservedOp "\\"
           (nm,tp) <- parens anonNamed <|> anonNamed
@@ -92,9 +92,7 @@ trm =     parens trm
           tp' <- tmpState nm trm
           return $ AbsImp nm tp tp' -}
    <|> do t <- pAtom
-          tps <- {- many $ (Impl <$> braces tipe)
-                 <|> (Norm <$> (parens tipe <|> (Atom <$> pAtom))) -}
-            many $ parens tipe <|> pAtom
+          tps <- many $ parens tipe <|> pAtom
           return $ rebuildSpine t tps
    <?> "term"
 
@@ -134,7 +132,6 @@ anonNamed = do
   ty <- optionMaybe $ reservedOp sep >> tipe
   nm' <- getNextVar
   mp <- currentSet <$> getState
---  return (nm,fromMaybe (Atom $ Spine (Var nm') $ Norm <$> Atom <$> var <$> S.toList mp) ty)
   return (nm,fromMaybe (Spine nm' $ var <$> S.toList mp) ty)
 
 tmpState :: String -> Parser a -> Parser a
@@ -156,16 +153,22 @@ tipe = buildExpressionParser table (
     <|> do (nm,tp) <- braces anonNamed
            tp' <- tmpState nm tipe
            return $ exists nm tp tp' 
+           
+    <|> do (nm,tp) <- angles anonNamed
+           tp' <- tmpState nm tipe
+           return $ infer nm tp tp'
+           
     <|> do reservedOp "∀" <|> reserved "forall"
            (nm,tp) <- parens anonNamed <|> anonNamed
            reservedOp "."
            tp' <- tmpState nm tipe
            return $ forall nm tp tp'
-  {-  <|> do reservedOp "?∀" <|> reserved "?forall"
+
+    <|> do reservedOp "??" <|> reserved "infer"
            (nm,tp) <- parens anonNamed <|> anonNamed
            reservedOp "."
            tp' <- tmpState nm tipe
-           return $ ForallImp nm tp tp' -}
+           return $ infer nm tp tp'           
     <?> "type")
 
 P.TokenParser{..} = P.makeTokenParser mydef
@@ -174,9 +177,15 @@ mydef :: P.GenLanguageDef String ParseState Identity
 mydef = haskellDef
   { P.identStart = lower
   , P.identLetter = alphaNum <|> oneOf "_'-/"
-  , P.reservedNames = ["defn", "as", "query", "forall", "exists", "?forall", "_"]
+  , P.reservedNames = ["defn", "as", "query", "forall", "exists", "?forall", "_", "infer"]
   , P.caseSensitive = True
-  , P.reservedOpNames = ["->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", ":", "|", "\\","?\\", "λ","?λ","∀","∃", "?∀", "."]
+  , P.reservedOpNames = ["->", "=>", "<=", 
+                         "⇐", "⇒", "→", "<-", 
+                         "←", ":", "|", 
+                         "\\", "?\\", 
+                         "λ","?λ", 
+                         "∀", "?∀", 
+                         "??", "∃", "."]
   }
 
 getId :: Parser Char -> Parser String

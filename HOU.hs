@@ -307,7 +307,9 @@ gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
 --- proof search ---  
 --------------------
 
+getFamily (Spine "#infer#" [Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#forall#" [_, Abs _ _ lm]) = getFamily lm
+getFamily (Spine "#exists#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#open#" (_:_:c:_)) = getFamily c
 getFamily (Spine nm' _) = nm'
 getFamily v = error $ "values don't have families: "++show v
@@ -455,9 +457,14 @@ test = case runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts) 0 of
 
           runStateT (unify constraint) emptyContext
 
+----------------------
+--- type inference ---
+----------------------
+          
 typeInfer :: Constants -> (Name,Type) -> Choice Constants
-typeInfer env (nm,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r env 0) $ do
-  constraint <- typeCheckToEnv $ checkType ty atom
+typeInfer env (nm,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) 0) $ do
+  constraint <- appendErr ("in name: "++ nm ++" : "++show ty) $ 
+                typeCheckToEnv $ checkType ty atom
   (sub,ctxt) <- runStateT (unify constraint) emptyContext
   -- TODO: need to solve the existentials from the context in order to properly substitute.
   -- TODO: ensure that x doesn't get rewritten during substitution.  
@@ -467,44 +474,29 @@ typeInfer env (nm,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r env 0) $ do
   
   return $ M.insert nm (applySubst ty) env
   
-typeCheckAxioms :: [(Name,Name,Type)] -> Choice () 
+  
+----------------------------
+--- the public interface ---
+----------------------------
+typeCheckAxioms :: [(Name,Name,Type)] -> Choice Constants
 typeCheckAxioms lst = do
   forM lst $ \(fam,_,ty) -> 
     unless (getFamily ty == fam) $ throwError $ "not the right family: need "++show fam++" for "++show ty
   
   let toplst = topoSortAxioms $ map (\(_,a,b) -> (a,b)) lst
         
-  F.foldlM typeInfer envConsts toplst
-  return ()
-  
-----------------------------
---- the public interface ---
-----------------------------
+  F.foldlM typeInfer mempty toplst
 
-startTypeCheck :: Constants -> String -> Type -> Choice ()    
-startTypeCheck env str ty = (\r -> (\(a,_,_) -> a) <$> runRWST r env 0) $ do 
-  unless (getFamily ty == str) $ throwError $ "not the right family: "++show str++" = "++show ty
-  constraint <- typeCheckToEnv $ checkType ty atom
-  substitution <- runStateT (unify constraint) emptyContext
-  return ()
-    
-typeCheckPredicate :: Constants -> Predicate -> Choice Predicate
-typeCheckPredicate env (Query nm ty) = appendErr ("in query : "++show ty) $ do
-  startTypeCheck env "" ty
-  return $ Query nm ty
-typeCheckPredicate env pred@(Predicate pnm pty plst) = appendErr ("in\n"++show pred) $ do
-  pty' <- appendErr ("in name: "++ pnm ++" : "++show pty) $
-    startTypeCheck env "atom" pty
-  plst' <- forM plst $ \(nm,ty) ->
-    appendErr ("in case: " ++nm ++ " = "++show ty) $ (nm,) <$> startTypeCheck env pnm ty
-  return $ Predicate pnm pty plst
-  
 typeCheckAll :: [Predicate] -> Choice [Predicate]
-typeCheckAll preds = forM preds $ typeCheckPredicate assumptions
-  where assumptions = M.fromList $ consts++
-                      concatMap (\st -> case st of
-                                    Query _ _ -> []
-                                    _ -> (predName st, predType st):predConstructors st) preds
+typeCheckAll preds = do
+  let toAxioms (Predicate nm ty cs) = ("atom",nm,ty):map (\(nm',ty') -> (nm,nm',ty')) cs
+      toAxioms (Query nm ty) = [(getFamily ty, nm,ty)]
+  tyMap <- typeCheckAxioms (concatMap toAxioms preds)
+  
+  let newPreds (Predicate nm _ cs) = Predicate nm (tyMap M.! nm) $ map (\(nm,_) -> (nm,tyMap M.! nm)) cs
+      newPreds (Query nm _) = Query nm (tyMap M.! nm)
+  
+  return $ newPreds <$> preds
   
 solver :: [(Name,Type)] -> Type -> Either String [(Name, Term)]
 solver axioms tp = case runError $ runRWST (runStateT (search tp) emptyContext) (M.fromList axioms) 0 of
