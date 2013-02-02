@@ -36,7 +36,8 @@ type Type = Spine
 type Term = Spine
 
 data Predicate = Predicate { predName :: Name, predType :: Type, predConstructors :: [(Name,Type)] }
-               | Query { predName :: Name, predType ::  Type }
+               | Query { predName :: Name, predType ::Spine}
+               | Define { predName :: Name, predValue ::Spine, predType :: Type}
                deriving (Eq)
 
 
@@ -51,9 +52,10 @@ showWithParens t = if (case t of
                       ) then "("++show t++")" else show t 
 
 instance Show Spine where
-  show (Spine "#infer#" [Abs nm t t']) = "<"++nm++" : "++show t++"> "++show t'
+  show (Spine "#infer#" [_, Abs nm t t']) = "<"++nm++" : "++show t++"> "++show t'
   show (Spine "#forall#" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " → " ++ show t'
   show (Spine "#forall#" [_,Abs nm t t']) = "["++nm++" : "++show t++"] "++show t'  
+  show (Spine "#imp_forall#" [_,Abs nm t t']) = "?["++nm++" : "++show t++"] "++show t'  
   show (Spine "#exists#" [_,Abs nm t t']) = "∃"++nm++" : "++show t++". "++show t' 
   show (Spine h t) = h++concatMap (\s -> " "++showWithParens s) t
   show (Abs nm ty t) = "λ "++nm++" : "++showWithParens ty++" . "++show t
@@ -63,15 +65,17 @@ instance Show Predicate where
   show (Predicate nm ty (a:cons)) =
     "defn " ++ nm ++ " : " ++ show ty ++ "\n" ++ "  as " ++ showSingle a ++ concatMap (\x-> "\n   | " ++ showSingle x) cons ++ ";"
       where showSingle (nm,ty) = nm ++ " = " ++ show ty
-  show (Query nm ty) = "query " ++ nm ++ " = " ++ show ty
+  show (Query nm val) = "query " ++ nm ++ " = " ++ show val
+  show (Define nm val ty) = "defn " ++ nm ++ " : " ++ show ty ++"\n by "++show ty
                                                
 var nm = Spine nm []
 atom = var "atom"
 forall x tyA v = Spine ("#forall#") [tyA, Abs x tyA v]
+imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
 exists x tyA v = Spine ("#exists#") [tyA, Abs x tyA v]
 pack e tau imp tp interface = Spine "#pack#" [tp, Abs imp tp interface, tau, e]
 open cl (imp,ty) (p,iface) cty inexp = Spine "#open#" [cl, ty,Abs imp ty iface, Abs imp ty (Abs p iface cty), Abs imp ty (Abs p iface inexp)] 
-infer x tyA v = Spine ("#infer#") [Abs x tyA v]
+infer x tyA v = Spine ("#infer#") [tyA, Abs x tyA v]
 ---------------------
 ---  substitution ---
 ---------------------
@@ -174,8 +178,8 @@ instance Monoid Constraint where
   
   mappend Top b = b
   mappend a Top = a
---  mappend (Spine a [] :=: Spine b []) c | a == b = c
---  mappend c (Spine a [] :=: Spine b []) | a == b = c
+  mappend (Spine a [] :=: Spine b []) c | a == b = c
+  mappend c (Spine a [] :=: Spine b []) | a == b = c
   mappend a b = a :&: b
 
 instance Subst Constraint where
@@ -221,7 +225,9 @@ instance RegenAbsVars Spine where
  
 
 consts = [ ("atom", atom)
+         , ("#infer#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
+         , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#exists#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#pack#", forall "tp" atom 
                     $ forall "iface" (var "tp" ~> atom) 

@@ -35,7 +35,7 @@ getNextVar :: Parser String
 getNextVar = do
   v <- currentVar <$> getState
   modifyState $ modifyVar (+1)
-  return $ show v++"@?_?"
+  return $ show v
 
 decls :: Parser [Predicate]
 decls = do
@@ -99,11 +99,12 @@ trm =     parens trm
 
 table :: OperatorTable String ParseState Identity Type
 table = [ [ binary (reservedOp "->" <|> reservedOp "→") (~>) AssocRight
---          , binary (reservedOp "=>" <|> reservedOp "⇒") fallImp AssocRight
+          , binary (reservedOp "=>" <|> reservedOp "⇒") (imp_forall "") AssocRight
           ]
         , [ binary (reservedOp "<-" <|> reservedOp "←") (flip (~>)) AssocLeft
---          , binary (reservedOp "<=" <|> reservedOp "⇐") (flip fallImp) AssocLeft ]
-          ]]
+          , binary (reservedOp "<=" <|> reservedOp "⇐") (flip $ imp_forall "") AssocLeft 
+          ]
+        ]
   where binary name fun = Infix (name >> return fun)
 
 decTipe :: (Parser String, String)
@@ -150,6 +151,9 @@ tipe = buildExpressionParser table (
     <|> do (nm,tp) <- brackets anonNamed
            tp' <- tmpState nm tipe
            return $ forall nm tp tp'
+    <|> do (nm,tp) <- reservedOp "?" >> brackets anonNamed
+           tp' <- tmpState nm tipe
+           return $ imp_forall nm tp tp'
     <|> do (nm,tp) <- braces anonNamed
            tp' <- tmpState nm tipe
            return $ exists nm tp tp' 
@@ -163,6 +167,12 @@ tipe = buildExpressionParser table (
            reservedOp "."
            tp' <- tmpState nm tipe
            return $ forall nm tp tp'
+           
+    <|> do reservedOp "?∀" <|> reserved "?forall"
+           (nm,tp) <- parens anonNamed <|> anonNamed
+           reservedOp "."
+           tp' <- tmpState nm tipe
+           return $ imp_forall nm tp tp'           
 
     <|> do reservedOp "??" <|> reserved "infer"
            (nm,tp) <- parens anonNamed <|> anonNamed
@@ -185,6 +195,7 @@ mydef = haskellDef
                          "\\", "?\\", 
                          "λ","?λ", 
                          "∀", "?∀", 
+                         "?",
                          "??", "∃", "."]
   }
 

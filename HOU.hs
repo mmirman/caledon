@@ -33,8 +33,6 @@ type WithContext = StateT Context Env
 
 type Unification = WithContext Substitution
 
-
-
 getElm :: Name -> Name -> WithContext (Either Binding Spine)
 getElm s x = do
   ty <- lookupConstant x
@@ -76,7 +74,7 @@ isolate m = do
 unify :: Constraint -> Unification
 unify cons = do
   cons <- lift $ regenAbsVars cons
-  let (binds,constraints) = trace (show cons) $ flatten cons
+  let (binds,constraints) = trace ("CONS: "++show cons) $ flatten cons
   addBinds binds      
   let with l r newstate sub cons = do
         let (binds,constraints) = flatten cons
@@ -129,8 +127,8 @@ unifyEq a b = let cons = a :=: b in case (a,b) of
               case bind' of
                 Right ty' -> traceName "-gc-" $ -- gvar-const
                   gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
-                Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> traceName "-gu-dep-" $ throwError $ "gvar-uvar-depends: "++show (a :=: b)
-                Left Binding{ elmQuant = Forall } | S.member x $ freeVariables yl -> traceName "-occ-" $ throwError $ "occurs check: "++show (a :=: b)
+                Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> traceName "CANT: -gu-dep-" $ throwError $ "gvar-uvar-depends: "++show (a :=: b)
+                Left Binding{ elmQuant = Forall } | S.member x $ freeVariables yl -> traceName "CANT: -occ-" $ throwError $ "occurs check: "++show (a :=: b)
                 Left Binding{ elmQuant = Forall, elmType = ty' } ->traceName "-gui-" $  -- gvar-uvar-inside
                   gvar_uvar_inside (Spine x yl, ty) (Spine x' y'l, ty')
                 Left bind@Binding{ elmQuant = Exists, elmType = ty' } -> 
@@ -141,7 +139,7 @@ unifyEq a b = let cons = a :=: b in case (a,b) of
                          gvar_gvar_same (Spine x yl, ty) (Spine x' y'l, ty')
                        else -- gvar-gvar-diff
                          if S.member x $ freeVariables y'l 
-                         then traceName "-ggd-occ-" $ throwError $ "occurs check: "++show (a :=: b)
+                         then traceName "CANT: -ggd-occ-" $ throwError $ "occurs check: "++show (a :=: b)
                          else traceName "-ggd-" $ gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
             _ -> traceName "-ggs-" $ return Nothing
       _ -> Just <$> case s' of 
@@ -149,11 +147,11 @@ unifyEq a b = let cons = a :=: b in case (a,b) of
           bind' <- getElm ("const case: "++show cons) x'
           case bind' of
             Left Binding{ elmQuant = Exists } -> traceName "-ug-" $ return $ (mempty,s' :=: s) -- uvar-gvar
-            _ -> traceName "-uud-" $ throwError $ "two different universal equalities: "++show cons -- uvar-uvar
+            _ -> traceName "CANT: -uud-" $ throwError $ "two different universal equalities: "++show cons -- uvar-uvar
         Spine x' yl' | x == x' -> traceName "-uue-" $ do -- uvar-uvar-eq
           unless (length yl == length yl') $ throwError $ "different numbers of arguments on constant: "++show cons
           return (mempty, foldl (:&:) Top $ zipWith (:=:) yl yl')
-        _ -> throwError $ "uvar against a pi WITH CONS "++show cons
+        _ -> traceName "CANT: -uvarpi-" $ throwError $ "uvar against a pi WITH CONS "++show cons
             
 allElementsAreVariables :: [Spine] -> Bool
 allElementsAreVariables = all $ \c -> case c of
@@ -261,13 +259,26 @@ gvar_uvar_inside _ _ = error "gvar-uvar-inside is not made for this case"
   
 gvar_const a@(Spine _ yl, _) b@(Spine y _, _) = case elemIndex (var y) $ yl of 
   Nothing -> gvar_fixed a b $ var . const y
-  Just _ -> gvar_fixed a b (var . const y) <|> gvar_uvar_outside a b
+  Just _ -> gvar_uvar_outside a b <|> gvar_fixed a b (var . const y)
 gvar_const _ _ = error "gvar-const is not made for this case"
 
-gvar_uvar_outside a@(Spine _ yl,_) b@(Spine y _,_) = do
+gvar_uvar_outside a@(Spine x yl,_) b@(Spine y _,bty) = do
   let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
   i <- F.asum $ return <$> ilst
   gvar_fixed a b $ var . (!! i)
+  {-
+  case [i | (i,y') <- zip [0..] yl , y' == var y] of
+    [i] -> trace ("-ic-") $ gvar_fixed a b $ lookup
+      where lookup list = case length list <= i of
+              True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
+              False -> var $ list !! i
+    ilst -> trace ("-il-") $ do
+      defered <- lift $ getNewWith "@def"
+      res <- gvar_fixed a b $ \ui_list -> 
+        Spine defered $ var <$> (ui_list !!) <$> ilst
+      modify $ addToHead Exists defered $ foldr (\_ a -> bty ~> a) bty ilst
+      return res
+  -}
 gvar_uvar_outside _ _ = error "gvar-uvar-outside is not made for this case"
 
 gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
@@ -307,8 +318,9 @@ gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
 --- proof search ---  
 --------------------
 
-getFamily (Spine "#infer#" [Abs _ _ lm]) = getFamily lm
+getFamily (Spine "#infer#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#forall#" [_, Abs _ _ lm]) = getFamily lm
+getFamily (Spine "#imp_forall#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#exists#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#open#" (_:_:c:_)) = getFamily c
 getFamily (Spine nm' _) = nm'
@@ -386,19 +398,12 @@ left goal (x,target) = do
 
 checkType :: Spine -> Type -> TypeChecker Spine
 checkType sp ty = case sp of
-
-  Spine "#infer#" [ Abs x tyA tyB ] -> do
+  Spine "#infer#" [_, Abs x tyA tyB ] -> do
     tyA <- checkType tyA atom
-    addToEnv (∃) x tyA $ do
-      checkType tyB ty
-
-  Abs x tyA sp -> do
-    e <- getNewWith "@e"
-    tyA <- checkType tyA atom
-    addToEnv (∃) e (forall x tyA atom) $ do
-      forall x tyA (Spine e [var x]) =.= ty
-      sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
-      return $ Abs x tyA sp
+    x' <- getNewWith "@inf"
+    addToEnv (∃) x' tyA $ do
+      checkType (subst (x |-> var x') tyB) ty
+  
 
   Spine "#pack#" [tp, Abs imp _ interface, tau, e] -> do
     tp <- checkType tp atom    
@@ -418,7 +423,13 @@ checkType sp ty = case sp of
         c <- checkType c atom
         c =.= ty
         return $ open closed (imp,tp) (p,interface) c exp
-
+        
+  Spine "#imp_forall#" [_, Abs x tyA tyB] -> do
+    tyA <- checkType tyA atom
+    tyB <- addToEnv (∀) x tyA $ checkType tyB atom
+    atom =.= ty
+    return $ imp_forall x tyA tyB
+    
   Spine "#forall#" [_, Abs x tyA tyB] -> do
     tyA <- checkType tyA atom
     tyB <- addToEnv (∀) x tyA $ checkType tyB atom
@@ -430,7 +441,15 @@ checkType sp ty = case sp of
     tyB <- addToEnv (∀) x tyA $ checkType tyB atom
     atom =.= ty
     return $ exists x tyA tyB
-
+    
+  -- below are the only cases where bidirectional type checking is useful 
+  Abs x tyA sp -> do
+    e <- getNewWith "@e"
+    tyA <- checkType tyA atom
+    addToEnv (∃) e (forall x tyA atom) $ do
+      forall x tyA (Spine e [var x]) =.= ty
+      sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
+      return $ Abs x tyA sp
   Spine head args -> cty (head, reverse args) ty
     where cty (head,[]) ty = do
             mty <- (M.lookup head) <$> lift ask
@@ -473,41 +492,37 @@ testGen s t = do
 --- type inference ---
 ----------------------
           
-typeInfer :: Constants -> (Name,Type) -> Choice Constants
-typeInfer env (nm,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) 0) $ do
-  (ty,constraint) <- appendErr ("in name: "++ nm ++" : "++show ty) $ 
-                     typeCheckToEnv $ checkType ty atom
+typeInfer :: Constants -> (Name,Spine,Type) -> Choice Constants
+typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) 0) $ do
+  (val,constraint) <- appendErr ("in name: "++ nm ++" : "++show val) $ 
+                      trace ("NAME: " ++nm) $ typeCheckToEnv $ checkType val ty
   (sub,ctxt) <- runStateT (unify constraint) emptyContext
-  return $ M.insert nm (subst sub ty) env
-  -- TODO: need to solve the existentials from the context in order to properly substitute.
-  -- TODO: ensure that x doesn't get rewritten during substitution.  
-{-  let applySubst (Spine "#infer#" [Abs x tyA tyB ]) = subst (x |-> subst sub (var x)) $ applySubst tyB
-      applySubst (Abs x ty l) = Abs x (applySubst ty) (applySubst l)
-      applySubst (Spine a l) = Spine a (map applySubst l)
-
-  return $ M.insert nm (applySubst ty) env
-  -}  
+  
+  
+  return $ M.insert nm (subst sub val) env
   
 ----------------------------
 --- the public interface ---
 ----------------------------
-typeCheckAxioms :: [(Name,Name,Type)] -> Choice Constants
+typeCheckAxioms :: [(Name,Name,Spine,Type)] -> Choice Constants
 typeCheckAxioms lst = do
-  forM lst $ \(fam,_,ty) -> 
-    unless (getFamily ty == fam) $ throwError $ "not the right family: need "++show fam++" for "++show ty
+  forM lst $ \(fam,_,val,_) -> 
+    unless (getFamily val == fam) $ throwError $ "not the right family: need "++show fam++" for "++show val
   
-  let toplst = topoSortAxioms $ map (\(_,a,b) -> (a,b)) lst
+  let toplst = topoSortAxioms $ map (\(_,a,b,t) -> (a,b,t)) lst
         
   F.foldlM typeInfer mempty toplst
 
 typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = do
-  let toAxioms (Predicate nm ty cs) = ("atom",nm,ty):map (\(nm',ty') -> (nm,nm',ty')) cs
-      toAxioms (Query nm ty) = [(getFamily ty, nm,ty)]
+  let toAxioms (Predicate nm ty cs) = ("atom",nm,ty,atom):map (\(nm',ty') -> (nm,nm',ty',atom)) cs
+      toAxioms (Query nm val) = [(getFamily val, nm,val,infer "x" atom (var "x"))]
+      toAxioms (Define nm val ty) = [(getFamily ty, nm,ty,atom), (getFamily val, "#val#"++nm,val,ty)]
   tyMap <- typeCheckAxioms (concatMap toAxioms preds)
   
   let newPreds (Predicate nm _ cs) = Predicate nm (tyMap M.! nm) $ map (\(nm,_) -> (nm,tyMap M.! nm)) cs
       newPreds (Query nm _) = Query nm (tyMap M.! nm)
+      newPreds (Define nm _ _) = Define nm (tyMap M.! ("#val#"++nm)) (tyMap M.! nm)
   
   return $ newPreds <$> preds
   
