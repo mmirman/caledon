@@ -441,7 +441,6 @@ checkType sp ty = case sp of
               cty (head,rest) $ forall x (var tyA) $ Spine tyB' [var x]
               checkType arg $ var tyA
               Spine tyB' [arg] =.= tyB
-
          
 test :: IO ()
 test = case runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts) 0 of
@@ -456,13 +455,34 @@ test = case runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts) 0 of
 
           runStateT (unify constraint) emptyContext
 
-
+typeInfer :: Constants -> (Name,Type) -> Choice Constants
+typeInfer env (nm,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r env 0) $ do
+  constraint <- typeCheckToEnv $ checkType ty atom
+  (sub,ctxt) <- runStateT (unify constraint) emptyContext
+  -- TODO: need to solve the existentials from the context in order to properly substitute.
+  -- TODO: ensure that x doesn't get rewritten during substitution.  
+  let applySubst (Spine "#infer#" [Abs x tyA tyB ]) = subst (x |-> subst sub (var x)) $ applySubst tyB
+      applySubst (Abs x ty l) = Abs x (applySubst ty) (applySubst l)
+      applySubst (Spine a l) = Spine a (map applySubst l)
+  
+  return $ M.insert nm (applySubst ty) env
+  
+typeCheckAxioms :: [(Name,Name,Type)] -> Choice () 
+typeCheckAxioms lst = do
+  forM lst $ \(fam,_,ty) -> 
+    unless (getFamily ty == fam) $ throwError $ "not the right family: need "++show fam++" for "++show ty
+  
+  let toplst = topoSortAxioms $ map (\(_,a,b) -> (a,b)) lst
+        
+  F.foldlM typeInfer envConsts toplst
+  return ()
+  
 ----------------------------
 --- the public interface ---
 ----------------------------
 
 startTypeCheck :: Constants -> String -> Type -> Choice ()    
-startTypeCheck env str ty =  (\r -> (\(a,_,_) -> a) <$> runRWST r env 0) $ do 
+startTypeCheck env str ty = (\r -> (\(a,_,_) -> a) <$> runRWST r env 0) $ do 
   unless (getFamily ty == str) $ throwError $ "not the right family: "++show str++" = "++show ty
   constraint <- typeCheckToEnv $ checkType ty atom
   substitution <- runStateT (unify constraint) emptyContext

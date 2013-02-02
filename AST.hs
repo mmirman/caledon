@@ -232,3 +232,5 @@ consts = [ ("atom", atom)
                     $ open (var "closed") ("imp" ,var "tp") ("p",Spine "iface" [var "imp"]) atom (Spine "cty" [var "imp", var "p"])
                     )    
          ]
+
+envConsts = M.fromList consts
