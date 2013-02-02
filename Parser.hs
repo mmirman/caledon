@@ -131,8 +131,8 @@ anonNamed = do
   nm <- ident
   ty <- optionMaybe $ reservedOp sep >> tipe
   nm' <- getNextVar
-  mp <- currentSet <$> getState
-  return (nm,fromMaybe (Spine nm' $ var <$> S.toList mp) ty)
+  nm'' <- getNextVar
+  return (nm,fromMaybe (infer nm' atom $ infer nm'' (var nm') $ var nm'') ty)
 
 tmpState :: String -> Parser a -> Parser a
 tmpState nm m = do

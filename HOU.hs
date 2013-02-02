@@ -14,7 +14,7 @@ import TopoSortAxioms
 import Control.Monad.State (StateT, runStateT, modify, get, put)
 import Control.Monad.RWS (RWST, runRWST, ask, tell)
 import Control.Monad.Error (throwError, MonadError)
-import Control.Monad (unless, forM, replicateM)
+import Control.Monad (unless, forM, replicateM, void)
 import Control.Monad.Trans (lift)
 import Control.Applicative
 import qualified Data.Foldable as F
@@ -382,68 +382,74 @@ left goal (x,target) = do
 -----------------------------
 --- constraint generation ---
 -----------------------------
-(=.=) a b = tell $ a :=: b
+(=.=) a b = lift $ tell $ a :=: b
 
-checkType :: Spine -> Type -> TypeChecker
+checkType :: Spine -> Type -> TypeChecker Spine
 checkType sp ty = case sp of
+
+  Spine "#infer#" [ Abs x tyA tyB ] -> do
+    tyA <- checkType tyA atom
+    addToEnv (∃) x tyA $ do
+      checkType tyB ty
+
   Abs x tyA sp -> do
     e <- getNewWith "@e"
-    checkType ty atom
+    tyA <- checkType tyA atom
     addToEnv (∃) e (forall x tyA atom) $ do
-      addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
       forall x tyA (Spine e [var x]) =.= ty
+      sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
+      return $ Abs x tyA sp
 
   Spine "#pack#" [tp, Abs imp _ interface, tau, e] -> do
-    checkType tp atom    
-    checkType tau tp
-    addToEnv (∀) imp tp $ checkType interface atom
-    checkType e (subst (imp |-> tau) interface)
+    tp <- checkType tp atom    
+    tau <- checkType tau tp
+    interface <- addToEnv (∀) imp tp $ checkType interface atom
+    e <- checkType e (subst (imp |-> tau) interface)    
     ty =.= exists imp tp interface
+    return $ pack e tau imp tp interface
 
   Spine "#open#" [tp, Abs imp _ interface, closed, Abs _ _ (Abs _ _ c), Abs _ _ (Abs p _ exp)] -> do
-    checkType tp atom
-    checkType closed $ exists imp tp interface
+    tp <- checkType tp atom
+    closed <- checkType closed $ exists imp tp interface
     addToEnv (∀) imp tp $ do
-      checkType interface atom
+      interface <- checkType interface atom
       addToEnv (∀) p interface $ do
-        checkType exp ty    
-        let cip = rebuildSpine c [var imp, var p]
-        checkType cip atom
-        cip =.= ty
+        exp <- checkType exp ty    
+        c <- checkType c atom
+        c =.= ty
+        return $ open closed (imp,tp) (p,interface) c exp
 
   Spine "#forall#" [_, Abs x tyA tyB] -> do
-    checkType tyA atom
-    addToEnv (∀) x tyA $ checkType tyB atom
+    tyA <- checkType tyA atom
+    tyB <- addToEnv (∀) x tyA $ checkType tyB atom
     atom =.= ty
+    return $ forall x tyA tyB
 
   Spine "#exists#" [_, Abs x tyA tyB] -> do
-    checkType tyA atom
-    addToEnv (∀) x tyA $ checkType tyB atom
+    tyA <- checkType tyA atom
+    tyB <- addToEnv (∀) x tyA $ checkType tyB atom
     atom =.= ty
+    return $ exists x tyA tyB
 
-  -- the magic inference!
-  -- this existential quantifier should get reduced out
-  Spine "#infer#" [ Abs x tyA tyB ] -> do
-    checkType tyA atom
-    addToEnv (∃) x tyA $ checkType tyB ty
-    
   Spine head args -> cty (head, reverse args) ty
     where cty (head,[]) ty = do
-            mty <- (M.lookup head) <$> ask
+            mty <- (M.lookup head) <$> lift ask
             case mty of
-              Nothing  -> throwError $ "variable: "++show head++" not found in the environment."
+              Nothing  -> lift $ throwError $ "variable: "++show head++" not found in the environment."
               Just ty' -> ty' =.= ty
-              
+            return $ Spine head []
+            
           cty (head,arg:rest) tyB = do
             x <- getNewWith "@xin"
             tyB' <- getNewWith "@tyB'"
             tyA  <- getNewWith "@tyA"
             let tyB'ty = forall x (var tyA) atom
             addToEnv (∃) tyA atom $ addToEnv (∃) tyB' tyB'ty $ do
-              cty (head,rest) $ forall x (var tyA) $ Spine tyB' [var x]
-              checkType arg $ var tyA
+              arg <- checkType arg $ var tyA
               Spine tyB' [arg] =.= tyB
-         
+              v <- cty (head,rest) $ forall x (var tyA) $ Spine tyB' [var x]
+              return $ rebuildSpine v [arg]
+              
 test :: IO ()
 test = case runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts) 0 of
   Left a -> putStrLn a
@@ -457,23 +463,30 @@ test = case runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts) 0 of
 
           runStateT (unify constraint) emptyContext
 
+testGen :: Spine -> Type -> IO ()
+testGen s t = do
+  let Right ((ty,constraint),_,_) = runError $ runRWST (typeCheckToEnv $ checkType s t) envConsts 0
+  putStrLn $ show ty
+  putStrLn $ show constraint
+
 ----------------------
 --- type inference ---
 ----------------------
           
 typeInfer :: Constants -> (Name,Type) -> Choice Constants
 typeInfer env (nm,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) 0) $ do
-  constraint <- appendErr ("in name: "++ nm ++" : "++show ty) $ 
-                typeCheckToEnv $ checkType ty atom
+  (ty,constraint) <- appendErr ("in name: "++ nm ++" : "++show ty) $ 
+                     typeCheckToEnv $ checkType ty atom
   (sub,ctxt) <- runStateT (unify constraint) emptyContext
+  return $ M.insert nm (subst sub ty) env
   -- TODO: need to solve the existentials from the context in order to properly substitute.
   -- TODO: ensure that x doesn't get rewritten during substitution.  
-  let applySubst (Spine "#infer#" [Abs x tyA tyB ]) = subst (x |-> subst sub (var x)) $ applySubst tyB
+{-  let applySubst (Spine "#infer#" [Abs x tyA tyB ]) = subst (x |-> subst sub (var x)) $ applySubst tyB
       applySubst (Abs x ty l) = Abs x (applySubst ty) (applySubst l)
       applySubst (Spine a l) = Spine a (map applySubst l)
-  
+
   return $ M.insert nm (applySubst ty) env
-  
+  -}  
   
 ----------------------------
 --- the public interface ---

@@ -14,7 +14,8 @@ import Data.Functor
 import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
-import Control.Monad.RWS (RWST, ask, withRWST, censor, execRWST, get, put)
+import Control.Monad.RWS (RWST, ask, local, censor, runRWST, get, put)
+import Control.Monad.Trans.Cont
 import Control.Monad.Trans (lift)
 import Choice
 
@@ -43,13 +44,17 @@ getNewWith s = (++s) <$> getNew
 
 showWithParens t = if (case t of
                           Abs{} -> True
-                          Spine _ lst -> not $ null lst
+                          Spine "#infer#" _ -> True
+                          Spine "#forall#" _ -> True
+                          Spine "#exists#" _ -> True
+                          Spine _ _ -> False
                       ) then "("++show t++")" else show t 
 
 instance Show Spine where
+  show (Spine "#infer#" [Abs nm t t']) = "<"++nm++" : "++show t++"> "++show t'
   show (Spine "#forall#" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " → " ++ show t'
-  show (Spine "#forall#" [_,Abs nm ty t]) = "∀ "++nm++" : "++showWithParens ty++" . "++show t  
-  show (Spine "#exists#" [_,Abs nm ty t]) = "∃ "++nm++" : "++showWithParens ty++" . "++show t  
+  show (Spine "#forall#" [_,Abs nm t t']) = "["++nm++" : "++show t++"] "++show t'  
+  show (Spine "#exists#" [_,Abs nm t t']) = "∃"++nm++" : "++show t++". "++show t' 
   show (Spine h t) = h++concatMap (\s -> " "++showWithParens s) t
   show (Abs nm ty t) = "λ "++nm++" : "++showWithParens ty++" . "++show t
 
@@ -122,20 +127,19 @@ type Env = RWST Constants () Integer Choice
 
 lookupConstant x = (M.lookup x) <$> lift ask 
 
+type TypeChecker = ContT Spine (RWST Constants Constraint Integer Choice)
 
-type TypeChecker = RWST Constants Constraint Integer Choice ()
-
-typeCheckToEnv :: TypeChecker -> Env Constraint
+typeCheckToEnv :: TypeChecker Spine -> Env (Spine,Constraint)
 typeCheckToEnv m = do
   r <- ask
   s <- get
-  (s',w) <- lift $ execRWST m r s 
+  (a,s',w) <- lift $ runRWST (runContT m return) r s 
   put s'
-  return w
+  return (a,w)
 
-addToEnv :: (Name -> Spine -> Constraint -> Constraint) -> Name  -> Spine -> TypeChecker -> TypeChecker
-addToEnv e x ty m = do
-  censor (e x ty) $ withRWST (\r s -> (M.insert x ty r, s)) m
+addToEnv :: (Name -> Spine -> Constraint -> Constraint) -> Name  -> Spine -> TypeChecker a -> TypeChecker a
+addToEnv e x ty = mapContT (censor $ e x ty) . liftLocal ask local (M.insert x ty) 
+    
   
 -------------------------
 ---  Constraint types ---
@@ -170,8 +174,8 @@ instance Monoid Constraint where
   
   mappend Top b = b
   mappend a Top = a
-  mappend (Spine a [] :=: Spine b []) c | a == b = c
-  mappend c (Spine a [] :=: Spine b []) | a == b = c
+--  mappend (Spine a [] :=: Spine b []) c | a == b = c
+--  mappend c (Spine a [] :=: Spine b []) | a == b = c
   mappend a b = a :&: b
 
 instance Subst Constraint where
