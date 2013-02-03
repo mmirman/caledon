@@ -74,7 +74,7 @@ isolate m = do
 unify :: Constraint -> Unification
 unify cons = do
   cons <- lift $ regenAbsVars cons
-  let (binds,constraints) = trace ("CONS: "++show cons) $ flatten cons
+  let (binds,constraints) = traceName ("CONS: "++show cons) $ flatten cons
   addBinds binds      
   let with l r newstate sub cons = do
         let (binds,constraints) = flatten cons
@@ -450,24 +450,30 @@ checkType sp ty = case sp of
       forall x tyA (Spine e [var x]) =.= ty
       sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
       return $ Abs x tyA sp
-  Spine head args -> cty (head, reverse args) ty
-    where cty (head,[]) ty = do
-            mty <- (M.lookup head) <$> lift ask
-            case mty of
-              Nothing  -> lift $ throwError $ "variable: "++show head++" not found in the environment."
-              Just ty' -> ty' =.= ty
-            return $ Spine head []
-            
-          cty (head,arg:rest) tyB = do
+      
+  Spine head args -> do
+    let chop mty [] = do
+          ty =.= mty
+          return []
+        chop mty (a:l) = case mty of 
+          Spine "#forall#" [ty', c] -> do
+            a <- checkType a ty'
+            (a:) <$> chop (rebuildSpine c [a]) l
+          _ -> do  
             x <- getNewWith "@xin"
-            tyB' <- getNewWith "@tyB'"
-            tyA  <- getNewWith "@tyA"
-            let tyB'ty = forall x (var tyA) atom
-            addToEnv (∃) tyA atom $ addToEnv (∃) tyB' tyB'ty $ do
-              arg <- checkType arg $ var tyA
-              Spine tyB' [arg] =.= tyB
-              v <- cty (head,rest) $ forall x (var tyA) $ Spine tyB' [var x]
-              return $ rebuildSpine v [arg]
+            z <- getNewWith "@zin"
+            tybody <- getNewWith "@v"
+            let tybodyty = forall z (var x) atom
+            addToEnv (∃) x atom $ addToEnv (∃) tybody tybodyty $ do 
+              a <- checkType a (var x)
+              v <- getNewWith "@v"
+              forall v (var x) (Spine tybody [var v]) =.= mty
+              (a:) <$> chop (Spine tybody [a]) l
+    mty <- (M.lookup head) <$> lift ask
+    
+    case mty of 
+      Nothing -> lift $ throwError $ "variable: "++show head++" not found in the environment."
+      Just ty' -> Spine head <$> chop ty' args
               
 test :: IO ()
 test = case runError $ (\(a,_,_) -> a) <$> runRWST run (M.fromList consts) 0 of
@@ -495,7 +501,7 @@ testGen s t = do
 typeInfer :: Constants -> (Name,Spine,Type) -> Choice Constants
 typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) 0) $ do
   (val,constraint) <- appendErr ("in name: "++ nm ++" : "++show val) $ 
-                      trace ("NAME: " ++nm) $ typeCheckToEnv $ checkType val ty
+                      trace ("Checking: " ++nm) $ typeCheckToEnv $ checkType val ty
   (sub,ctxt) <- runStateT (unify constraint) emptyContext
   
   

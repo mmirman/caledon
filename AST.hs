@@ -58,6 +58,10 @@ instance Show Spine where
   show (Spine "#imp_forall#" [_,Abs nm t t']) = "?["++nm++" : "++show t++"] "++show t'  
   show (Spine "#exists#" [_,Abs nm t t']) = "∃"++nm++" : "++show t++". "++show t' 
   show (Spine h t) = h++concatMap (\s -> " "++showWithParens s) t
+     where showWithParens t = if (case t of
+                          Abs{} -> True
+                          Spine _ lst -> not $ null lst
+                      ) then "("++show t++")" else show t 
   show (Abs nm ty t) = "λ "++nm++" : "++showWithParens ty++" . "++show t
 
 instance Show Predicate where
