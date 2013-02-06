@@ -1,9 +1,6 @@
 defn identity : atom -> atom
   as cons = {f : atom} f -> identity f
-{-
-defn getIdent : {f : atom} identity f -> f -> atom
-  as getIdentity = {f}{V:f} getIdent {f = f} (cons V) V
--}
+
 infixr 0 =:=
 
 defn =:= : {a : atom} a -> a -> atom
@@ -14,3 +11,6 @@ let getIdent : [f : atom] identity f -> f -> atom
 
  
 
+defn getIdent' : {f : atom} identity f -> f -> atom
+  as getIdentity = {f}{V:f} getIdent' {f = f} (cons V) V
+   | getIdentity2 = {f}{V:f} getIdent' (cons V) V

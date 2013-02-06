@@ -50,6 +50,7 @@ showWithParens t = if (case t of
                           Spine "#exists#" _ -> True
                           Spine "#imp_forall#" _ -> True
                           Spine "#ascribe#" _ -> True
+                          Spine "#tycon#" _ -> False
                           Spine _ _ -> False
                       ) then "("++show t++")" else show t 
 
@@ -64,11 +65,13 @@ instance Show Spine where
   show (Spine "#forall#" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " → " ++ show t'
   show (Spine "#forall#" [_,Abs nm t t']) = "["++nm++" : "++show t++"] "++show t'  
   show (Spine "#imp_forall#" [_,Abs nm t t']) = "{"++nm++" : "++show t++"} "++show t'  
+  show (Spine "#tycon#" [Spine nm [t]]) = "{"++nm++" = "++show t++"}"
   show (Spine "#exists#" [_,Abs nm t t']) = "∃"++nm++" : "++show t++". "++show t' 
   show (Spine nm (t:t':l)) | isOperator nm = "( "++showWithParens t++" "++nm++" "++ show t'++" )"++show (Spine "" l)
   show (Spine h l) = h++concatMap showWithParens' l
      where showWithParens' t = " "++if case t of
                           Abs{} -> True
+                          Spine "#tycon#" _ -> False
                           Spine _ lst -> not $ null lst
                       then "("++show t++")" else show t 
   show (Abs nm ty t) = "λ "++nm++" : "++showWithParens ty++" . "++show t

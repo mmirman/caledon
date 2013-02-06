@@ -408,9 +408,9 @@ left goal (x,target) = do
 
 checkType :: Spine -> Type -> TypeChecker Spine
 checkType sp ty = case sp of
-  Spine "#ascribe#" [t,v] -> do
-    t =.= ty
-    checkType v t
+  Spine "#ascribe#" (t:v:l) -> do
+    v <- checkType v t
+    checkType (rebuildSpine v l) ty
   
   Spine "#infer#" [_, Abs x tyA tyB ] -> do
     tyA <- checkType tyA atom
@@ -456,13 +456,19 @@ checkType sp ty = case sp of
     return $ exists x tyA tyB
     
   -- below are the only cases where bidirectional type checking is useful 
-  Abs x tyA sp -> do
-    e <- getNewWith "@e"
-    tyA <- checkType tyA atom
-    addToEnv (∃) e (forall x tyA atom) $ do
-      forall x tyA (Spine e [var x]) =.= ty
-      sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
-      return $ Abs x tyA sp
+  Abs x tyA sp -> case ty of
+    Spine "#forall#" [_, Abs x' tyA' tyF'] -> do
+      tyA <- checkType tyA atom
+      tyA =.= tyA'
+      addToEnv (∀) x tyA $ do
+        Abs x tyA <$> checkType sp (subst (x' |-> var x) tyF')
+    _ -> do
+      e <- getNewWith "@e"
+      tyA <- checkType tyA atom
+      addToEnv (∃) e (forall x tyA atom) $ do
+        forall x tyA (Spine e [var x]) =.= ty
+        sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
+        return $ Abs x tyA sp
 
   Spine head args -> do
     let chop mty [] = do
@@ -472,7 +478,8 @@ checkType sp ty = case sp of
           Spine "#imp_forall#" [ty', Abs nm _ tyv] -> case a of
             Spine "#tycon#" [Spine nm' [val]] | nm' == nm -> do
               val <- checkType val ty'
-              (Spine "#tycon#" [Spine nm' [val]]:) <$> chop (subst (nm |-> val) tyv) l
+--              (Spine "#tycon#" [Spine nm' [val]]:) <$> chop (subst (nm |-> val) tyv) l
+              chop (subst (nm |-> val) tyv) l              
             _ -> do
               x <- getNewWith "@xin"
               addToEnv (∃) x ty' $ 
