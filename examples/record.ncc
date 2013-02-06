@@ -1,0 +1,18 @@
+defn functor : (atom -> atom) -> atom
+  as functorImp = {f : atom -> atom} ({a : atom }{b : atom} (a -> b -> atom) -> f a -> f b -> atom) -> functor f
+
+defn fmap : {f} functor f => {a}{b} (a -> b -> atom) -> f a -> f b -> atom
+   as getFMap = {f : atom -> atom}{fm : {a}{b} (a -> b -> atom) -> f a -> f b -> atom}
+                {a : atom}{b : atom}{foo : a -> b -> atom}{fa : f a }{fb : f b }
+               fm foo fa fb -> fmap foo fa fb
+{-
+defn identity : atom -> atom
+  as cons = {a} a -> identity a
+
+defn mapIdentity : {a}{b} (a -> b -> atom) -> identity a -> identity b -> atom
+  as mapIdentityImp = {foo}{a}{b} foo a b -> mapIdentity foo (cons a) (cons b)
+
+
+let functorIdentity : functor identity
+ be functorImp mapIdentity
+-}
