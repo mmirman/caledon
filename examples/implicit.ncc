@@ -4,11 +4,11 @@ defn identity : atom -> atom
 defn getIdent : {f : atom} identity f -> f -> atom
   as getIdentity = {f}{V:f} getIdent {f = f} (cons V) V
 -}
-infix 1 =:=
+infixr 0 =:=
 
 defn =:= : {a : atom} a -> a -> atom
   as eq = [a : atom] a =:= a
 
 let getIdent : [f : atom] identity f -> f -> atom
- be (\f : atom . \id : identity f . \v : f . cons v =:= id
+ be \f : atom . \id : identity f . \v : f . ((=:=) {- : identity f -> identity f -> atom -}) (cons v) id
 
