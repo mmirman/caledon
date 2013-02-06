@@ -132,7 +132,8 @@ unifyEq a b = let cons = a :=: b in case (a,b) of
                 Right ty' -> traceName "-gc-" $ -- gvar-const
                   gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
                 Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> traceName "CANT: -gu-dep-" $ throwError $ "gvar-uvar-depends: "++show (a :=: b)
-                Left Binding{ elmQuant = Forall } | S.member x $ freeVariables yl -> traceName "CANT: -occ-" $ throwError $ "occurs check: "++show (a :=: b)
+                Left Binding{ elmQuant = Forall } | S.member x $ freeVariables y'l -> 
+                  traceName "CANT: -occ-" $ throwError $ "occurs check: "++show (a :=: b)
                 Left Binding{ elmQuant = Forall, elmType = ty' } ->traceName "-gui-" $  -- gvar-uvar-inside
                   gvar_uvar_inside (Spine x yl, ty) (Spine x' y'l, ty')
                 Left bind@Binding{ elmQuant = Exists, elmType = ty' } -> 
