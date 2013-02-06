@@ -96,17 +96,6 @@ letbe =  do
   val <- tipe
   return (Define nm val ty) <?> "definition"  
 
-pAtom :: Parser Spine
-pAtom =  do reserved "_"
-            nm <- getNextVar
-            nm' <- getNextVar
-            return $ infer nm atom $ infer nm' (var nm) $ var nm'
-     <|> do r <- idVar
-            return $ var r
-     <|> do r <- identifier
-            return $ var r
-     <|> (parens tipe)
-     <?> "atom"
 
 
 
@@ -118,6 +107,9 @@ decPred = (operator <|> getId lower, "=")
 
 idVar :: Parser String
 idVar = getId $ upper <|> char '\''
+
+decVar :: (Parser String, String)
+decVar = (idVar <|> getId lower, "=")
 
 decAnon :: (Parser String, String)
 decAnon = (getId $ letter <|> char '\'' , ":")
@@ -149,7 +141,8 @@ tmpState nm m = do
 
 
 table :: OperatorTable String ParseState Identity Type
-table = [ [ binary (reservedOp "->" <|> reservedOp "→") (forall) AssocRight
+table = [ [lam]
+          , [ binary (reservedOp "->" <|> reservedOp "→") (forall) AssocRight
           , binary (reservedOp "=>" <|> reservedOp "⇒") (imp_forall) AssocRight
           ]
         , [ binary (reservedOp "<-" <|> reservedOp "←") (flip . forall) AssocLeft
@@ -159,7 +152,12 @@ table = [ [ binary (reservedOp "->" <|> reservedOp "→") (forall) AssocRight
   where binary name fun = Infix $ do 
           name
           fun <$> getNextVar
-
+        lam = Postfix $ do
+          reservedOp "λ" <|> reservedOp "\\"
+          (nm,tp) <- parens anonNamed <|> anonNamed
+          reservedOp "."
+          return $ Abs nm tp
+          
 tipe = do
   FixityTable left none right <- currentTable <$> getState 
   
@@ -186,17 +184,36 @@ tipe = do
         return $ \a b -> Spine nm [a , b])
         
   buildExpressionParser (table++table') tiper
+
+pAtom :: Parser Spine
+pAtom =  do reserved "_"
+            nm <- getNextVar
+            nm' <- getNextVar
+            return $ infer nm atom $ infer nm' (var nm) $ var nm'
+     <|> do r <- idVar
+            return $ var r
+     <|> do r <- identifier
+            return $ var r
+     <?> "atom"
   
+pArg = pAtom <|> (do 
+  braces $ do
+    (nm,ty) <- named decVar
+    return $ Spine "#tycon#" [Spine nm [ty]])
+  
+trm = do reservedOp "λ" <|> reservedOp "\\"
+         (nm,tp) <- parens anonNamed <|> anonNamed
+         reservedOp "."
+         tp' <- tmpState nm $ trm
+         return $ Abs nm tp tp' 
+   <|> do t <- pAtom <|> parens trm
+          tps <- many $ pArg <|> parens trm <|> parens tipe
+          return $ rebuildSpine t tps
+   <|> parens tipe
+   <?> "term"
+   
 tiper :: Parser Type
-tiper = (  parens tipe
-    <|> do reservedOp "λ" <|> reservedOp "\\"
-           (nm,tp) <- parens anonNamed <|> anonNamed
-           reservedOp "."
-           tp' <- tmpState nm tipe
-           return $ Abs nm tp tp'
-    <|> do t <- pAtom
-           tps <- many $ parens tipe <|> pAtom
-           return $ rebuildSpine t tps
+tiper = trm
     <|> do (nm,tp) <- brackets anonNamed
            tp' <- tmpState nm tipe
            return $ forall nm tp tp'
@@ -216,26 +233,24 @@ tiper = (  parens tipe
            reservedOp "."
            tp' <- tmpState nm tipe
            return $ exists nm tp tp'
-           
     <|> do reservedOp "?∀" <|> reserved "?forall"
            (nm,tp) <- parens anonNamed <|> anonNamed
            reservedOp "."
            tp' <- tmpState nm tipe
            return $ imp_forall nm tp tp'           
-
     <|> do reservedOp "??" <|> reserved "infer"
            (nm,tp) <- parens anonNamed <|> anonNamed
            reservedOp "."
            tp' <- tmpState nm tipe
            return $ infer nm tp tp'           
-    <?> "type")
+    <?> "type"
 
 
 reservedOperators = ["->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", 
                      "\\", "?\\", 
                      "λ","?λ", 
                      "∀", "?∀", 
-                     "?",
+                     "?", 
                      "??", "∃", ".", "=", 
                      ":", ";", "|"]
 identStartOps = "_'-/"                     

@@ -106,7 +106,7 @@ unify cons = do
   uniWhile constraints
 
            
-traceName = trace
+traceName _ = id
 
 unifyEq :: Spine -> Spine -> WithContext (Maybe (Substitution , Constraint))
 unifyEq a b = let cons = a :=: b in case (a,b) of 
@@ -463,10 +463,14 @@ checkType sp ty = case sp of
           ty =.= mty
           return []
         chop mty (a:l) = case mty of 
-          Spine "#imp_forall#" [ty', Abs nm _ tyv] -> do
-            x <- getNewWith "@xin"
-            addToEnv (∃) x ty' $ 
-              chop (subst (nm |-> var x) tyv) (a:l)
+          Spine "#imp_forall#" [ty', Abs nm _ tyv] -> case a of
+            Spine "#tycon#" [Spine nm' [val]] | nm' == nm -> do
+              val <- checkType val ty'
+              (Spine "#tycon#" [Spine nm' [val]]:) <$> chop (subst (nm |-> val) tyv) l
+            _ -> do
+              x <- getNewWith "@xin"
+              addToEnv (∃) x ty' $ 
+                chop (subst (nm |-> var x) tyv) (a:l)
           Spine "#forall#" [ty', c] -> do
             a <- checkType a ty'
             (a:) <$> chop (rebuildSpine c [a]) l
