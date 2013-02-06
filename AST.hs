@@ -51,11 +51,17 @@ showWithParens t = if (case t of
                           Spine _ _ -> False
                       ) then "("++show t++")" else show t 
 
+isOperator ('#':l) = False
+isOperator (a:l) = not $ elem a ('_':['a'..'z']++['A'..'Z'])
+
+
 instance Show Spine where
   show (Spine "#infer#" [_, Abs nm t t']) = "<"++nm++" : "++show t++"> "++show t'
+  show (Spine nm [t , t']) | isOperator nm = showWithParens t++" "++nm++" "++ show t'
+  
   show (Spine "#forall#" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " → " ++ show t'
   show (Spine "#forall#" [_,Abs nm t t']) = "["++nm++" : "++show t++"] "++show t'  
-  show (Spine "#imp_forall#" [_,Abs nm t t']) = "?["++nm++" : "++show t++"] "++show t'  
+  show (Spine "#imp_forall#" [_,Abs nm t t']) = "{"++nm++" : "++show t++"} "++show t'  
   show (Spine "#exists#" [_,Abs nm t t']) = "∃"++nm++" : "++show t++". "++show t' 
   show (Spine h t) = h++concatMap (\s -> " "++showWithParens s) t
      where showWithParens t = if (case t of
@@ -70,7 +76,7 @@ instance Show Predicate where
     "defn " ++ nm ++ " : " ++ show ty ++ "\n" ++ "  as " ++ showSingle a ++ concatMap (\x-> "\n   | " ++ showSingle x) cons ++ ";"
       where showSingle (nm,ty) = nm ++ " = " ++ show ty
   show (Query nm val) = "query " ++ nm ++ " = " ++ show val
-  show (Define nm val ty) = "defn " ++ nm ++ " : " ++ show ty ++"\n by "++show ty
+  show (Define nm val ty) = "let " ++ nm ++ " : " ++ show ty ++"\n be "++show val
                                                
 var nm = Spine nm []
 atom = var "atom"
@@ -116,7 +122,11 @@ instance Subst Spine where
     case s ! nm of
       Just nm -> rebuildSpine nm apps'
       _ -> Spine nm apps'
-
+instance Subst Predicate where
+  subst sub (Predicate nm ty cons) = Predicate nm (subst sub ty) ((\(nm,t) -> (nm,subst sub t)) <$> cons)
+  subst sub (Query nm ty) = Query nm (subst sub ty)
+  subst sub (Define nm val ty) = Define nm (subst sub val) (subst sub ty)
+  
 class FV a where         
   freeVariables :: a -> S.Set Name
 instance (FV a, F.Foldable f) => FV (f a) where

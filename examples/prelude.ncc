@@ -1,3 +1,6 @@
+let imp : [a : atom] [b : atom] atom
+ be \a : atom . \b : atom . [ha : a] b
+
 defn num  : atom
   as zero = num
    | succ = num → num

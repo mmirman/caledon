@@ -100,17 +100,21 @@ unify cons = do
       uniWhile [] = return mempty
       uniWhile l = do 
         (sub,l') <- uniOne l []
-          
         modify $ subst sub
         (sub ***) <$> uniWhile l'
       
   uniWhile constraints
 
            
-traceName _ = id
+traceName = trace
 
 unifyEq :: Spine -> Spine -> WithContext (Maybe (Substitution , Constraint))
 unifyEq a b = let cons = a :=: b in case (a,b) of 
+  (Spine "#imp_forall#" [_, Abs a ty l], b) -> traceName "-implicit-" $ do
+    return $ Just (mempty,  (∃) a ty $ l :=: b)
+  (b, Spine "#imp_forall#" [_, Abs a ty l]) -> traceName "-implicit-" $ do
+    return $ Just (mempty,  (∃) a ty $ b :=: l)
+  
   (Abs nm ty s , Abs nm' ty' s') -> traceName "-aa-" $ do
     return $ Just (mempty, ty :=: ty' :&: (Bind Forall nm ty $ s :=: subst (nm' |-> var nm) s'))
   (Abs nm ty s , s') -> traceName "-as-" $ do
@@ -313,6 +317,10 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
   return $ Just (sub, subst sub $ a :=: b)
 
 gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
+-- AEEAEE
+-- EEEEAA
+--  (-> S)EEEAA 
+--  (-> S)EEAA 
 
 --------------------
 --- proof search ---  
@@ -403,7 +411,6 @@ checkType sp ty = case sp of
     x' <- getNewWith "@inf"
     addToEnv (∃) x' tyA $ do
       checkType (subst (x |-> var x') tyB) ty
-  
 
   Spine "#pack#" [tp, Abs imp _ interface, tau, e] -> do
     tp <- checkType tp atom    
@@ -450,12 +457,16 @@ checkType sp ty = case sp of
       forall x tyA (Spine e [var x]) =.= ty
       sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
       return $ Abs x tyA sp
-      
+
   Spine head args -> do
     let chop mty [] = do
           ty =.= mty
           return []
         chop mty (a:l) = case mty of 
+          Spine "#imp_forall#" [ty', Abs nm _ tyv] -> do
+            x <- getNewWith "@xin"
+            addToEnv (∃) x ty' $ 
+              chop (subst (nm |-> var x) tyv) (a:l)
           Spine "#forall#" [ty', c] -> do
             a <- checkType a ty'
             (a:) <$> chop (rebuildSpine c [a]) l
@@ -497,7 +508,7 @@ testGen s t = do
 ----------------------
 --- type inference ---
 ----------------------
-          
+    
 typeInfer :: Constants -> (Name,Spine,Type) -> Choice Constants
 typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) 0) $ do
   (val,constraint) <- appendErr ("in name: "++ nm ++" : "++show val) $ 
@@ -507,13 +518,15 @@ typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envCon
   
   return $ M.insert nm (subst sub val) env
   
+
 ----------------------------
 --- the public interface ---
 ----------------------------
-typeCheckAxioms :: [(Name,Name,Spine,Type)] -> Choice Constants
+typeCheckAxioms :: [(Maybe Name,Name,Spine,Type)] -> Choice Constants
 typeCheckAxioms lst = do
-  forM lst $ \(fam,_,val,_) -> 
-    unless (getFamily val == fam) $ throwError $ "not the right family: need "++show fam++" for "++show val
+  forM lst $ \(fam,_,val,_) -> case fam of
+    Just fam -> unless (getFamily val == fam) $ throwError $ "not the right family: need "++show fam++" for "++show val
+    Nothing -> return ()
   
   let toplst = topoSortAxioms $ map (\(_,a,b,t) -> (a,b,t)) lst
         
@@ -521,9 +534,9 @@ typeCheckAxioms lst = do
 
 typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = do
-  let toAxioms (Predicate nm ty cs) = ("atom",nm,ty,atom):map (\(nm',ty') -> (nm,nm',ty',atom)) cs
-      toAxioms (Query nm val) = [(getFamily val, nm,val,infer "x" atom (var "x"))]
-      toAxioms (Define nm val ty) = [(getFamily ty, nm,ty,atom), (getFamily val, "#val#"++nm,val,ty)]
+  let toAxioms (Predicate nm ty cs) = (Just "atom",nm,ty,atom):map (\(nm',ty') -> (Just nm,nm',ty',atom)) cs
+      toAxioms (Query nm val) = [(Just $ getFamily val, nm,val,infer "x" atom (var "x"))]
+      toAxioms (Define nm val ty) = [(Just $ getFamily ty, nm,ty,atom), (Nothing, "#val#"++nm,val,ty)]
   tyMap <- typeCheckAxioms (concatMap toAxioms preds)
   
   let newPreds (Predicate nm _ cs) = Predicate nm (tyMap M.! nm) $ map (\(nm,_) -> (nm,tyMap M.! nm)) cs

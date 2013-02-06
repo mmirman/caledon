@@ -24,19 +24,26 @@ checkAndRun decs = do
   decs <- case runError $ typeCheckAll decs of
     Left e -> error e
     Right e -> putStrLn "Type checking success!" >> return e
-  let (predicates, targets) = flip partition decs $ \x -> case x of
+  let (defs,others)  = flip partition decs $ \x -> case x of
+        Define {} -> True
+        _ -> False
+      
+      sub = subst $ foldr (\a r -> r *** (predName a |-> subst r (predValue a))) mempty defs
+      (predicates, targets) = flip partition others $ \x -> case x of
         Predicate {} -> True
         _ -> False
 
   putStrLn "\nAXIOMS: "
-  forM_ predicates $ \s -> putStrLn $ show s++"\n"
+  forM_ (defs++predicates) $ \s -> putStrLn $ show s++"\n"
 
   putStrLn "\nTARGETS: "
   forM_ targets $ \s -> putStrLn $ show s++"\n"
 
   let allTypes c = (predName c, predType c):predConstructors c
-  forM_ targets $ \target ->
-    case solver (concatMap allTypes predicates) $ predType target of
+      predicates' = sub predicates
+      targets' = sub targets
+  forM_ targets' $ \target ->
+    case solver (concatMap allTypes predicates') $ predType target of
       Left e -> putStrLn $ "ERROR: "++e
       Right sub -> putStrLn $
                    "\nTARGET: \n"++show target
@@ -49,7 +56,7 @@ main = do
     [] -> putStrLn "No file specified. Usage is \"caledon file.ncc\""
     [fname] -> do
       file <- readFile fname
-      let mError = runP decls (ParseState 0 mempty) fname file
+      let mError = runP decls (ParseState 0 mempty emptyTable) fname file
       decs <- case mError of
         Left e -> error $ show e
         Right l -> return l

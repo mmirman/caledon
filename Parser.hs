@@ -13,6 +13,7 @@ import Text.Parsec
 import Control.Monad (unless)
 import Text.Parsec.Language (haskellDef)
 import Text.Parsec.Expr
+import Data.List
 import Data.Maybe
 import qualified Text.Parsec.Token as P
 import qualified Data.Set as S
@@ -21,7 +22,7 @@ import qualified Data.Set as S
 -------------------------- PARSER -------------------------------------
 -----------------------------------------------------------------------
 
-data ParseState = ParseState { currentVar :: Integer, currentSet :: S.Set Name }
+data ParseState = ParseState { currentVar :: Integer, currentSet :: S.Set Name, currentTable :: FixityTable }
 
 type Parser = ParsecT String ParseState Identity
 
@@ -40,9 +41,33 @@ getNextVar = do
 decls :: Parser [Predicate]
 decls = do
   whiteSpace
-  lst <- many (query <|> defn <?> "declaration")
+  lst <- many (topLevel <?> "declaration")
   eof
   return lst
+
+topLevel = fixityDef <|> query <|> defn <|> letbe
+
+data Fixity = FixLeft | FixRight | FixNone
+
+data FixityTable = FixityTable { fixityLeft :: [(Integer,String)] 
+                               , fixityNone :: [(Integer, String)]
+                               , fixityRight :: [(Integer, String)]
+                               } deriving (Show)
+
+emptyTable = FixityTable [] [] []
+
+fixityDef = do 
+  -- I wish template haskell worked with record wild cards!
+  (setFixity) <- (reserved "infixl" >> return (\b c -> b { fixityLeft = c $ fixityLeft b} )) 
+             <|> (reserved "infix" >> return (\b c -> b { fixityNone = c $ fixityNone b}))
+             <|> (reserved "infixr" >> return (\b c -> b { fixityRight = c $ fixityRight b}))
+  n <- integer
+  op <- operator
+  
+  let modify = insertBy (\(n,_) (m,_) -> compare n m) (n,op)
+  modifyState $ \b -> b { currentTable = setFixity (currentTable b) modify }
+  topLevel
+  
 
 query :: Parser Predicate
 query = do
@@ -62,56 +87,34 @@ defn =  do
       none = do optional semi
                 return $ Predicate nm ty []
   more <|> none <?> "definition"
+  
+letbe :: Parser Predicate
+letbe =  do
+  reserved "let"
+  (nm,ty) <- named decTipe
+  reserved "be"
+  val <- tipe
+  return (Define nm val ty) <?> "definition"  
 
 pAtom :: Parser Spine
 pAtom =  do reserved "_"
             nm <- getNextVar
-            mp <- currentSet <$> getState
-            return $ Spine nm $ var <$> S.toList mp
+            nm' <- getNextVar
+            return $ infer nm atom $ infer nm' (var nm) $ var nm'
      <|> do r <- idVar
             return $ var r
      <|> do r <- identifier
-            mp <- currentSet <$> getState
             return $ var r
-
      <|> (parens tipe)
      <?> "atom"
 
-trm :: Parser Term
-trm =     parens trm
---   <|> Spine "#open#" <$> (:[]) <$> angles trm
-          
-   <|> do reservedOp "λ" <|> reservedOp "\\"
-          (nm,tp) <- parens anonNamed <|> anonNamed
-          reservedOp "."
-          tp' <- tmpState nm trm
-          return $ Abs nm tp tp'
-{-   <|> do reservedOp "?λ" <|> reservedOp "?\\"
-          (nm,tp) <- parens anonNamed <|> anonNamed
-          reservedOp "."
-          tp' <- tmpState nm trm
-          return $ AbsImp nm tp tp' -}
-   <|> do t <- pAtom
-          tps <- many $ parens tipe <|> pAtom
-          return $ rebuildSpine t tps
-   <?> "term"
 
-
-table :: OperatorTable String ParseState Identity Type
-table = [ [ binary (reservedOp "->" <|> reservedOp "→") (~>) AssocRight
-          , binary (reservedOp "=>" <|> reservedOp "⇒") (imp_forall "") AssocRight
-          ]
-        , [ binary (reservedOp "<-" <|> reservedOp "←") (flip (~>)) AssocLeft
-          , binary (reservedOp "<=" <|> reservedOp "⇐") (flip $ imp_forall "") AssocLeft 
-          ]
-        ]
-  where binary name fun = Infix (name >> return fun)
 
 decTipe :: (Parser String, String)
-decTipe = (getId lower, ":")
+decTipe = (operator <|> getId lower, ":")
 
 decPred :: (Parser String, String)
-decPred = (getId lower, "=")
+decPred = (operator <|> getId lower, "=")
 
 idVar :: Parser String
 idVar = getId $ upper <|> char '\''
@@ -144,29 +147,75 @@ tmpState nm m = do
   unless b $ modifyState $ modifySet $ S.delete nm
   return r
 
-tipe :: Parser Type
-tipe = buildExpressionParser table (
-        parens tipe
-    <|> trm
+
+table :: OperatorTable String ParseState Identity Type
+table = [ [ binary (reservedOp "->" <|> reservedOp "→") (forall) AssocRight
+          , binary (reservedOp "=>" <|> reservedOp "⇒") (imp_forall) AssocRight
+          ]
+        , [ binary (reservedOp "<-" <|> reservedOp "←") (flip . forall) AssocLeft
+          , binary (reservedOp "<=" <|> reservedOp "⇐") (flip . imp_forall) AssocLeft 
+          ]
+        ]
+  where binary name fun = Infix $ do 
+          name
+          fun <$> getNextVar
+
+tipe = do
+  FixityTable left none right <- currentTable <$> getState 
+  
+  let getSnd [] = []
+      getSnd (a:l) = l
+      getFst (a:l) = a
+      getFst [] = []
+                  
+      union [] [] [] = []
+      union l1 l2 l3 = (getFst l1++getFst l2++getFst l3):union (getSnd l1) (getSnd l2) (getSnd l3)
+      
+      reify ((a,op):(a',op'):l) r | a == a' = reify ((a',op'):l) (op:r)
+      reify ((a,op):l) r = (op:r):reify l []
+      reify [] [] = []
+      reify [] r = [r]
+      
+      table' = union 
+              (reify (binary AssocLeft  <$> left) []) 
+              (reify (binary AssocNone  <$> none) []) 
+              (reify (binary AssocRight <$> right) [])
+      
+      binary assoc (v,nm) = (v,flip Infix assoc $ do
+        reservedOp nm
+        return $ \a b -> Spine nm [a , b])
+        
+  buildExpressionParser (table++table') tiper
+  
+tiper :: Parser Type
+tiper = (  parens tipe
+    <|> do reservedOp "λ" <|> reservedOp "\\"
+           (nm,tp) <- parens anonNamed <|> anonNamed
+           reservedOp "."
+           tp' <- tmpState nm tipe
+           return $ Abs nm tp tp'
+    <|> do t <- pAtom
+           tps <- many $ parens tipe <|> pAtom
+           return $ rebuildSpine t tps
     <|> do (nm,tp) <- brackets anonNamed
            tp' <- tmpState nm tipe
            return $ forall nm tp tp'
-    <|> do (nm,tp) <- reservedOp "?" >> brackets anonNamed
-           tp' <- tmpState nm tipe
-           return $ imp_forall nm tp tp'
     <|> do (nm,tp) <- braces anonNamed
            tp' <- tmpState nm tipe
-           return $ exists nm tp tp' 
-           
+           return $ imp_forall nm tp tp'
     <|> do (nm,tp) <- angles anonNamed
            tp' <- tmpState nm tipe
            return $ infer nm tp tp'
-           
     <|> do reservedOp "∀" <|> reserved "forall"
            (nm,tp) <- parens anonNamed <|> anonNamed
            reservedOp "."
            tp' <- tmpState nm tipe
            return $ forall nm tp tp'
+    <|> do reservedOp "∃" <|> reserved "exists"
+           (nm,tp) <- parens anonNamed <|> anonNamed
+           reservedOp "."
+           tp' <- tmpState nm tipe
+           return $ exists nm tp tp'
            
     <|> do reservedOp "?∀" <|> reserved "?forall"
            (nm,tp) <- parens anonNamed <|> anonNamed
@@ -181,23 +230,32 @@ tipe = buildExpressionParser table (
            return $ infer nm tp tp'           
     <?> "type")
 
-P.TokenParser{..} = P.makeTokenParser mydef
+
+reservedOperators = ["->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", 
+                     "\\", "?\\", 
+                     "λ","?λ", 
+                     "∀", "?∀", 
+                     "?",
+                     "??", "∃", ".", "=", 
+                     ":", ";", "|"]
+identStartOps = "_'-/"                     
+                    
+reservedNames = ["defn", "as", "query"    
+                , "forall", "exists", "?forall"
+                , "_" , "infer", "let"
+                , "be", "infixl", "infixr", "infix"]
 
 mydef :: P.GenLanguageDef String ParseState Identity
 mydef = haskellDef
   { P.identStart = lower
-  , P.identLetter = alphaNum <|> oneOf "_'-/"
-  , P.reservedNames = ["defn", "as", "query", "forall", "exists", "?forall", "_", "infer"]
+  , P.identLetter = alphaNum <|> oneOf identStartOps
+  , P.reservedNames = reservedNames
   , P.caseSensitive = True
-  , P.reservedOpNames = ["->", "=>", "<=", 
-                         "⇐", "⇒", "→", "<-", 
-                         "←", ":", "|", 
-                         "\\", "?\\", 
-                         "λ","?λ", 
-                         "∀", "?∀", 
-                         "?",
-                         "??", "∃", "."]
+  , P.reservedOpNames = reservedOperators
+  , P.opStart = noneOf $ "# \n\t\r\f\v"++['a'..'z']++['A'..'Z']
+  , P.opLetter = noneOf $ " \n\t\r\f\v"++['a'..'z']++['A'..'Z']
   }
+P.TokenParser{..} = P.makeTokenParser mydef
 
 getId :: Parser Char -> Parser String
 getId start = P.identifier $ P.makeTokenParser mydef { P.identStart = start }
