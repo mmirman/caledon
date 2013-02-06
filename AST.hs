@@ -48,26 +48,29 @@ showWithParens t = if (case t of
                           Spine "#infer#" _ -> True
                           Spine "#forall#" _ -> True
                           Spine "#exists#" _ -> True
+                          Spine "#imp_forall#" _ -> True
+                          Spine "#ascribe#" _ -> True
                           Spine _ _ -> False
                       ) then "("++show t++")" else show t 
 
+isOperator [] = False
 isOperator ('#':l) = False
-isOperator (a:l) = not $ elem a ('_':['a'..'z']++['A'..'Z'])
+isOperator (a:l) = not $ elem a ('_':['a'..'z']++['A'..'Z']++['0'..'9'])
 
 
 instance Show Spine where
   show (Spine "#infer#" [_, Abs nm t t']) = "<"++nm++" : "++show t++"> "++show t'
-  show (Spine nm [t , t']) | isOperator nm = showWithParens t++" "++nm++" "++ show t'
-  
+  show (Spine "#ascribe#" (ty:v:l)) = "( "++showWithParens v++ " : " ++ show ty++" ) "++show (Spine "" l)  
   show (Spine "#forall#" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " → " ++ show t'
   show (Spine "#forall#" [_,Abs nm t t']) = "["++nm++" : "++show t++"] "++show t'  
   show (Spine "#imp_forall#" [_,Abs nm t t']) = "{"++nm++" : "++show t++"} "++show t'  
   show (Spine "#exists#" [_,Abs nm t t']) = "∃"++nm++" : "++show t++". "++show t' 
-  show (Spine h t) = h++concatMap (\s -> " "++showWithParens s) t
-     where showWithParens t = if (case t of
+  show (Spine nm (t:t':l)) | isOperator nm = "( "++showWithParens t++" "++nm++" "++ show t'++" )"++show (Spine "" l)
+  show (Spine h l) = h++concatMap showWithParens' l
+     where showWithParens' t = " "++if case t of
                           Abs{} -> True
                           Spine _ lst -> not $ null lst
-                      ) then "("++show t++")" else show t 
+                      then "("++show t++")" else show t 
   show (Abs nm ty t) = "λ "++nm++" : "++showWithParens ty++" . "++show t
 
 instance Show Predicate where
@@ -80,6 +83,7 @@ instance Show Predicate where
                                                
 var nm = Spine nm []
 atom = var "atom"
+ascribe a t = Spine ("#ascribe#") [t, a]
 forall x tyA v = Spine ("#forall#") [tyA, Abs x tyA v]
 imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
 exists x tyA v = Spine ("#exists#") [tyA, Abs x tyA v]
@@ -239,6 +243,7 @@ instance RegenAbsVars Spine where
  
 
 consts = [ ("atom", atom)
+         , ("#ascribe#", forall "a" atom $ (var "a") ~> (var "a"))
          , ("#infer#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)

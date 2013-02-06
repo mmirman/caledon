@@ -169,7 +169,7 @@ tipe = do
         return (nm,fromMaybe (infer nm' atom $ infer nm'' (var nm') $ var nm'') ty)
 
   
-      binary name fun = Infix $ do 
+      binary fun assoc name = flip Infix assoc $ do 
         name
         fun <$> getNextVar
         
@@ -183,18 +183,19 @@ tipe = do
                    (parens anonNamed <|> anonNamed)
         return $ out nm tp
       
-      
-      table = [ [ altPostfix ["λ", "\\"] "lambda" Abs
+      table = [ [ binary (const ascribe) AssocNone $ reservedOp ":"
+                ]
+              , [ altPostfix ["λ", "\\"] "lambda" Abs
                 , altPostfix ["∃"] "exists" exists
                 , regPostfix angles ["??"] "infer" infer
                 , regPostfix brackets ["∀"] "forall" forall
                 , regPostfix braces ["?∀"] "?forall" imp_forall
                 ]
-              , [ binary (reservedOp "->" <|> reservedOp "→") (forall) AssocRight
-                , binary (reservedOp "=>" <|> reservedOp "⇒") (imp_forall) AssocRight
+              , [ binary forall AssocRight $ reservedOp "->" <|> reservedOp "→" 
+                , binary imp_forall AssocRight $ reservedOp "=>" <|> reservedOp "⇒"
                 ]
-              , [ binary (reservedOp "<-" <|> reservedOp "←") (flip . forall) AssocLeft
-                , binary (reservedOp "<=" <|> reservedOp "⇐") (flip . imp_forall) AssocLeft 
+              , [ binary (flip . forall) AssocLeft $ reservedOp "<-" <|> reservedOp "←"
+                , binary (flip . imp_forall) AssocLeft $ reservedOp "<=" <|> reservedOp "⇐" 
                 ]
               ]
              ++union [ reify (binaryOther AssocLeft  <$> left) [] 
@@ -211,24 +212,22 @@ tipe = do
       unary fix (v,nm) = (v,fix $ do
         reservedOp nm
         return $ \a -> Spine nm [a])
-  
 
       ptipe = buildExpressionParser (reverse $ table) $ trm
-
-      trm =  do t <- pAtom <|> parens ptipe
+      
+      trm =  do t <- try pAtom <|> (parens ptipe)
                 tps <- many $ try pArg <|> parens ptipe
                 return $ rebuildSpine t tps
          <|> ptipe
          <?> "term"
 
       pOp = do operators <- currentOps <$> getState 
-               choice $ flip map operators $ \nm -> do reservedOp nm 
+               choice $ flip map operators $ \nm -> do reserved nm 
                                                        return $ var nm
          <|> parens pOp
          <?> "operator"
       pAtom = try (parens pOp) <|> pAt
-      pAt =  parens pAt
-           
+      pAt   = parens pAt
            <|> do reserved "_"
                   nm <- getNextVar
                   nm' <- getNextVar

@@ -327,6 +327,7 @@ gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
 --------------------
 
 getFamily (Spine "#infer#" [_, Abs _ _ lm]) = getFamily lm
+getFamily (Spine "#ascribe#"  (_:v:l)) = getFamily v
 getFamily (Spine "#forall#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#imp_forall#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#exists#" [_, Abs _ _ lm]) = getFamily lm
@@ -406,6 +407,10 @@ left goal (x,target) = do
 
 checkType :: Spine -> Type -> TypeChecker Spine
 checkType sp ty = case sp of
+  Spine "#ascribe#" [t,v] -> do
+    t =.= ty
+    checkType v t
+  
   Spine "#infer#" [_, Abs x tyA tyB ] -> do
     tyA <- checkType tyA atom
     x' <- getNewWith "@inf"
