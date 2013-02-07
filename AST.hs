@@ -46,6 +46,7 @@ getNewWith s = (++s) <$> getNew
 showWithParens t = if (case t of
                           Abs{} -> True
                           Spine "#infer#" _ -> True
+                          Spine "#imp_abs#" _ -> True
                           Spine "#forall#" _ -> True
                           Spine "#exists#" _ -> True
                           Spine "#imp_forall#" _ -> True
@@ -67,6 +68,7 @@ instance Show Spine where
   show (Spine "#imp_forall#" [_,Abs nm t t']) = "{"++nm++" : "++show t++"} "++show t'  
   show (Spine "#tycon#" [Spine nm [t]]) = "{"++nm++" = "++show t++"}"
   show (Spine "#exists#" [_,Abs nm t t']) = "∃"++nm++" : "++show t++". "++show t' 
+  show (Spine "#imp_abs#" [_, Abs nm ty t]) = "?λ "++nm++" : "++showWithParens ty++" . "++show t
   show (Spine nm (t:t':l)) | isOperator nm = "( "++showWithParens t++" "++nm++" "++ show t'++" )"++show (Spine "" l)
   show (Spine h l) = h++concatMap showWithParens' l
      where showWithParens' t = " "++if case t of
@@ -93,6 +95,7 @@ exists x tyA v = Spine ("#exists#") [tyA, Abs x tyA v]
 pack e tau imp tp interface = Spine "#pack#" [tp, Abs imp tp interface, tau, e]
 open cl (imp,ty) (p,iface) cty inexp = Spine "#open#" [cl, ty,Abs imp ty iface, Abs imp ty (Abs p iface cty), Abs imp ty (Abs p iface inexp)] 
 infer x tyA v = Spine ("#infer#") [tyA, Abs x tyA v]
+imp_abs x tyA v = Spine ("#imp_abs#") [tyA, Abs x tyA v]
 ---------------------
 ---  substitution ---
 ---------------------

@@ -186,6 +186,7 @@ tipe = do
       table = [ [ binary (const ascribe) AssocNone $ reservedOp ":"
                 ]
               , [ altPostfix ["λ", "\\"] "lambda" Abs
+                , altPostfix ["?λ", "?\\"] "?lambda" imp_abs
                 , altPostfix ["∃"] "exists" exists
                 , regPostfix angles ["??"] "infer" infer
                 , regPostfix brackets ["∀"] "forall" forall

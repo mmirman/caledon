@@ -110,10 +110,15 @@ traceName _ = id
 
 unifyEq :: Spine -> Spine -> WithContext (Maybe (Substitution , Constraint))
 unifyEq a b = let cons = a :=: b in case (a,b) of 
-  (Spine "#imp_forall#" [_, Abs a ty l], b) -> traceName "-implicit-" $ do
+  (Spine "#imp_forall#" [_, Abs a ty l], b) -> traceName "-imp_forall-" $ do
     return $ Just (mempty,  (∃) a ty $ l :=: b)
-  (b, Spine "#imp_forall#" [_, Abs a ty l]) -> traceName "-implicit-" $ do
+  (b, Spine "#imp_forall#" [_, Abs a ty l]) -> traceName "-imp_forall-" $ do
     return $ Just (mempty,  (∃) a ty $ b :=: l)
+    
+  (Spine "#imp_abs#" [_, Abs a ty l], b) -> traceName "-imp_abs-" $ do
+    return $ Just (mempty, (∃) a ty $ l :=: b)
+  (b, Spine "#imp_abs#" [_, Abs a ty l]) -> traceName "-imp_abs-" $ do
+    return $ Just (mempty, (∃) a ty $ b :=: l)    
   
   (Abs nm ty s , Abs nm' ty' s') -> traceName "-aa-" $ do
     return $ Just (mempty, ty :=: ty' :&: (Bind Forall nm ty $ s :=: subst (nm' |-> var nm) s'))
@@ -456,6 +461,20 @@ checkType sp ty = case sp of
     return $ exists x tyA tyB
     
   -- below are the only cases where bidirectional type checking is useful 
+  Spine "#imp_abs#" [_, Abs x tyA sp] -> case ty of
+    Spine "#imp_forall#" [_, Abs x' tyA' tyF'] -> do
+      tyA <- checkType tyA atom
+      tyA =.= tyA'
+      addToEnv (∀) x tyA $ do
+        imp_abs x tyA <$> checkType sp (subst (x' |-> var x) tyF')
+    _ -> do
+      e <- getNewWith "@e"
+      tyA <- checkType tyA atom
+      addToEnv (∃) e (forall x tyA atom) $ do
+        imp_forall x tyA (Spine e [var x]) =.= ty
+        sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
+        return $ imp_abs x tyA sp
+
   Abs x tyA sp -> case ty of
     Spine "#forall#" [_, Abs x' tyA' tyF'] -> do
       tyA <- checkType tyA atom
@@ -474,16 +493,17 @@ checkType sp ty = case sp of
     let chop mty [] = do
           ty =.= mty
           return []
+          
         chop mty (a:l) = case mty of 
           Spine "#imp_forall#" [ty', Abs nm _ tyv] -> case a of
             Spine "#tycon#" [Spine nm' [val]] | nm' == nm -> do
               val <- checkType val ty'
---              (Spine "#tycon#" [Spine nm' [val]]:) <$> chop (subst (nm |-> val) tyv) l
               chop (subst (nm |-> val) tyv) l              
             _ -> do
               x <- getNewWith "@xin"
               addToEnv (∃) x ty' $ 
                 chop (subst (nm |-> var x) tyv) (a:l)
+                
           Spine "#forall#" [ty', c] -> do
             a <- checkType a ty'
             (a:) <$> chop (rebuildSpine c [a]) l
@@ -531,7 +551,6 @@ typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envCon
   (val,constraint) <- appendErr ("in name: "++ nm ++" : "++show val) $ 
                       trace ("Checking: " ++nm) $ typeCheckToEnv $ checkType val ty
   (sub,ctxt) <- runStateT (unify constraint) emptyContext
-  
   
   return $ M.insert nm (subst sub val) env
   
