@@ -106,7 +106,7 @@ unify cons = do
   uniWhile constraints
 
            
-traceName _ = id
+traceName = const id
 
 unifyEq :: Spine -> Spine -> WithContext (Maybe (Substitution , Constraint))
 unifyEq a b = let cons = a :=: b in case (a,b) of 
@@ -114,12 +114,12 @@ unifyEq a b = let cons = a :=: b in case (a,b) of
     return $ Just (mempty,  (∃) a ty $ l :=: b)
   (b, Spine "#imp_forall#" [_, Abs a ty l]) -> traceName "-imp_forall-" $ do
     return $ Just (mempty,  (∃) a ty $ b :=: l)
-    
+
   (Spine "#imp_abs#" [_, Abs a ty l], b) -> traceName "-imp_abs-" $ do
     return $ Just (mempty, (∃) a ty $ l :=: b)
   (b, Spine "#imp_abs#" [_, Abs a ty l]) -> traceName "-imp_abs-" $ do
     return $ Just (mempty, (∃) a ty $ b :=: l)    
-  
+
   (Abs nm ty s , Abs nm' ty' s') -> traceName "-aa-" $ do
     return $ Just (mempty, ty :=: ty' :&: (Bind Forall nm ty $ s :=: subst (nm' |-> var nm) s'))
   (Abs nm ty s , s') -> traceName "-as-" $ do
@@ -383,7 +383,7 @@ left goal (x,target) = do
           nm' <- lift $ getNewWith "@sla"
           -- by using existential quantification we can defer search implicitly
           modify $ addToTail Exists nm' ty
-          (sub, result)  <- leftCont x $ subst (nm |-> var nm') lm
+          (sub, result) <- leftCont x $ subst (nm |-> var nm') lm
           return $ (sub, \l -> result $ (subst sub $ var nm'):l )
             
         Spine "#exists#" [_, Abs nm ty lm] -> do 
@@ -571,13 +571,13 @@ typeCheckAxioms lst = do
 typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = do
   let toAxioms (Predicate nm ty cs) = (Just "atom",nm,ty,atom):map (\(nm',ty') -> (Just nm,nm',ty',atom)) cs
-      toAxioms (Query nm val) = [(Just $ getFamily val, nm,val,infer "x" atom (var "x"))]
-      toAxioms (Define nm val ty) = [(Just $ getFamily ty, nm,ty,atom), (Nothing, "#val#"++nm,val,ty)]
+      toAxioms (Query nm val) = [(Nothing, nm,val,atom)]
+      toAxioms (Define nm val ty) = [(Just $ getFamily ty, nm,ty,atom), (Nothing, "#val: "++nm,val,ty)]
   tyMap <- typeCheckAxioms (concatMap toAxioms preds)
   
   let newPreds (Predicate nm _ cs) = Predicate nm (tyMap M.! nm) $ map (\(nm,_) -> (nm,tyMap M.! nm)) cs
       newPreds (Query nm _) = Query nm (tyMap M.! nm)
-      newPreds (Define nm _ _) = Define nm (tyMap M.! ("#val#"++nm)) (tyMap M.! nm)
+      newPreds (Define nm _ _) = Define nm (tyMap M.! ("#val: "++nm)) (tyMap M.! nm)
   
   return $ newPreds <$> preds
   

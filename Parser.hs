@@ -12,7 +12,7 @@ import Data.Functor.Identity
 import Text.Parsec
 import Control.Monad (unless)
 import Text.Parsec.Language (haskellDef)
-import Text.Parsec.Expr
+import Text.Parsec.Expr 
 import Data.List
 import Data.Maybe
 import Data.Monoid
@@ -20,9 +20,11 @@ import qualified Text.Parsec.Token as P
 import qualified Data.Set as S
 import Debug.Trace
 import qualified Data.Foldable as F
+
 -----------------------------------------------------------------------
 -------------------------- PARSER -------------------------------------
 -----------------------------------------------------------------------
+
 
 data ParseState = ParseState { currentVar :: Integer
                              , currentSet :: S.Set Name
@@ -63,7 +65,7 @@ decls = do
   eof
   return lst
 
-topLevel = fixityDef <|> query <|> defn <|> letbe
+topLevel = fixityDef <|> query <|> defn
 
 
 fixityDef = do 
@@ -74,7 +76,7 @@ fixityDef = do
              <|> (reserved "prefix" >> return (\b c -> b { fixityPrefix = c $ fixityPrefix b}))
              <|> (reserved "postfix" >> return (\b c -> b { fixityPostfix = c $ fixityPostfix b}))
   n <- integer
-  op <- operator
+  op <- operator <|> identifier
   
   let modify = insertBy (\(n,_) (m,_) -> compare n m) (n,op)
   modifyState $ \b -> b { currentTable = setFixity (currentTable b) modify
@@ -93,21 +95,16 @@ defn :: Parser Predicate
 defn =  do
   reserved "defn"
   (nm,ty) <- named decTipe
-  let more =  do reserved "as"
+  let more =  do reservedOp "|"
                  lst <- flip sepBy1 (reservedOp "|") $ named decPred
                  optional semi
                  return $ Predicate nm ty lst
       none = do optional semi
                 return $ Predicate nm ty []
-  more <|> none <?> "definition"
-  
-letbe :: Parser Predicate
-letbe =  do
-  reserved "let"
-  (nm,ty) <- named decTipe
-  reserved "be"
-  val <- tipe
-  return (Define nm val ty) <?> "definition"  
+      letbe = do reserved "as"
+                 val <- tipe
+                 return $ Define nm val ty
+  letbe <|> more <|> none <?> "definition"
 
 
 
@@ -162,11 +159,11 @@ tipe = do
       
       anonNamed = do
         let (ident,sep) = decAnon
-        nm <- ident
+        nml <- many ident
         ty <- optionMaybe $ reservedOp sep >> ptipe
         nm' <- getNextVar
         nm'' <- getNextVar
-        return (nm,fromMaybe (infer nm' atom $ infer nm'' (var nm') $ var nm'') ty)
+        return (nml,fromMaybe (infer nm' atom $ infer nm'' (var nm') $ var nm'') ty)
 
   
       binary fun assoc name = flip Infix assoc $ do 
@@ -177,15 +174,13 @@ tipe = do
       regPostfix bind = prefixGen (bind anonNamed <|>)
         
       prefixGen bind opsl nm out = Prefix $ do
-        (nm,tp) <- bind $ between 
+        (nml,tp) <- bind $ between 
                    (choice $ reserved nm:(reservedOp <$> opsl))
-                   (reservedOp ".")  
+                   (symbol ".")  
                    (parens anonNamed <|> anonNamed)
-        return $ out nm tp
+        return $ \input -> foldr (flip out tp) input nml
       
-      table = [ [ binary (const ascribe) AssocNone $ reservedOp ":"
-                ]
-              , [ altPostfix ["λ", "\\"] "lambda" Abs
+      table = [ [ altPostfix ["λ", "\\"] "lambda" Abs
                 , altPostfix ["?λ", "?\\"] "?lambda" imp_abs
                 , altPostfix ["∃"] "exists" exists
                 , regPostfix angles ["??"] "infer" infer
@@ -197,6 +192,8 @@ tipe = do
                 ]
               , [ binary (flip . forall) AssocLeft $ reservedOp "<-" <|> reservedOp "←"
                 , binary (flip . imp_forall) AssocLeft $ reservedOp "<=" <|> reservedOp "⇐" 
+                ]
+              , [ binary (const ascribe) AssocNone $ reservedOp ":"
                 ]
               ]
              ++union [ reify (binaryOther AssocLeft  <$> left) [] 
@@ -214,52 +211,67 @@ tipe = do
         reservedOp nm
         return $ \a -> Spine nm [a])
 
-      ptipe = buildExpressionParser (reverse $ table) $ trm
+      ptipe = buildExpressionParser (reverse $ table) terminal
+      -- now terms must be parsed in pattern normal form
       
-      trm =  do t <- try pAtom <|> (parens ptipe)
-                tps <- many $ try pArg <|> parens ptipe
+      terminal = try trm <|> (myParens "terminal" ptipe) <|> ptipe <?> "terminal"
+      
+      trm =  do t <- pHead
+                tps <- many pArg
                 return $ rebuildSpine t tps
-         <|> ptipe
          <?> "term"
+            
+      pHead = pParens pAt (pOp <|> ptipe <|> pAsc) "head"
+      pArg  = pParens (pAt <|> tycon) (pOp <|> ptipe) "argument"
+      
+      pParens anyAmount atLeast1 nm = anyAmount <|> pothers <?> nm
+        where others = atLeast1 <|> anyAmount <|> pothers <?> nm
+              pothers = myParens nm others
 
+      pAsc = do
+        v <- trm
+        let asc = do
+              reservedOp ":"
+              t <- ptipe 
+              return $ ascribe v t
+        (asc <|> return v <?> "function") 
+        
       pOp = do operators <- currentOps <$> getState 
                choice $ flip map operators $ \nm -> do reserved nm 
                                                        return $ var nm
-         <|> parens pOp
-         <?> "operator"
-      pAtom = try (parens pOp) <|> pAt
-      pAt   = parens pAt
-           <|> do reserved "_"
-                  nm <- getNextVar
-                  nm' <- getNextVar
-                  return $ infer nm atom $ infer nm' (var nm) $ var nm'
-           <|> do r <- idVar
-                  return $ var r
-           <|> do r <- identifier
-                  return $ var r
-           <?> "atom"
+         <?> "operator"      
+         
+      pAt =  do reserved "_"
+                nm <- getNextVar
+                nm' <- getNextVar
+                return $ infer nm atom $ infer nm' (var nm) $ var nm'
+         <|> do r <- idVar
+                return $ var r
+         <|> do r <- identifier
+                return $ var r
+         <?> "atom"
 
-
-      pArg = pAtom
-          <|> do braces $ do
-                   (nm,ty) <- named decVar
-                   return $ Spine "#tycon#" [Spine nm [ty]]
-          <?> "argument"
-  ptipe        
+      tycon = braces $ do
+        (nm,ty) <- named decVar
+        return $ Spine "#tycon#" [Spine nm [ty]]    
+      
+      myParens s m = between (symbol "(" <?> ("("++s)) (symbol ")" <?> (s++")")) m
+      
+  ptipe <?> "tipe"
 
 reservedOperators = ["->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", 
                      "\\", "?\\", 
                      "λ","?λ", 
                      "∀", "?∀", 
                      "?", 
-                     "??", "∃", ".", "=", 
+                     "??", "∃", "=", 
                      ":", ";", "|"]
 identStartOps = "_'-/"                     
                     
 reservedNames = ["defn", "as", "query"    
                 , "forall", "exists", "?forall"
-                , "_" , "infer", "let"
-                , "be", "infixl", "infixr", "infix"]
+                , "_" , "infer", "postfix", "prefix"
+                , "infixl", "infixr", "infix"]
 
 mydef :: P.GenLanguageDef String ParseState Identity
 mydef = haskellDef

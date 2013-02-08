@@ -1,24 +1,60 @@
-let imp : [a : atom] [b : atom] atom
- be \a : atom . \b : atom . [ha : a] b
+-- an example of how powerfull the syntax is
+infixr 0 |->
+defn |-> : [a : atom] [b : atom] atom
+  as \a : atom . \b : atom . [ha : a] b
+
+infixr 1 <-|
+defn <-| : [a : atom] [b : atom] atom
+  as \a : atom . \b : atom . b |-> a
+
+infixr 0 |=>
+defn |=> : [a : atom] [b : atom] atom
+  as \a : atom . \b : atom . {ha : a} b
+
+infixl 1 <=|
+defn <=| : [b : atom][a : atom] atom
+  as \a : atom . \b : atom . {ha : b} a
+
+infixr 1 =:=
+defn =:= : {a : atom} a -> a -> atom
+   | eq = [a : atom] a =:= a
 
 defn num  : atom
-  as zero = num
+   | zero = num
    | succ = num → num
 
 defn add   : num → num → num → atom
-  as add_z = {N} add zero N N
+   | add_z = {N} add zero N N
    | add_s = {N}{M}{R} add N M R → add (succ N) M (succ R)
 
 defn sub   : num → num → num → atom
-  as sub_with_add = {N}{M}{R} sub N M R ← add N R M
-
+   | sub_with_add = {N}{M}{R} sub N M R ← add N R M
 
 defn maybe : atom → atom
-  as nothing = {a} maybe a
+   | nothing = {a} maybe a
    | just = {a} a → maybe a
 
 defn list : atom → atom
-  as nil = {a} list a
+   | nil = {a} list a
    | cons = {a} a -> list a → list a
 
+defn bool : atom
+   | true = bool
+   | false = bool
 
+defn if : bool -> bool
+  as \b . b
+
+infix 1 |:|
+defn |:| : {a : atom} a -> a -> (a -> a -> a) -> a
+  as ?\t : atom . \a b. \f : t -> t -> t. f a b
+
+infix 0 ==>
+defn ==> : {a : atom} bool -> ((a -> a -> a) -> a) -> a -> atom
+   | thentrue =  [a:atom][f : (a -> a -> a) -> a] (true ==> f)  (f (\A B. A))
+   | thenfalse = [a:atom][f : (a -> a -> a) -> a] (false ==> f) (f (\A B. B))
+
+defn qry : bool -> atom
+  as if true ==> false |:| true
+
+query moop = (if true ==> false |:| true) false

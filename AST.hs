@@ -64,6 +64,7 @@ instance Show Spine where
   show (Spine "#infer#" [_, Abs nm t t']) = "<"++nm++" : "++show t++"> "++show t'
   show (Spine "#ascribe#" (ty:v:l)) = "( "++showWithParens v++ " : " ++ show ty++" ) "++show (Spine "" l)  
   show (Spine "#forall#" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " → " ++ show t'
+  show (Spine "#imp_forall#" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " ⇒ " ++ show t'
   show (Spine "#forall#" [_,Abs nm t t']) = "["++nm++" : "++show t++"] "++show t'  
   show (Spine "#imp_forall#" [_,Abs nm t t']) = "{"++nm++" : "++show t++"} "++show t'  
   show (Spine "#tycon#" [Spine nm [t]]) = "{"++nm++" = "++show t++"}"
@@ -81,10 +82,10 @@ instance Show Spine where
 instance Show Predicate where
   show (Predicate nm ty []) = "defn " ++ nm ++ " : " ++ show ty ++ ";"
   show (Predicate nm ty (a:cons)) =
-    "defn " ++ nm ++ " : " ++ show ty ++ "\n" ++ "  as " ++ showSingle a ++ concatMap (\x-> "\n   | " ++ showSingle x) cons ++ ";"
+    "defn " ++ nm ++ " : " ++ show ty ++ "\n" ++ "   | " ++ showSingle a ++ concatMap (\x-> "\n   | " ++ showSingle x) cons ++ ";"
       where showSingle (nm,ty) = nm ++ " = " ++ show ty
   show (Query nm val) = "query " ++ nm ++ " = " ++ show val
-  show (Define nm val ty) = "let " ++ nm ++ " : " ++ show ty ++"\n be "++show val
+  show (Define nm val ty) = "defn " ++ nm ++ " : " ++ show ty ++"\n as "++show val
                                                
 var nm = Spine nm []
 atom = var "atom"
@@ -253,6 +254,7 @@ consts = [ ("atom", atom)
          , ("#infer#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
+         , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))
          , ("#exists#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#pack#", forall "tp" atom 
                     $ forall "iface" (var "tp" ~> atom) 
