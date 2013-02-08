@@ -83,9 +83,8 @@ unify cons = do
         addBinds binds
         let l' = subst sub <$> l
             r' = subst sub <$> reverse r
-            res = (sub,l'++constraints++r')
-            
-        return res
+        -- order of constraints does matter!  need to fix this in the future            
+        return (sub,constraints ++l'++r')
       uniOne [] _  = throwError "can not unify any further"
       uniOne ((a,b):l) r = do
         (newstate,choice) <- isolate $ unifyEq a b
@@ -115,15 +114,18 @@ unifyEq a b = let cons = a :=: b in case (a,b) of
   (b, Spine "#imp_forall#" [_, Abs a ty l]) -> traceName "-imp_forall-" $ do
     return $ Just (mempty,  (∃) a ty $ b :=: l)
 
-  (Spine "#imp_abs#" [_, Abs a ty l], b) -> traceName "-imp_abs-" $ do
-    return $ Just (mempty, (∃) a ty $ l :=: b)
-  (b, Spine "#imp_abs#" [_, Abs a ty l]) -> traceName "-imp_abs-" $ do
-    return $ Just (mempty, (∃) a ty $ b :=: l)    
+  (Spine "#imp_abs#" (ty:l:r), b) -> traceName ("-imp_abs- : "++show a ++ "\n\t"++show b) $ do
+    a <- lift $ getNewWith "@a"
+    return $ Just (mempty, (∃) a ty $ rebuildSpine l (var a:r) :=: b)
+  (b, Spine "#imp_abs#" (ty:l:r)) -> traceName "-imp_abs-" $ do
+    a <- lift $ getNewWith "@a"
+    return $ Just (mempty, (∃) a ty $ b :=: rebuildSpine l (var a:r))    
 
   (Abs nm ty s , Abs nm' ty' s') -> traceName "-aa-" $ do
     return $ Just (mempty, ty :=: ty' :&: (Bind Forall nm ty $ s :=: subst (nm' |-> var nm) s'))
-  (Abs nm ty s , s') -> traceName "-as-" $ do
+  (Abs nm ty s , s') -> traceName ("-as-  "++ show cons) $ do
     return $ Just (mempty, Bind Forall nm ty $  s :=: rebuildSpine s' [var nm])
+    
   (s , s') | s == s' -> traceName "-eq-" $ return $ Just (mempty, Top)
   (s@(Spine x yl), s') -> do
     bind <- getElm ("all: "++show cons) x
@@ -134,7 +136,7 @@ unifyEq a b = let cons = a :=: b in case (a,b) of
             Spine x' y'l -> do
               bind' <- getElm ("gvar-blah: "++show cons) x'
               case bind' of
-                Right ty' -> traceName "-gc-" $ -- gvar-const
+                Right ty' -> traceName ("-gc- "++show cons) $ -- gvar-const
                   gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
                 Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> traceName "CANT: -gu-dep-" $ throwError $ "gvar-uvar-depends: "++show (a :=: b)
                 Left Binding{ elmQuant = Forall } | S.member x $ freeVariables y'l -> 
@@ -157,7 +159,8 @@ unifyEq a b = let cons = a :=: b in case (a,b) of
           bind' <- getElm ("const case: "++show cons) x'
           case bind' of
             Left Binding{ elmQuant = Exists } -> traceName "-ug-" $ return $ (mempty,s' :=: s) -- uvar-gvar
-            _ -> traceName "CANT: -uud-" $ throwError $ "two different universal equalities: "++show cons -- uvar-uvar
+            _ -> traceName ("CANT: -uud- two different universal equalities: "++show cons) -- uvar-uvar 
+                 $ throwError $ "two different universal equalities: "++show cons -- uvar-uvar
         Spine x' yl' | x == x' -> traceName "-uue-" $ do -- uvar-uvar-eq
           unless (length yl == length yl') $ throwError $ "different numbers of arguments on constant: "++show cons
           return (mempty, foldl (:&:) Top $ zipWith (:=:) yl yl')
@@ -272,6 +275,7 @@ gvar_const a@(Spine _ yl, _) b@(Spine y _, _) = case elemIndex (var y) $ yl of
   Just _ -> gvar_uvar_outside a b <|> gvar_fixed a b (var . const y)
 gvar_const _ _ = error "gvar-const is not made for this case"
 
+
 gvar_uvar_outside a@(Spine x yl,_) b@(Spine y _,bty) = do
   let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
   i <- F.asum $ return <$> ilst
@@ -337,7 +341,7 @@ getFamily (Spine "#ascribe#"  (_:v:l)) = getFamily v
 getFamily (Spine "#forall#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#imp_forall#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#exists#" [_, Abs _ _ lm]) = getFamily lm
-getFamily (Spine "#open#" (_:_:c:_)) = getFamily c
+getFamily (Spine "#open#" (_:_:_:_:Abs _ _ (Abs _ _ c):_)) = getFamily c
 getFamily (Spine nm' _) = nm'
 getFamily v = error $ "values don't have families: "++show v
                       
@@ -582,6 +586,6 @@ typeCheckAll preds = do
   return $ newPreds <$> preds
   
 solver :: [(Name,Type)] -> Type -> Either String [(Name, Term)]
-solver axioms tp = case runError $ runRWST (runStateT (search tp) emptyContext) (M.fromList axioms) 0 of
+solver axioms tp = case runError $ runRWST (runStateT (search tp) emptyContext) (M.union envConsts $ M.fromList axioms) 0 of
   Right (((s,tm),_),_,_) -> Right $ ("query", tm):(map (\a -> (a,var a)) $ S.toList $ freeVariables tp)
   Left s -> Left $ "reification not possible: "++s
