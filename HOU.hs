@@ -83,8 +83,7 @@ unify cons = do
         addBinds binds
         let l' = subst sub <$> l
             r' = subst sub <$> reverse r
-        -- order of constraints does matter!  need to fix this in the future            
-        return (sub,constraints ++l'++r')
+        return (sub,l'++constraints++r')
       uniOne [] _  = throwError "can not unify any further"
       uniOne ((a,b):l) r = do
         (newstate,choice) <- isolate $ unifyEq a b
@@ -137,7 +136,9 @@ unifyEq a b = let cons = a :=: b in case (a,b) of
               bind' <- getElm ("gvar-blah: "++show cons) x'
               case bind' of
                 Right ty' -> traceName ("-gc- "++show cons) $ -- gvar-const
-                  gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
+                  if allElementsAreVariables yl
+                  then gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
+                  else return Nothing
                 Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> traceName "CANT: -gu-dep-" $ throwError $ "gvar-uvar-depends: "++show (a :=: b)
                 Left Binding{ elmQuant = Forall } | S.member x $ freeVariables y'l -> 
                   traceName "CANT: -occ-" $ throwError $ "occurs check: "++show (a :=: b)
