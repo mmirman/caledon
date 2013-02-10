@@ -54,7 +54,6 @@ defn ==> : {a : atom} bool -> ((a -> a -> a) -> a) -> a -> atom
    | thentrue  = [a : atom][f: _ -> a] (true ==> f)  (f (\A B : a. A))
    | thenfalse = [a : atom][f: _ -> a] (false ==> f) (f (\A B : a. B))
 
-defn qry : bool -> atom
-  as (if true) ==> (false |:| true)
+defn not : bool -> bool -> atom
+  as \a . if a ==> (false |:| true)
 
-query moop = qry false
