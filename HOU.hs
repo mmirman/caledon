@@ -50,19 +50,6 @@ getAllBindings = do
   ctx <- get
   getBindings $ getTail ctx
   
-flatten :: Constraint -> ([(Quant, Name, Type)], [(Spine, Spine)])
-flatten cons = case cons of
-  Top -> ([],[])
-  c1 :&: c2 -> let (binds1,c1') = flatten c1
-                   (binds2,c2') = flatten c2
-               in  (binds1++binds2,c1'++c2')
-  Bind quant nm ty c -> ((quant,nm,ty):binds,c')
-    where (binds, c') = flatten c
-  a :=: b -> ([],[(a,b)])
-  
-addBinds :: [(Quant, Name, Type)] -> WithContext ()
-addBinds binds = mapM_ (\(quant,nm,ty) -> modify $ addToTail quant nm ty) binds   
-
 isolate m = do
   s <- get
   a <- m
@@ -73,48 +60,26 @@ isolate m = do
 unify :: Constraint -> Unification
 unify cons = do
   cons <- lift $ regenAbsVars cons
-  
+
   let uniWhile c = do 
         res <- unifyOne c
         case res of
+          Nothing -> return (mempty, c)
           Just (sub,c') -> do
             modify $ subst sub
             (\(s,c) -> (sub *** s, c)) <$> uniWhile c'
-          Nothing -> return (mempty, c)
+          
   fst <$> uniWhile cons
-  {-
-  let (binds,constraints) = traceName ("CONS: "++show cons) $ flatten cons
-  addBinds binds
-  let with l r newstate sub cons = do
-        let (binds,constraints) = flatten cons
-            
-        put newstate
-        addBinds binds
-        let l' = subst sub <$> l
-            r' = subst sub <$> reverse r
-        return (sub,l'++constraints++r')
-      uniOne [] _  = throwError "can not unify any further"
-      uniOne ((a,b):l) r = do
-        (newstate,choice) <- isolate $ unifyOne (a :=: b)
-        case choice of
-          Just (sub,cons) -> with l r newstate sub cons
-          Nothing -> do 
-            (newstate,choice) <- isolate $ unifyOne (b :=: a)
-            case choice of
-              Just (sub, cons) -> with l r newstate sub cons
-              Nothing -> uniOne l ((a,b):r)
-     
-      uniWhile [] = return mempty
-      uniWhile l = do 
-        (sub,l') <- unifyOne l []
-        modify $ subst sub
-        (sub ***) <$> uniWhile l'
-      
-  uniWhile constraints
-
-   -}        
     
-traceName _ = id
+traceName = trace
+
+isolateIf m = do
+  (ns,c) <- isolate m
+  case c of
+    Just c -> do
+      put ns
+      return $ Just c
+    Nothing -> return Nothing
 
 unifyOne :: Constraint -> WithContext (Maybe (Substitution , Constraint))
 unifyOne Top = return $ Nothing
@@ -131,12 +96,12 @@ unifyOne (c1 :&: c2) = do
         Just (sub,c2) -> Just $ (sub, subst sub c1 :&: c2)
     Just (sub,c1) -> return $ Just $ (sub,c1 :&: subst sub c2)
 unifyOne (a :=: b) = do
-  c' <- unifyOne' (a :=: b) 
+  c' <- isolateIf $ unifyEq $ a :=: b 
   case c' of 
-    Nothing -> unifyOne' (b :=: a)
+    Nothing -> isolateIf $ unifyEq $ b :=: a
     r -> return r
 
-unifyOne' cons@(a :=: b) = case (a,b) of 
+unifyEq cons@(a :=: b) = case (a,b) of 
   (Spine "#imp_forall#" [_, Abs a ty l], b) -> traceName "-implicit-" $ do
     return $ Just (mempty, (∃) a ty $ l :=: b)
   (b, Spine "#imp_forall#" [_, Abs a ty l]) -> traceName "-implicit-" $ do
