@@ -71,7 +71,7 @@ unify cons = do
           
   fst <$> uniWhile cons
     
-traceName = trace
+traceName _ = id
 
 isolateIf m = do
   (ns,c) <- isolate m
