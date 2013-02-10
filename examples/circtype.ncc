@@ -1,6 +1,3 @@
---defn a : a cat -> atom
---  as cat = a cat
-
 defn mu : [x : atom] (x -> x) -> atom
 
 defn nat : atom -> atom

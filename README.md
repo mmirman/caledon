@@ -45,11 +45,11 @@ Features
 
 ```
 defn num  : atom
-  as zero = num
+   | zero = num
    | succ = num -> num
 
 defn add  : num -> num -> num -> atom
-  as add_zero = {N} add zero N N
+   | add_zero = {N} add zero N N
    | add_succ = {N}{M}{R} add (succ N) M (succ R) <- add N M R
 
 -- we can define subtraction from addition!
@@ -59,12 +59,12 @@ query subtract = add (succ (succ zero)) 'v (succ (succ (succ zero)))
 
 ```
 defn trm : atom
-  as lam = (trm -> trm) -> trm
+   | lam = (trm -> trm) -> trm
    | app = trm -> trm -> trm
 
 -- we can check that a term is linear!
 defn linear : (trm → trm) → atom
-  as linear_var = linear ( λ v . v )
+   | linear_var = linear ( λ v . v )
    | linear_lam = {N} linear (λ v . lam (λ x . N x v))
                 ← [x] linear (λ v . N x v)
    | linear_app1 = {V}{F} linear (λ v . app (F v) V)
@@ -77,8 +77,24 @@ defn linear : (trm → trm) → atom
 
 ```
 defn maybe   : atom → atom
-  as nothing = {a} maybe a
+   | nothing = {a} maybe a
    | just    = {a} a → maybe a
+```
+
+* Pure Type System:  This allows some crazy language level definitions!  
+
+```
+infix 1 =:=
+defn =:= : {a : atom} a -> a -> atom
+   | eq = {a : atom} a =:= a
+
+infix 0 /\
+defn /\ : atom -> atom -> atom
+   | and = {a : atom}{b : atom} a -> b -> a /\ b
+
+infixr 0 |->
+defn |-> : [a : atom] [b : atom] atom
+  as \a : atom . \b : atom . [ha : a] b
 ```
 
 * Indulgent type inferring nondeterminism:  The entire type checking process is a nondeterministic search for a type check proof.  This could be massively slow, but at least it is complete.  The size of this search is bounded by the size of the types and not the whole program, so this shouldn't be too slow in practice.  (function cases should be small).  I'm working on adding search control primitives to make this more efficient.
@@ -87,7 +103,7 @@ defn maybe   : atom → atom
 
 ```
 defn fsum_maybe  : {a}{b} (a -> b -> atom) -> maybe a -> maybe b → atom
-  as fsum_nothing = {a}{b}[F : a -> b -> atom] maybe_fsum F nothing nothing
+   | fsum_nothing = {a}{b}[F : a -> b -> atom] maybe_fsum F nothing nothing
    | fsum_just    = {a}{b}[F : _ -> _ -> atom][av : a][bv : b]
                    maybe_fsum F (just av) (just bv)
                    <- F av bv
@@ -97,15 +113,38 @@ defn fsum_maybe  : {a}{b} (a -> b -> atom) -> maybe a -> maybe b → atom
 
 ```
 defn functor : (atom → atom) → atom
-  as isFunctor = ∀ F . ({a}{b : _ } (a → b → atom) → F a → F b → atom) → functor F.
+   | isFunctor = ∀ F . ({a}{b : _ } (a → b → atom) → F a → F b → atom) → functor F.
 
 defn fsum : {F} functor F => {a}{b} (a → b → atom) → F a → F b → atom
-  as get_fsum = [F] functor F -> [FSUM][Foo][Fa][Fb] FSUM Foo Fa Fb -> fsum Foo Fa Fb
+   | get_fsum = [F] functor F -> [FSUM][Foo][Fa][Fb] FSUM Foo Fa Fb -> fsum Foo Fa Fb
 
 defn functor_maybe : functor maybe -> atom.
-  as is_functor_maybe = functor_maybe (isFunctor fsum_maybe).
+   | is_functor_maybe = functor_maybe (isFunctor fsum_maybe).
 
--- this syntax is rather verbose for the moment.  I have yet to add proper records or typeclass syntax sugar.
+-- this syntax is rather verbose for the moment.  I have yet to add typeclass syntax sugar.
+```
+
+* Arbitrary operator fixities:  combined with the pure type system, you can do agda style syntax (with a bit of creativity)!
+
+```
+defn bool : atom
+   | true = bool
+   | false = bool
+
+defn if : bool -> bool
+  as \b . b
+
+infix 1 |:|
+defn |:| : {a : atom} a -> a -> (a -> a -> a) -> a
+  as ?\t : atom . \a b. \f : t -> t -> t. f a b
+
+infix 0 ==>
+defn ==> : {a : atom} bool -> ((a -> a -> a) -> a) -> a -> atom
+   | thentrue =  [a:atom][f : (a -> a -> a) -> a] (true ==> f)  (f (\A B. A))
+   | thenfalse = [a:atom][f : (a -> a -> a) -> a] (false ==> f) (f (\A B. B))
+
+defn not : bool -> bool -> atom
+  as \v . if v ==> false |:| true
 ```
 
 * Optional unicode syntax: Monad m ⇒ ∀ t : goats . m (λ x : t . t → t).
@@ -114,6 +153,7 @@ defn functor_maybe : functor maybe -> atom.
     * Quantification: "[x:A] t"  or  "∀ x:A . t" or "forall x:A . t"
     * abstraction: "λ x . t" or "\x.t"
     * Quantified implicits: "{x:A} t"  or  "?∀ x:A . t" or "?forall x:A . t"
+
 
 
 Usage

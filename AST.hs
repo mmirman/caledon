@@ -46,46 +46,57 @@ getNewWith s = (++s) <$> getNew
 showWithParens t = if (case t of
                           Abs{} -> True
                           Spine "#infer#" _ -> True
+                          Spine "#imp_abs#" _ -> True
                           Spine "#forall#" _ -> True
                           Spine "#exists#" _ -> True
+                          Spine "#imp_forall#" _ -> True
+                          Spine "#ascribe#" _ -> True
+                          Spine "#tycon#" _ -> False
                           Spine _ _ -> False
                       ) then "("++show t++")" else show t 
 
+isOperator [] = False
 isOperator ('#':l) = False
-isOperator (a:l) = not $ elem a ('_':['a'..'z']++['A'..'Z'])
+isOperator (a:l) = not $ elem a ('_':['a'..'z']++['A'..'Z']++['0'..'9'])
 
 
 instance Show Spine where
   show (Spine "#infer#" [_, Abs nm t t']) = "<"++nm++" : "++show t++"> "++show t'
-  show (Spine nm [t , t']) | isOperator nm = showWithParens t++" "++nm++" "++ show t'
-  
+  show (Spine "#ascribe#" (ty:v:l)) = "( "++showWithParens v++ " : " ++ show ty++" ) "++show (Spine "" l)  
   show (Spine "#forall#" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " → " ++ show t'
+  show (Spine "#imp_forall#" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " ⇒ " ++ show t'
   show (Spine "#forall#" [_,Abs nm t t']) = "["++nm++" : "++show t++"] "++show t'  
   show (Spine "#imp_forall#" [_,Abs nm t t']) = "{"++nm++" : "++show t++"} "++show t'  
+  show (Spine "#tycon#" [Spine nm [t]]) = "{"++nm++" = "++show t++"}"
   show (Spine "#exists#" [_,Abs nm t t']) = "∃"++nm++" : "++show t++". "++show t' 
-  show (Spine h t) = h++concatMap (\s -> " "++showWithParens s) t
-     where showWithParens t = if (case t of
+  show (Spine "#imp_abs#" [_, Abs nm ty t]) = "?λ "++nm++" : "++showWithParens ty++" . "++show t
+  show (Spine nm (t:t':l)) | isOperator nm = "( "++showWithParens t++" "++nm++" "++ show t'++" )"++show (Spine "" l)
+  show (Spine h l) = h++concatMap showWithParens' l
+     where showWithParens' t = " "++if case t of
                           Abs{} -> True
+                          Spine "#tycon#" _ -> False
                           Spine _ lst -> not $ null lst
-                      ) then "("++show t++")" else show t 
+                      then "("++show t++")" else show t 
   show (Abs nm ty t) = "λ "++nm++" : "++showWithParens ty++" . "++show t
 
 instance Show Predicate where
   show (Predicate nm ty []) = "defn " ++ nm ++ " : " ++ show ty ++ ";"
   show (Predicate nm ty (a:cons)) =
-    "defn " ++ nm ++ " : " ++ show ty ++ "\n" ++ "  as " ++ showSingle a ++ concatMap (\x-> "\n   | " ++ showSingle x) cons ++ ";"
+    "defn " ++ nm ++ " : " ++ show ty ++ "\n" ++ "   | " ++ showSingle a ++ concatMap (\x-> "\n   | " ++ showSingle x) cons ++ ";"
       where showSingle (nm,ty) = nm ++ " = " ++ show ty
   show (Query nm val) = "query " ++ nm ++ " = " ++ show val
-  show (Define nm val ty) = "let " ++ nm ++ " : " ++ show ty ++"\n be "++show val
+  show (Define nm val ty) = "defn " ++ nm ++ " : " ++ show ty ++"\n as "++show val
                                                
 var nm = Spine nm []
 atom = var "atom"
+ascribe a t = Spine ("#ascribe#") [t, a]
 forall x tyA v = Spine ("#forall#") [tyA, Abs x tyA v]
 imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
 exists x tyA v = Spine ("#exists#") [tyA, Abs x tyA v]
 pack e tau imp tp interface = Spine "#pack#" [tp, Abs imp tp interface, tau, e]
 open cl (imp,ty) (p,iface) cty inexp = Spine "#open#" [cl, ty,Abs imp ty iface, Abs imp ty (Abs p iface cty), Abs imp ty (Abs p iface inexp)] 
 infer x tyA v = Spine ("#infer#") [tyA, Abs x tyA v]
+imp_abs x tyA v = Spine ("#imp_abs#") [tyA, Abs x tyA v]
 ---------------------
 ---  substitution ---
 ---------------------
@@ -239,9 +250,11 @@ instance RegenAbsVars Spine where
  
 
 consts = [ ("atom", atom)
+         , ("#ascribe#", forall "a" atom $ (var "a") ~> (var "a"))
          , ("#infer#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
+         , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))
          , ("#exists#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#pack#", forall "tp" atom 
                     $ forall "iface" (var "tp" ~> atom) 
@@ -254,7 +267,7 @@ consts = [ ("atom", atom)
                     $ forall "cty" (forall "imp" (var "tp") $ forall "p" (Spine "iface" [var "imp"]) $ atom)
                     $ forall "exp" (forall "imp" (var "tp") $ forall "p" (Spine "iface" [var "imp"]) $ Spine "cty" [var "imp", var "p"])
                     $ open (var "closed") ("imp" ,var "tp") ("p",Spine "iface" [var "imp"]) atom (Spine "cty" [var "imp", var "p"])
-                    )    
+                    )
          ]
 
 envConsts = M.fromList consts
