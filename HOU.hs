@@ -63,19 +63,28 @@ flatten cons = case cons of
 addBinds :: [(Quant, Name, Type)] -> WithContext ()
 addBinds binds = mapM_ (\(quant,nm,ty) -> modify $ addToTail quant nm ty) binds   
 
-
 isolate m = do
   s <- get
   a <- m
   s' <- get
   put s
   return (s',a)
-  
+
 unify :: Constraint -> Unification
 unify cons = do
   cons <- lift $ regenAbsVars cons
+  
+  let uniWhile c = do 
+        res <- unifyOne c
+        case res of
+          Just (sub,c') -> do
+            modify $ subst sub
+            (\(s,c) -> (sub *** s, c)) <$> uniWhile c'
+          Nothing -> return (mempty, c)
+  fst <$> uniWhile cons
+  {-
   let (binds,constraints) = traceName ("CONS: "++show cons) $ flatten cons
-  addBinds binds      
+  addBinds binds
   let with l r newstate sub cons = do
         let (binds,constraints) = flatten cons
             
@@ -88,37 +97,50 @@ unify cons = do
         return res
       uniOne [] _  = throwError "can not unify any further"
       uniOne ((a,b):l) r = do
-        (newstate,choice) <- isolate $ unifyEq a b
+        (newstate,choice) <- isolate $ unifyOne (a :=: b)
         case choice of
           Just (sub,cons) -> with l r newstate sub cons
           Nothing -> do 
-            (newstate,choice) <- isolate $ unifyEq b a 
+            (newstate,choice) <- isolate $ unifyOne (b :=: a)
             case choice of
               Just (sub, cons) -> with l r newstate sub cons
               Nothing -> uniOne l ((a,b):r)
      
       uniWhile [] = return mempty
       uniWhile l = do 
-        (sub,l') <- uniOne l []
+        (sub,l') <- unifyOne l []
         modify $ subst sub
         (sub ***) <$> uniWhile l'
       
   uniWhile constraints
 
-           
+   -}        
 traceName _ = id
 
-unifyEq :: Spine -> Spine -> WithContext (Maybe (Substitution , Constraint))
-unifyEq a b = let cons = a :=: b in case (a,b) of 
+unifyOne :: Constraint -> WithContext (Maybe (Substitution , Constraint))
+unifyOne Top = return $ Nothing
+unifyOne (Bind quant nm ty c) = do
+  modify $ addToTail quant nm ty
+  return $ Just (mempty, c)
+unifyOne (c1 :&: c2) = do
+  c1' <- unifyOne c1 
+  case c1' of
+    Nothing -> do 
+      c2' <- unifyOne c2
+      return $ case c2' of
+        Nothing -> Nothing
+        Just (sub,c2) -> Just $ (sub, subst sub c1 :&: c2)
+    Just (sub,c1) -> return $ Just $ (sub,c1 :&: subst sub c2)
+
+unifyOne cons@(a :=: b) = case (a,b) of 
   (Spine "#imp_forall#" [_, Abs a ty l], b) -> traceName "-implicit-" $ do
-    return $ Just (mempty,  (∃) a ty $ l :=: b)
+    return $ Just (mempty, (∃) a ty $ l :=: b)
   (b, Spine "#imp_forall#" [_, Abs a ty l]) -> traceName "-implicit-" $ do
     return $ Just (mempty,  (∃) a ty $ b :=: l)
-  
   (Abs nm ty s , Abs nm' ty' s') -> traceName "-aa-" $ do
-    return $ Just (mempty, ty :=: ty' :&: (Bind Forall nm ty $ s :=: subst (nm' |-> var nm) s'))
+    return $ Just (mempty, ty :=: ty' :&: ((∀) nm ty $ s :=: subst (nm' |-> var nm) s'))
   (Abs nm ty s , s') -> traceName "-as-" $ do
-    return $ Just (mempty, Bind Forall nm ty $  s :=: rebuildSpine s' [var nm])
+    return $ Just (mempty, (∀) nm ty $  s :=: rebuildSpine s' [var nm])
   (s , s') | s == s' -> traceName "-eq-" $ return $ Just (mempty, Top)
   (s@(Spine x yl), s') -> do
     bind <- getElm ("all: "++show cons) x
@@ -333,25 +355,19 @@ getFamily (Spine "#exists#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#open#" (_:_:c:_)) = getFamily c
 getFamily (Spine nm' _) = nm'
 getFamily v = error $ "values don't have families: "++show v
-                      
 
 getEnv :: WithContext Constants
 getEnv = do  
   nmMapA <- lift $ ask  
   nmMapB <- (fmap elmType . ctxtMap) <$> get
   return $ M.union nmMapB nmMapA 
-  
+
+
 search :: Type -> WithContext (Substitution, Term)
 search goal = case goal of 
-  Spine "#exists#" [Abs nm ty lm] -> do
-    
-    -- this case is a bit strange as we rely on unification, either now
-    -- OR in the FUTURE in order to find the actual value for tau/nm'
-    -- so we can't delete nm' from the context.
-    
+  Spine "#exists#" [_, Abs nm ty lm] -> do
     nm' <- lift $ getNewWith "@search"
     modify $ addToTail Exists nm' ty
-    
     (sub, e) <- search $ subst (nm |-> var nm') lm 
     return $ (sub, pack e (subst sub $ var nm') nm ty lm)
     
@@ -361,7 +377,8 @@ search goal = case goal of
     (sub,l) <- search $ subst (nm |-> var nm') lm
     modify $ removeFromContext nm'
     return (sub, Abs nm' (subst sub ty) l)
-  Spine nm _ -> fail "" <|> do 
+    
+  Spine nm _ -> fail "" <|> do -- good time to do a breadth first search.
     -- here we ensure that since this might run infinitely deep without different cases, we stop somewhere along the way 
     -- to give other branches a fair shot at computation.
     env <- M.toList <$> getEnv
@@ -369,7 +386,7 @@ search goal = case goal of
     F.asum $ left goal <$> filter (sameFamily . snd) env
     
   _ -> error $ "Not a type: "++show goal
-  
+
 left goal (x,target) = do
   let leftCont x target = case target of 
         Spine "#forall#" [_, Abs nm ty lm] -> do
@@ -378,27 +395,63 @@ left goal (x,target) = do
           modify $ addToTail Exists nm' ty
           (sub, result)  <- leftCont x $ subst (nm |-> var nm') lm
           return $ (sub, \l -> result $ (subst sub $ var nm'):l )
-            
+          
         Spine "#exists#" [_, Abs nm ty lm] -> do 
           nm' <- lift $ getNewWith "@sle"
           -- universal quantification as information hiding
           modify $ addToTail Forall nm' ty
           (sub,result) <- leftCont x $ subst (nm |-> var nm') lm
           modify $ removeFromContext nm'
-            
+          
           p <- lift $ getNewWith "@p"
           return (sub, \l -> open (result []) (nm', ty) (p , subst (nm |-> var nm') lm) 
                              goal -- the goal never changes when we do left only substitution
                              $ Spine p l)
 
-        Spine _ _ -> do  
-          sub <- unify $ goal :=: target
+        Spine _ _ -> do
+          -- should we really call a full unification here 
+          -- and not just add the unification to the context 
+          -- since unification is potentially incomplete & might defer? 
+          -- we might want to include everything which can defer into one main loop.  
+          sub <- unify $ goal :=: target 
           return (sub, \l -> Spine x l)
         _ -> error $ "λ does not have type atom: " ++ show target
   (sub,l) <- leftCont x target
   return (sub, subst sub $ l [])         
-
-          
+  
+------------------------------------------
+--- Constraint generation proof search ---
+------------------------------------------
+{-
+this search works by adding constraints and variables to the prefix context, rather than 
+simply "searching".  I'd need to compare and contrast merits with the entirely definite search.
+-}
+csearch :: Name -> Type -> WithContext Constraint
+csearch m goal = case goal of           
+  Spine "#forall#" [_, Abs x a b] -> do
+    y <- lift $ getNewWith "@sY"
+    modify $ addToTail Forall x a
+    modify $ addToTail Exists y b
+    cons <- csearch y b
+    return $ cons :&: var y :=: rebuildSpine (var m) [var x]
+  Spine nm _ -> do  
+    env <- M.toList <$> getEnv
+    let sameFamily s = getFamily s == nm
+    F.asum $ cleft m goal <$> filter (sameFamily . snd) env
+    
+cleft m goal (x,target) = leftCont (var x) target
+  where leftCont n target = case target of 
+          Spine "#forall#" [_, Abs x a b] -> do
+            nm' <- lift $ getNewWith "@sla"
+            -- by using existential quantification we can defer search implicitly
+            modify $ addToTail Exists x a
+            cons1 <- leftCont (rebuildSpine n [var x]) b
+            cons2 <- csearch x a
+            return $ cons1 :&: cons2
+          Spine _ _ -> do
+            return $ goal :=: target :&: var m :=: var x
+          _ -> error $ "λ does not have type atom: " ++ show target
+    
 -----------------------------
 --- constraint generation ---
 -----------------------------
