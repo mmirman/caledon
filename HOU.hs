@@ -19,6 +19,7 @@ import Control.Monad.Trans (lift)
 import Control.Applicative
 import qualified Data.Foldable as F
 import Data.List
+import Data.Maybe
 import Data.Monoid
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -261,9 +262,16 @@ gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) =
     Just _ -> gvar_uvar_outside a b
 gvar_uvar_inside _ _ = error "gvar-uvar-inside is not made for this case"
   
-gvar_const a@(Spine _ yl, _) b@(Spine y _, _) = case elemIndex (var y) $ yl of 
+gvar_const a@(Spine x yl, _) b@(Spine y _, bty) = case elemIndex (var y) $ yl of 
   Nothing -> gvar_fixed a b $ var . const y
-  Just _ -> gvar_uvar_outside a b <|> gvar_fixed a b (var . const y)
+  Just _ -> do {- gvar_uvar_outside a b <|> gvar_fixed a b (var . const y)-}
+    let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
+    defered <- lift $ getNewWith "@def"
+    res <- gvar_fixed a b $ \ui_list -> 
+      Spine defered $ var <$> y:((ui_list !!) <$> ilst)
+    modify $ addToHead Exists defered $ bty ~> foldr (\_ a -> bty ~> a) bty ilst
+    return res
+
 gvar_const _ _ = error "gvar-const is not made for this case"
 
 
@@ -273,7 +281,7 @@ gvar_uvar_outside a@(Spine x yl,_) b@(Spine y _,bty) = do
   gvar_fixed a b $ var . (!! i)
 -}
   case [i | (i,y') <- zip [0..] yl , y' == var y] of
-    [i] -> vtrace ("-ic-") $ gvar_fixed a b $ lookup
+    [i] -> vtrace ("-ic-") $ gvar_fixed a b lookup
       where lookup list = case length list <= i of
               True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
               False -> var $ list !! i
@@ -530,7 +538,10 @@ typeInfer :: Constants -> (Name,Spine,Type) -> Choice Constants
 typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) 0) $ do
 
   (val,constraint) <- appendErr ("in name: "++ nm ++" : "++show val) $ 
-                      trace ("Checking: " ++nm) $ typeCheckToEnv $ checkType val ty
+                      trace ("Checking: " ++nm) $ 
+                      trace ("\tVAL: " ++show val) $ 
+                      trace ("\t:: " ++show ty) $ 
+                      typeCheckToEnv $ checkType val ty
   (sub,ctxt) <- runStateT (unify constraint) emptyContext
   
   return $ M.insert nm (unsafeSubst sub val) env
@@ -545,24 +556,41 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 ----------------------------
 typeCheckAxioms :: [(Maybe Name,Name,Spine,Type)] -> Choice Constants
 typeCheckAxioms lst = do
-  forM lst $ \(fam,_,val,_) -> case fam of
-    Just fam -> unless (getFamily val == fam) $ throwError $ "not the right family: need "++show fam++" for "++show val
-    Nothing -> return ()
+  let toplst = topoSortAxioms $ map (\(fam,a,b,t) -> (a,b,t)) lst  
   
-  let toplst = topoSortAxioms $ map (\(fam,a,b,t) -> (a,b,t)) lst
+  -- check the closedness of families.  this gets done
+  -- after typechecking since family checking needs to evaluate a little bit
+  -- in order to allow defs in patterns
+  forM lst $ \(fam,_,val,_) -> case fam of
+    Just fam -> do
+      unless (getFamily val == fam) $ throwError $ "not the right family: need "++show fam++" for "++show val
+    Nothing -> return ()
+
+      -- typeInfer :: Constants -> (Name,Spine,Type) -> Choice Constants
+  let inferAll l [] = return l
+      inferAll l (a@(nm,val,_):toplst) = do
+        l' <- typeInfer l a
         
-  F.foldlM typeInfer mempty toplst
+        let (toplst',l'') = case nm of
+              '#':'v':':':nm' -> let vnm = l' M.! nm 
+                                     sub = nm' |-> vnm
+                                 in (map (\(nm,val,ty) -> (nm, subst sub val, subst sub ty)) toplst, subst sub <$> l')
+              _ -> (toplst,l')
+        inferAll l'' toplst'
+
+  inferAll mempty toplst
 
 typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = do
   let toAxioms (Predicate nm ty cs) = (Just "atom",nm,ty,atom):map (\(nm',ty') -> (Just nm,nm',ty',atom)) cs
       toAxioms (Query nm val) = [(Nothing, nm,val,atom)]
-      toAxioms (Define nm val ty) = [(Just $ getFamily ty, nm,ty,atom), (Nothing, "#val: "++nm,val,ty)]
-  tyMap <- typeCheckAxioms (concatMap toAxioms preds)
+      toAxioms (Define nm val ty) = [(Just $ getFamily ty, nm,ty,atom), (Nothing, "#v:"++nm,val,ty)]
+
+  tyMap <- typeCheckAxioms $ concatMap toAxioms preds
   
   let newPreds (Predicate nm _ cs) = Predicate nm (tyMap M.! nm) $ map (\(nm,_) -> (nm,tyMap M.! nm)) cs
       newPreds (Query nm _) = Query nm (tyMap M.! nm)
-      newPreds (Define nm _ _) = Define nm (tyMap M.! ("#val: "++nm)) (tyMap M.! nm)
+      newPreds (Define nm _ _) = Define nm (tyMap M.! ("#v:"++nm)) (tyMap M.! nm)
   
   return $ newPreds <$> preds
   

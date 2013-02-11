@@ -66,7 +66,7 @@ defn concatList : {A} list A -> list A -> list A -> atom
    | concatListNil  = {T}{L:list T} concatList nil L L
    | concatListCons = {T}{A B C}{V:T} concatList (cons V A) B (cons V C) <- concatList A B C
 
-defn concatableList : {A:atom} concatable (list A)
+defn concatableList : {A:atom} concatable $ list A
   as ?\A . concatableImp (list A) concatList
 
 ----------------

@@ -113,11 +113,15 @@ m1 *** m2 = M.union m2 $ subst m2 <$> m1
 
 rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
-
-rebuildSpine (Spine "#imp_abs#" [ty, Abs nm _ rst]) (a:apps') = case a of
+rebuildSpine (Spine "#imp_abs#" [ty, Abs nm _ rst]) (a:apps') = case a of 
   Spine "#tycon#" [Spine nm' [v]] | nm == nm' -> 
-    rebuildSpine (subst (nm |-> v) $ rst) apps'
-  _ -> imp_abs nm ty $ rebuildSpine rst (a:apps')
+      rebuildSpine (subst (nm |-> v) $ rst) apps'
+  Spine "#tycon#" [Spine nm' [v]] -> case apps' of
+    [] -> rst
+    _ -> rebuildSpine (rebuildSpine (imp_abs nm ty $ rst) apps') [a]
+  _ -> rebuildSpine rst (a:apps')
+  
+  
 rebuildSpine (Spine c apps) apps' = Spine c (apps ++ apps')
 rebuildSpine (Abs nm _ rst) (a:apps') = rebuildSpine (subst (nm |-> a) $ rst) apps'
 
