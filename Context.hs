@@ -6,7 +6,7 @@ import Data.Functor
 import qualified Data.Map as M
 import Data.Map (Map)
 import Control.Monad.State (StateT, runStateT, modify, get, put)
-
+import Data.List
 
 --------------------------------
 ---  constraint context list ---
@@ -91,7 +91,7 @@ getHead (Context Nothing _ _) = error "no head"
 
 -- gets the list of bindings after (below) a given binding
 getAfter s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
-  where gb (Binding _ nm ty _ n) = (nm,ty):case n of
+  where gb ~(Binding quant nm ty _ n) = (quant, (nm,ty)):case n of
           Nothing -> []
           Just n -> gb $ case M.lookup n ctxt of 
             Nothing -> error $ "element "++show n++" not in map \n\twith ctxt: "++show ctx++" \n\t for bind: "++show bind++"\n\t"++s
@@ -99,7 +99,7 @@ getAfter s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
 
 -- gets the list of bindings before (above) a given binding
 getBefore s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
-  where gb (Binding quant nm ty p _) = (quant, (nm,ty)):case p of
+  where gb ~(Binding quant nm ty p _) = (quant, (nm,ty)):case p of
           Nothing -> []
           Just p -> gb $ case M.lookup p ctxt of 
             Nothing -> error $ "element "++show p++" not in map \n\twith ctxt: "++show ctx++" \n\t for bind: "++show bind++"\n\t"++s
@@ -130,11 +130,17 @@ getBindings :: Binding -> WithContext [(Name,Type)]
 getBindings bind = do
   ctx <- get
   return $ snd <$> getBefore "IN: getBindings" bind ctx
+  
+getExists :: WithContext (Maybe (Name,Type))
+getExists = do
+  ctx <- get
+  return $ case ctx of
+    Context _ _ Nothing -> Nothing
+    _ -> snd <$> find (\(q,_) -> q == Exists) (getAfter "IN: getBindings" (getHead ctx) ctx)
 
 getAllBindings = do
   ctx <- get
   getBindings $ getTail ctx
-
 
 
 isolateForFail m = do

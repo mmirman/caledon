@@ -18,7 +18,7 @@ import Control.Monad.RWS (RWST, ask, local, censor, runRWST, get, put)
 import Control.Monad.Trans.Cont
 import Control.Monad.Trans (lift)
 import Choice
-
+import Debug.Trace
 -----------------------------
 ---  abstract syntax tree ---
 -----------------------------
@@ -113,6 +113,7 @@ m1 *** m2 = M.union m2 $ subst m2 <$> m1
 
 rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
+
 rebuildSpine (Spine "#imp_abs#" [ty, Abs nm _ rst]) (a:apps') = case a of
   Spine "#tycon#" [Spine nm' [v]] | nm == nm' -> 
     rebuildSpine (subst (nm |-> v) $ rst) apps'
@@ -125,6 +126,7 @@ newName nm s = (nm',s')
         nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/") [0..]
         fv = mappend (M.keysSet s) (freeVariables s)
         free k = not $ S.member k fv
+
 
 class Subst a where
   subst :: Substitution -> a -> a
@@ -192,14 +194,12 @@ infixr 1 :&:
 
 data Constraint = Top
                 | Spine :=: Spine
-                | Term :∈: Type
                 | Constraint :&: Constraint
                 | Bind Quant Name Type Constraint
                 deriving (Eq)
                          
 instance Show Constraint where
   show (a :=: b) = show a++" ≐ "++show b
-  show (a :∈: b) = show a++" ∈ "++show b
   show (a :&: b) = show a++" ∧ "++show b
   show Top = " ⊤ "
   show (Bind q n ty c) = show q++" "++ n++" : "++show ty++" . "++showWithParens c
@@ -219,7 +219,6 @@ instance Subst Constraint where
   subst s c = case c of
     Top -> Top
     s1 :=: s2 -> subq (:=:) s1 s2
-    s1 :∈: s2 -> subq (:∈:) s1 s2
     c1 :&: c2 -> subq (:&:) c1 c2
     Bind q nm t c -> Bind q nm' (subst s t) $ subst s' c
       where (nm',s') = newName nm s
@@ -244,7 +243,6 @@ instance RegenAbsVars Constraint where
     Spine a [] :=: Spine b [] | a == b -> return Top
     a :=: b -> regen (:=:) a b
     a :&: b -> regen (:&:) a b
-    a :∈: b -> regen (:∈:) a b
     Top -> return Top
     where regen e a b = do
             a' <- regenAbsVars a 

@@ -34,7 +34,7 @@ unify :: Constraint -> WithContext Substitution
 unify cons = do
   cons <- lift $ regenAbsVars cons
   let uniWhile c = uniWith unifyOne 
-                 $ uniWith unifySearch
+                 $ uniWith envSearch
                  $ checkFinished c >> return (mempty, c)
         where uniWith wth backup = do
                 res <- wth c 
@@ -42,16 +42,30 @@ unify cons = do
                   Nothing -> backup
                   Just (sub, c') -> do
                     modify $ subst sub
-                    (\(s,c) -> (sub *** s, c)) <$> uniWhile c'      
+                    (\(s,c) -> (sub *** s, c)) <$> uniWhile (reduceTops c')
   fst <$> uniWhile cons
 
-checkFinished cval = cf cval
-  where cf c = case c of     
+reduceTops (a :=: b) = a :=: b
+reduceTops Top = Top
+reduceTops (c1 :&: c2) = case (reduceTops c1, reduceTops c2) of
+  (Top,b) -> b
+  (a,Top) -> a
+  (a,b) -> a :&: b
+reduceTops (Bind q nm ty b) = case reduceTops b of
+  Top -> Top
+  b -> Bind q nm ty b
+
+checkFinished cval = do
+  let cf c = case c of
           Top -> return ()
-          Bind _ _ _ c -> cf c
+          Bind Forall _ _ c -> cf c
           c1 :&: c2 -> cf c1 >> cf c2
           _ -> throwError $ "ambiguous constraint: " ++show cval
-
+  
+  binds <- getExists
+  unless (binds == Nothing) $ throwError $ "ambiguous constraint: " ++show cval
+  cf cval
+  
 unifyOther wth (Bind quant nm ty c) = do
   modify $ addToTail quant nm ty
   return $ Just (mempty, c)
@@ -66,10 +80,13 @@ unifyOther wth (c1 :&: c2) = do
     Just (sub,c1) -> return $ Just $ (sub,c1 :&: subst sub c2)
 unifyOther _ _ = return Nothing             
              
-unifySearch (a :∈: m) = do
-  cons <- rightSearch a m
-  return $ Just (mempty, cons)
-unifySearch c = unifyOther unifySearch c
+envSearch c = do  
+  binds <- getExists
+  case binds of
+    Nothing -> return Nothing
+    Just (a,m) -> do
+      cons <- rightSearch (var a) m
+      return $ Just (mempty,cons)
 
 unifyOne :: Constraint -> WithContext (Maybe (Substitution , Constraint))
 unifyOne (a :=: b) = do
@@ -79,18 +96,19 @@ unifyOne (a :=: b) = do
     r -> return r
 unifyOne c = unifyOther unifyOne c
 
+
 unifyEq cons@(a :=: b) = case (a,b) of 
   (Spine "#imp_forall#" [_, Abs a ty l], b) -> vtrace "-implicit-" $ do
-    return $ Just (mempty, (∃) a ty $ var a :∈: ty :&: l :=: b)
+    return $ Just (mempty, (∃) a ty $ l :=: b)
   (b, Spine "#imp_forall#" [_, Abs a ty l]) -> vtrace "-implicit-" $ do
-    return $ Just (mempty,  (∃) a ty $ var a :∈: ty :&: b :=: l)
+    return $ Just (mempty,  (∃) a ty $ b :=: l)
 
   (Spine "#imp_abs#" (ty:l:r), b) -> vtrace ("-imp_abs- : "++show a ++ "\n\t"++show b) $ do
     a <- lift $ getNewWith "@a"
-    return $ Just (mempty, (∃) a ty $ var a :∈: ty :&: rebuildSpine l (var a:r) :=: b)
+    return $ Just (mempty, (∃) a ty $ rebuildSpine l (var a:r) :=: b)
   (b, Spine "#imp_abs#" (ty:l:r)) -> vtrace "-imp_abs-" $ do
     a <- lift $ getNewWith "@a"
-    return $ Just (mempty, (∃) a ty $ var a :∈: ty :&: b :=: rebuildSpine l (var a:r))        
+    return $ Just (mempty, (∃) a ty $ b :=: rebuildSpine l (var a:r))
     
   (Abs nm ty s , Abs nm' ty' s') -> vtrace "-aa-" $ do
     return $ Just (mempty, ty :=: ty' :&: ((∀) nm ty $ s :=: subst (nm' |-> var nm) s'))
@@ -252,8 +270,8 @@ gvar_const _ _ = error "gvar-const is not made for this case"
 gvar_uvar_outside a@(Spine x yl,_) b@(Spine y _,bty) = do
 {-  let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
   i <- F.asum $ return <$> ilst
-  gvar_fixed a b $ var . (!! i) -}
-
+  gvar_fixed a b $ var . (!! i)
+-}
   case [i | (i,y') <- zip [0..] yl , y' == var y] of
     [i] -> vtrace ("-ic-") $ gvar_fixed a b $ lookup
       where lookup list = case length list <= i of
@@ -357,7 +375,7 @@ leftSearch m goal (x,target) = vtrace "-ls-" $ leftCont (var x) target
             cons1 <- leftCont (rebuildSpine n [tycon x $ var x']) (subst (x |-> var x') b)
             cons2 <- rightSearch (var x') a
             return $ cons1 :&: cons2
-            
+
           Spine _ _ -> do
             return $ goal :=: target :&: m :=: n
           _ -> error $ "λ does not have type atom: " ++ show target
@@ -365,7 +383,7 @@ leftSearch m goal (x,target) = vtrace "-ls-" $ leftCont (var x) target
 search :: Type -> WithContext (Substitution, Term)
 search ty = do
   e <- lift $ getNewWith "e"
-  sub <- unify $ (∃) e ty $ var e :∈: ty
+  sub <- unify $ (∃) e ty $ Top
   return $ (sub, subst sub $ var e)
 
 -----------------------------
@@ -373,7 +391,6 @@ search ty = do
 -----------------------------
 
 (≐) a b = lift $ tell $ a :=: b
-(∈) a b = lift $ tell $ var a :∈: b
 
 checkType :: Spine -> Type -> TypeChecker Spine
 checkType sp ty = case sp of
@@ -385,7 +402,6 @@ checkType sp ty = case sp of
     tyA <- checkType tyA atom
     x' <- getNewWith "@inf"
     addToEnv (∃) x' tyA $ do
-      x' ∈ tyA
       checkType (subst (x |-> var x') tyB) ty
 
   Spine "#pack#" [tp, Abs imp _ interface, tau, e] -> do
@@ -436,7 +452,6 @@ checkType sp ty = case sp of
       e <- getNewWith "@e"
       tyA <- checkType tyA atom
       addToEnv (∃) e (forall x tyA atom) $ do
-        e ∈ forall x tyA atom
         imp_forall x tyA (Spine e [var x]) ≐ ty
         sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
         return $ imp_abs x tyA sp
@@ -451,7 +466,6 @@ checkType sp ty = case sp of
       e <- getNewWith "@e"
       tyA <- checkType tyA atom
       addToEnv (∃) e (forall x tyA atom) $ do
-        e ∈ forall x tyA atom
         forall x tyA (Spine e [var x]) ≐ ty
         sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
         return $ Abs x tyA sp
@@ -480,8 +494,6 @@ checkType sp ty = case sp of
             tybody <- getNewWith "@v"
             let tybodyty = forall z (var x) atom
             addToEnv (∃) x atom $ addToEnv (∃) tybody tybodyty $ do 
-              x ∈ atom
-              tybody ∈ tybodyty
               a <- checkType a (var x)
               v <- getNewWith "@v"
               forall v (var x) (Spine tybody [var v]) ≐ mty
@@ -514,16 +526,21 @@ testGen s t = do
 ----------------------
 --- type inference ---
 ----------------------
-    
 typeInfer :: Constants -> (Name,Spine,Type) -> Choice Constants
 typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) 0) $ do
+
   (val,constraint) <- appendErr ("in name: "++ nm ++" : "++show val) $ 
                       trace ("Checking: " ++nm) $ typeCheckToEnv $ checkType val ty
   (sub,ctxt) <- runStateT (unify constraint) emptyContext
   
-  return $ M.insert nm (subst sub val) env
-  
+  return $ M.insert nm (unsafeSubst sub val) env
 
+
+unsafeSubst s (Spine nm apps) = let apps' = unsafeSubst s <$> apps in case s ! nm of 
+  Just nm -> rebuildSpine nm apps'
+  _ -> Spine nm apps'
+unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
+  
 ----------------------------
 --- the public interface ---
 ----------------------------
