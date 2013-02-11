@@ -21,7 +21,6 @@ infixr 0 $
 defn $ : {a b:atom} (a -> b) -> a -> b
   as ?\at bt : atom . \f . \ a : at . f a
 
-
 --------------
 --- concat ---
 --------------
@@ -46,9 +45,9 @@ defn add   : natural -> natural -> natural -> atom
 defn sub   : natural -> natural -> natural -> atom
    | sub_with_add = {N}{M}{R} sub N M R <- add N R M
 
-
 defn concatableNatural : concatable natural
   as concatableImp natural add
+
 -------------
 --- Maybe ---
 -------------
@@ -69,6 +68,7 @@ defn concatList : {A} list A -> list A -> list A -> atom
 
 defn concatableList : {A:atom} concatable (list A)
   as ?\A . concatableImp (list A) concatList
+
 ----------------
 --- Booleans ---
 ----------------
@@ -106,4 +106,3 @@ infixr 1 \/
 defn \/ : atom -> atom -> atom
    | or1 = {a b:atom} a -> a \/ b
    | or2 = {a b:atom} b -> a \/ b
-

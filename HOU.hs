@@ -535,7 +535,6 @@ typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envCon
   
   return $ M.insert nm (unsafeSubst sub val) env
 
-
 unsafeSubst s (Spine nm apps) = let apps' = unsafeSubst s <$> apps in case s ! nm of 
   Just nm -> rebuildSpine nm apps'
   _ -> Spine nm apps'
