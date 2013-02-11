@@ -222,7 +222,7 @@ tipe = do
          <?> "term"
             
       pHead = pParens pAt (pOp <|> ptipe <|> pAsc) "head"
-      pArg  = pParens (pAt <|> tycon) (pOp <|> ptipe) "argument"
+      pArg  = pParens (pAt <|> pTycon) (pOp <|> ptipe) "argument"
       
       pParens anyAmount atLeast1 nm = anyAmount <|> pothers <?> nm
         where others = atLeast1 <|> anyAmount <|> pothers <?> nm
@@ -251,9 +251,9 @@ tipe = do
                 return $ var r
          <?> "atom"
 
-      tycon = braces $ do
+      pTycon = braces $ do
         (nm,ty) <- named decVar
-        return $ Spine "#tycon#" [Spine nm [ty]]    
+        return $ tycon nm ty
       
       myParens s m = between (symbol "(" <?> ("("++s)) (symbol ")" <?> (s++")")) m
       

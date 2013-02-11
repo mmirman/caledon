@@ -91,12 +91,14 @@ var nm = Spine nm []
 atom = var "atom"
 ascribe a t = Spine ("#ascribe#") [t, a]
 forall x tyA v = Spine ("#forall#") [tyA, Abs x tyA v]
-imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
 exists x tyA v = Spine ("#exists#") [tyA, Abs x tyA v]
 pack e tau imp tp interface = Spine "#pack#" [tp, Abs imp tp interface, tau, e]
 open cl (imp,ty) (p,iface) cty inexp = Spine "#open#" [cl, ty,Abs imp ty iface, Abs imp ty (Abs p iface cty), Abs imp ty (Abs p iface inexp)] 
 infer x tyA v = Spine ("#infer#") [tyA, Abs x tyA v]
+
+imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
 imp_abs x tyA v = Spine ("#imp_abs#") [tyA, Abs x tyA v]
+tycon nm val = Spine "#tycon#" [Spine nm [val]]
 ---------------------
 ---  substitution ---
 ---------------------
@@ -111,6 +113,10 @@ m1 *** m2 = M.union m2 $ subst m2 <$> m1
 
 rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
+rebuildSpine (Spine "#imp_abs#" [ty, Abs nm _ rst]) (a:apps') = case a of
+  Spine "#tycon#" [Spine nm' [v]] | nm == nm' -> 
+    rebuildSpine (subst (nm |-> v) $ rst) apps'
+  _ -> imp_abs nm ty $ rebuildSpine rst (a:apps')
 rebuildSpine (Spine c apps) apps' = Spine c (apps ++ apps')
 rebuildSpine (Abs nm _ rst) (a:apps') = rebuildSpine (subst (nm |-> a) $ rst) apps'
 

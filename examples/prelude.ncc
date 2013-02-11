@@ -1,3 +1,4 @@
+{-
 -- an example of how powerfull the syntax is
 infixr 0 |->
 defn |-> : [a : atom] [b : atom] atom
@@ -37,7 +38,7 @@ defn maybe : atom → atom
 defn list : atom → atom
    | nil = {a} list a
    | cons = {a} a -> list a → list a
-
+-}
 defn bool : atom
    | true = bool
    | false = bool
@@ -52,7 +53,7 @@ defn |:| : {a : atom} a -> a -> (a -> a -> a) -> a
 infix 0 ==>
 defn ==> : {a : atom} bool -> ((a -> a -> a) -> a) -> a -> atom
    | thentrue  = [a : atom][f: _ -> a] (true ==> f)  (f (\A B : a. A))
-   | thenfalse = [a : atom][f: _ -> a] (false ==> f) (f (\A B : a. B))
+   | thenfalse = [b : atom][f: _ -> b] (false ==> f) (f (\A B : b . B))
 
 defn not : bool -> bool -> atom
   as \a . if a ==> (false |:| true)

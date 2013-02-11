@@ -252,8 +252,8 @@ gvar_const _ _ = error "gvar-const is not made for this case"
 gvar_uvar_outside a@(Spine x yl,_) b@(Spine y _,bty) = do
 {-  let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
   i <- F.asum $ return <$> ilst
-  gvar_fixed a b $ var . (!! i)
--}
+  gvar_fixed a b $ var . (!! i) -}
+
   case [i | (i,y') <- zip [0..] yl , y' == var y] of
     [i] -> vtrace ("-ic-") $ gvar_fixed a b $ lookup
       where lookup list = case length list <= i of
@@ -265,7 +265,7 @@ gvar_uvar_outside a@(Spine x yl,_) b@(Spine y _,bty) = do
         Spine defered $ var <$> (ui_list !!) <$> ilst
       modify $ addToHead Exists defered $ foldr (\_ a -> bty ~> a) bty ilst
       return res
-  
+
 gvar_uvar_outside _ _ = error "gvar-uvar-outside is not made for this case"
 
 gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
@@ -315,12 +315,22 @@ rightSearch :: Term -> Type -> WithContext Constraint
 rightSearch m goal = vtrace ("-rs- "++show m++" ∈ "++show goal) $ case goal of
   Spine "#forall#" [_, Abs x a b] -> do
     y <- lift $ getNewWith "@sY"
-    x' <- lift $ getNewWith "@sY"
+    x' <- lift $ getNewWith "@sX"
     modify $ addToTail Forall x' a
     let b' = subst (x |-> var x') b
     modify $ addToTail Exists y b'
     cons <- rightSearch (var y) b'
     return $ var y :=: rebuildSpine m [var x'] :&: cons
+
+  Spine "#imp_forall#" [_, Abs x a b] -> do
+    y <- lift $ getNewWith "@isY"
+    x' <- lift $ getNewWith "@isX"
+    modify $ addToTail Forall x' a
+    let b' = subst (x |-> var x') b
+    modify $ addToTail Exists y b'
+    cons <- rightSearch (var y) b'
+    return $ var y :=: rebuildSpine m [tycon x $ var x'] :&: cons
+
   Spine nm _ -> do
     env <- getEnv
     let envl = M.toList env
@@ -332,14 +342,22 @@ rightSearch m goal = vtrace ("-rs- "++show m++" ∈ "++show goal) $ case goal of
       _ -> F.asum $ leftSearch m goal <$> filter (sameFamily . snd) envl
 
 leftSearch m goal (x,target) = vtrace "-ls-" $ leftCont (var x) target
-  where leftCont n target = fail ("No proof found:  "++show m ++" ∈ " ++show goal) <|> case target of 
+  where leftCont n target = fail ("No proof found:  "++show m ++" ∈ " ++show goal) <|> case target of
+          
           Spine "#forall#" [_, Abs x a b] -> do
             x' <- lift $ getNewWith "@sla"
-            -- by using existential quantification we can defer search implicitly
             modify $ addToTail Exists x' a
             cons1 <- leftCont (rebuildSpine n [var x']) (subst (x |-> var x') b)
             cons2 <- rightSearch (var x') a
             return $ cons1 :&: cons2
+            
+          Spine "#imp_forall#" [_ , Abs x a b] -> do  
+            x' <- lift $ getNewWith "@isla"
+            modify $ addToTail Exists x' a
+            cons1 <- leftCont (rebuildSpine n [tycon x $ var x']) (subst (x |-> var x') b)
+            cons2 <- rightSearch (var x') a
+            return $ cons1 :&: cons2
+            
           Spine _ _ -> do
             return $ goal :=: target :&: m :=: n
           _ -> error $ "λ does not have type atom: " ++ show target
