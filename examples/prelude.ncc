@@ -1,3 +1,6 @@
+---------------------
+--- Unary Numbers ---
+---------------------
 -- an example of how powerfull the syntax is
 infixr 0 |->
 defn |-> : [a : atom] [b : atom] atom
@@ -15,29 +18,41 @@ infixl 1 <=|
 defn <=| : [b : atom][a : atom] atom
   as \a : atom . \b : atom . {ha : b} a
 
-infixr 1 =:=
-defn =:= : {a : atom} a -> a -> atom
-   | eq = [a : atom] a =:= a
+---------------------
+--- Unary Numbers ---
+---------------------
+defn natural  : atom
+   | zero = natural
+   | succ = natural → natural
 
-defn num  : atom
-   | zero = num
-   | succ = num → num
-
-defn add   : num → num → num → atom
+defn add   : natural -> natural -> natural -> atom
    | add_z = {N} add zero N N
    | add_s = {N}{M}{R} add N M R → add (succ N) M (succ R)
 
-defn sub   : num → num → num → atom
-   | sub_with_add = {N}{M}{R} sub N M R ← add N R M
+defn sub   : natural -> natural -> natural -> atom
+   | sub_with_add = {N}{M}{R} sub N M R <- add N R M
 
+-------------
+--- Maybe ---
+-------------
 defn maybe : atom → atom
    | nothing = {a} maybe a
    | just = {a} a → maybe a
 
-defn list : atom → atom
+-------------
+--- Lists ---
+-------------
+defn list : atom -> atom
    | nil = {a} list a
-   | cons = {a} a -> list a → list a
+   | cons = {a} a -> list a -> list a
 
+defn concatList : {A} list A -> list A -> list A -> atom
+   | concatListNil  = {T}{L:list T} concatList nil L L
+   | concatListCons = {T}{A B C}{V:T} concatList A B C -> concatList (cons V A) B (cons V C)
+
+----------------
+--- Booleans ---
+----------------
 defn bool : atom
    | true = bool
    | false = bool
@@ -56,3 +71,19 @@ defn ==> : {a : atom} bool -> ((a -> a -> a) -> a) -> a -> atom
 
 defn not : bool -> bool -> atom
   as \a . if a ==> (false |:| true)
+
+-------------------
+--- Constraints ---
+-------------------
+infixr 1 =:=
+defn =:= : {a : atom} a -> a -> atom
+   | eq = [a : atom] a =:= a
+
+infixr 1 /\
+defn /\ : atom -> atom -> atom
+   | and = {a:atom}{b:atom} a -> b -> a /\ b
+
+infixr 1 \/
+defn \/ : atom -> atom -> atom
+   | or1 = {a:atom}{b:atom} a -> a \/ b
+   | or2 = {a:atom}{b:atom} b -> a \/ b
