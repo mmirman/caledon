@@ -5,11 +5,14 @@ import Data.Monoid
 import Data.Functor
 import qualified Data.Map as M
 import Data.Map (Map)
+import Control.Monad.State (StateT, runStateT, modify, get, put)
 
 
 --------------------------------
 ---  constraint context list ---
 --------------------------------
+
+
 data Binding = Binding { elmQuant :: Quant
                        , elmName :: Name
                        , elmType :: Type
@@ -106,3 +109,39 @@ checkContext _ c@(Context Nothing _ Nothing) = c
 checkContext s ctx = foldr seq ctx $ zip st ta
   where st = getBefore s (getTail ctx) ctx
         ta = getAfter s (getHead ctx) ctx
+
+
+
+
+------------------------        
+-- env with a context --        
+------------------------
+type WithContext = StateT Context Env 
+
+getElm :: Name -> Name -> WithContext (Either Binding Spine)
+getElm s x = do
+  ty <- lookupConstant x
+  case ty of
+    Nothing -> Left <$> (\ctxt -> lookupWith ("looking up "++x++"\n\t in context: "++show ctxt++"\n\t"++s) x ctxt) <$> ctxtMap <$> get
+    Just a -> return $ Right a
+
+-- | This gets all the bindings outside of a given bind and returns them in a list (not including that binding).
+getBindings :: Binding -> WithContext [(Name,Type)]
+getBindings bind = do
+  ctx <- get
+  return $ snd <$> getBefore "IN: getBindings" bind ctx
+
+getAllBindings = do
+  ctx <- get
+  getBindings $ getTail ctx
+
+
+
+isolateForFail m = do
+  s <- get
+  c <- m
+  case c of
+    Nothing -> do
+      put s
+      return Nothing
+    _ -> return c

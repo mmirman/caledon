@@ -186,13 +186,15 @@ infixr 1 :&:
 
 data Constraint = Top
                 | Spine :=: Spine
+                | Term :∈: Type
                 | Constraint :&: Constraint
                 | Bind Quant Name Type Constraint
                 deriving (Eq)
                          
 instance Show Constraint where
-  show (a :=: b) = show a ++" ≐ "++show b
-  show (a :&: b) = show a ++" ∧ "++show b
+  show (a :=: b) = show a++" ≐ "++show b
+  show (a :∈: b) = show a++" ∈ "++show b
+  show (a :&: b) = show a++" ∧ "++show b
   show Top = " ⊤ "
   show (Bind q n ty c) = show q++" "++ n++" : "++show ty++" . "++showWithParens c
     where showWithParens Bind{} = show c
@@ -208,11 +210,14 @@ instance Monoid Constraint where
   mappend a b = a :&: b
 
 instance Subst Constraint where
-  subst _ Top = Top
-  subst s (s1 :=: s2) = subst s s1 :=: subst s s2
-  subst s (c1 :&: c2) = subst s c1 :&: subst s c2
-  subst s (Bind q nm t c) = Bind q nm' (subst s t) $ subst s' c
-    where (nm',s') = newName nm s
+  subst s c = case c of
+    Top -> Top
+    s1 :=: s2 -> subq (:=:) s1 s2
+    s1 :∈: s2 -> subq (:∈:) s1 s2
+    c1 :&: c2 -> subq (:&:) c1 c2
+    Bind q nm t c -> Bind q nm' (subst s t) $ subst s' c
+      where (nm',s') = newName nm s
+    where subq e c1 c2 = e (subst s c1) (subst s c2)
           
 
 (∃) = Bind Exists
@@ -231,15 +236,14 @@ instance RegenAbsVars Constraint where
           Bind q nm' ty' <$> regenAbsVars (subst sub cons)
         _ -> Bind q nm ty' <$> regenAbsVars cons
     Spine a [] :=: Spine b [] | a == b -> return Top
-    a :=: b -> do
-      a' <- regenAbsVars a 
-      b' <- regenAbsVars b 
-      return $ a' :=: b'
-    a :&: b -> do  
-      a' <- regenAbsVars a 
-      b' <- regenAbsVars b 
-      return $ a' :&: b'
+    a :=: b -> regen (:=:) a b
+    a :&: b -> regen (:&:) a b
+    a :∈: b -> regen (:∈:) a b
     Top -> return Top
+    where regen e a b = do
+            a' <- regenAbsVars a 
+            b' <- regenAbsVars b 
+            return $ e a' b'
 instance RegenAbsVars Spine where  
   regenAbsVars (Abs a ty r) = do
     a' <- getNewWith "@new"
@@ -248,6 +252,15 @@ instance RegenAbsVars Spine where
     return $ Abs a' ty' r'
   regenAbsVars (Spine a l) = Spine a <$> mapM regenAbsVars l
  
+getFamily (Spine "#infer#" [_, Abs _ _ lm]) = getFamily lm
+getFamily (Spine "#ascribe#"  (_:v:l)) = getFamily v
+getFamily (Spine "#forall#" [_, Abs _ _ lm]) = getFamily lm
+getFamily (Spine "#imp_forall#" [_, Abs _ _ lm]) = getFamily lm
+getFamily (Spine "#exists#" [_, Abs _ _ lm]) = getFamily lm
+getFamily (Spine "#open#" (_:_:_:_:Abs _ _ (Abs _ _ c):_)) = getFamily c
+getFamily (Spine nm' _) = nm'
+getFamily v = error $ "values don't have families: "++show v
+
 
 consts = [ ("atom", atom)
          , ("#ascribe#", forall "a" atom $ (var "a") ~> (var "a"))

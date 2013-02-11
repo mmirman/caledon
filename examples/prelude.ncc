@@ -56,4 +56,3 @@ defn ==> : {a : atom} bool -> ((a -> a -> a) -> a) -> a -> atom
 
 defn not : bool -> bool -> atom
   as \a . if a ==> (false |:| true)
-
