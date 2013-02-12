@@ -26,7 +26,7 @@ import Debug.Trace
 type Name = String
 
 infixr 0 ~>
-(~>) = forall ""
+(~>) = forall "#"
 
 data Spine = Spine Name [Type]
            | Abs Name Type Spine 
@@ -68,7 +68,7 @@ instance Show Spine where
   show (Spine "#forall#" [_,Abs nm t t']) = "["++nm++" : "++show t++"] "++show t'  
   show (Spine "#imp_forall#" [_,Abs nm t t']) = "{"++nm++" : "++show t++"} "++show t'  
   show (Spine "#tycon#" [Spine nm [t]]) = "{"++nm++" = "++show t++"}"
-  show (Spine "#exists#" [_,Abs nm t t']) = "∃"++nm++" : "++show t++". "++show t' 
+  show (Spine "#exists#" [_,Abs nm t t']) = "∃ "++nm++" : "++show t++". "++show t' 
   show (Spine "#imp_abs#" [_, Abs nm ty t]) = "?λ "++nm++" : "++showWithParens ty++" . "++show t
   show (Spine nm (t:t':l)) | isOperator nm = "( "++showWithParens t++" "++nm++" "++ show t'++" )"++show (Spine "" l)
   show (Spine h l) = h++concatMap showWithParens' l
@@ -92,7 +92,7 @@ atom = var "atom"
 ascribe a t = Spine ("#ascribe#") [t, a]
 forall x tyA v = Spine ("#forall#") [tyA, Abs x tyA v]
 exists x tyA v = Spine ("#exists#") [tyA, Abs x tyA v]
-pack e tau imp tp interface = Spine "#pack#" [tp, Abs imp tp interface, tau, e]
+pack e tau imp tp interface = Spine "pack" [tp, Abs imp tp interface, tau, e]
 open cl (imp,ty) (p,iface) cty inexp = Spine "#open#" [cl, ty,Abs imp ty iface, Abs imp ty (Abs p iface cty), Abs imp ty (Abs p iface inexp)] 
 infer x tyA v = Spine ("#infer#") [tyA, Abs x tyA v]
 
@@ -114,13 +114,14 @@ m1 *** m2 = M.union m2 $ subst m2 <$> m1
 rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
 rebuildSpine (Spine "#imp_abs#" [ty, Abs nm _ rst]) (a:apps') = case a of 
+  -- TODO: this is not right!
   Spine "#tycon#" [Spine nm' [v]] | nm == nm' -> 
       rebuildSpine (subst (nm |-> v) $ rst) apps'
+
   Spine "#tycon#" [Spine nm' [v]] -> case apps' of
     [] -> rst
     _ -> rebuildSpine (rebuildSpine (imp_abs nm ty $ rst) apps') [a]
   _ -> rebuildSpine rst (a:apps')
-  
   
 rebuildSpine (Spine c apps) apps' = Spine c (apps ++ apps')
 rebuildSpine (Abs nm _ rst) (a:apps') = rebuildSpine (subst (nm |-> a) $ rst) apps'
@@ -197,6 +198,7 @@ infixr 2 :=:
 infixr 1 :&:
 
 data Constraint = Top
+                | Term :@: Type
                 | Spine :=: Spine
                 | Constraint :&: Constraint
                 | Bind Quant Name Type Constraint
@@ -204,6 +206,7 @@ data Constraint = Top
                          
 instance Show Constraint where
   show (a :=: b) = show a++" ≐ "++show b
+  show (a :@: b) = show a++" ∈ "++show b
   show (a :&: b) = show a++" ∧ "++show b
   show Top = " ⊤ "
   show (Bind q n ty c) = show q++" "++ n++" : "++show ty++" . "++showWithParens c
@@ -222,8 +225,9 @@ instance Monoid Constraint where
 instance Subst Constraint where
   subst s c = case c of
     Top -> Top
+    s1 :@: s2 -> subq (:@:) s1 s2
     s1 :=: s2 -> subq (:=:) s1 s2
-    c1 :&: c2 -> subq (:&:) c1 c2
+    s1 :&: s2 -> subq (:&:) s1 s2
     Bind q nm t c -> Bind q nm' (subst s t) $ subst s' c
       where (nm',s') = newName nm s
     where subq e c1 c2 = e (subst s c1) (subst s c2)
@@ -247,6 +251,7 @@ instance RegenAbsVars Constraint where
     Spine a [] :=: Spine b [] | a == b -> return Top
     a :=: b -> regen (:=:) a b
     a :&: b -> regen (:&:) a b
+    a :@: b -> regen (:@:) a b
     Top -> return Top
     where regen e a b = do
             a' <- regenAbsVars a 
@@ -277,18 +282,11 @@ consts = [ ("atom", atom)
          , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))
          , ("#exists#", forall "a" atom $ (var "a" ~> atom) ~> atom)
-         , ("#pack#", forall "tp" atom 
-                    $ forall "iface" (var "tp" ~> atom) 
-                    $ forall "tau" (var "tp") 
-                    $ forall "e" (Spine "iface" [var "tau"]) 
-                    $ exists "imp" (var "tp") (Spine "iface" [var "imp"]))
-         , ("#open#", forall "tp" atom 
-                    $ forall "iface" (var "tp" ~> atom) 
-                    $ forall "closed" (exists "imp" (var "tp") $ Spine "iface" [var "imp"])
-                    $ forall "cty" (forall "imp" (var "tp") $ forall "p" (Spine "iface" [var "imp"]) $ atom)
-                    $ forall "exp" (forall "imp" (var "tp") $ forall "p" (Spine "iface" [var "imp"]) $ Spine "cty" [var "imp", var "p"])
-                    $ open (var "closed") ("imp" ,var "tp") ("p",Spine "iface" [var "imp"]) atom (Spine "cty" [var "imp", var "p"])
-                    )
+         , ("pack", forall "tp" atom 
+                  $ forall "iface" (var "tp" ~> atom) 
+                  $ forall "tau" (var "tp") 
+                  $ forall "e" (Spine "iface" [var "tau"]) 
+                  $ exists "z" (var "tp") (Spine "iface" [var "z"]))
          ]
 
 envConsts = M.fromList consts

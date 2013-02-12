@@ -25,6 +25,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Debug.Trace
 
+--vtrace = trace 
 vtrace = const id
 
 -----------------------------------------------
@@ -46,15 +47,16 @@ unify cons = do
                     (\(s,c) -> (sub *** s, c)) <$> uniWhile (reduceTops c')
   fst <$> uniWhile cons
 
-reduceTops (a :=: b) = a :=: b
-reduceTops Top = Top
+
 reduceTops (c1 :&: c2) = case (reduceTops c1, reduceTops c2) of
   (Top,b) -> b
   (a,Top) -> a
   (a,b) -> a :&: b
-reduceTops (Bind q nm ty b) = case reduceTops b of
+reduceTops (Bind Exists nm ty b) = Bind Exists nm ty $ reduceTops b 
+reduceTops (Bind Forall nm ty b) = case reduceTops b of
   Top -> Top
-  b -> Bind q nm ty b
+  b -> Bind Forall nm ty b
+reduceTops r = r
 
 checkFinished cval = do
   let cf c = case c of
@@ -90,6 +92,7 @@ envSearch c = do
       return $ Just (mempty,cons)
 
 unifyOne :: Constraint -> WithContext (Maybe (Substitution , Constraint))
+
 unifyOne (a :=: b) = do
   c' <- isolateForFail $ unifyEq $ a :=: b 
   case c' of 
@@ -111,6 +114,14 @@ unifyEq cons@(a :=: b) = case (a,b) of
     a <- lift $ getNewWith "@a"
     return $ Just (mempty, (∃) a ty $ b :=: rebuildSpine l (var a:r))
     
+  (Spine "#tycon#" [Spine nm [_]], Spine "#tycon#" [Spine nm' [_]]) | nm /= nm' -> throwError $ "different type constraints: "++show cons
+  (Spine "#tycon#" [Spine nm [val]], Spine "#tycon#" [Spine nm' [val']]) | nm == nm' -> 
+    return $ Just (mempty, val :=: val')
+  (Spine "#tycon#" [Spine _ [val]], val') ->
+    return $ Just (mempty, val :=: val')    
+  (val', Spine "#tycon#" [Spine _ [val]]) ->
+    return $ Just (mempty, val' :=: val)
+
   (Abs nm ty s , Abs nm' ty' s') -> vtrace "-aa-" $ do
     return $ Just (mempty, ty :=: ty' :&: ((∀) nm ty $ s :=: subst (nm' |-> var nm) s'))
   (Abs nm ty s , s') -> vtrace "-as-" $ do
@@ -207,7 +218,7 @@ gvar_gvar_same (Spine x yl, aty) (Spine _ y'l, _) = do
                     
       (uNl,atyl) = unzip $ take n $ typeToListOfTypes aty
       
-  xN <- lift $ getNewWith "@x'"
+  xN <- lift $ getNewWith "@ggs"
   
   let perm = [iyt | (iyt,_) <- filter (\(_,(a,b)) -> a == b) $ zip (zip uNl atyl) (zip yl y'l) ]
       
@@ -236,7 +247,7 @@ gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(Spine x' y'l, bty
       (uNl,atyl) = unzip $ take n $ typeToListOfTypes aty
       (vNl,btyl) = unzip $ take m $ typeToListOfTypes bty
       
-  xN <- lift $ getNewWith "@x'"
+  xN <- lift $ getNewWith "@ggd"
   
   let perm = do
         (iyt,y) <- zip (zip uNl atyl) yl
@@ -254,7 +265,7 @@ gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(Spine x' y'l, bty
       
   modify $ addToHead Exists xN xNty
   
-  return $ Just (sub,Top)
+  return $ Just (sub, Top)
   
 gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) = 
   case elemIndex (var y) $ reverse yl of
@@ -268,12 +279,11 @@ gvar_const a@(Spine x yl, _) b@(Spine y _, bty) = case elemIndex (var y) $ yl of
     let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
     defered <- lift $ getNewWith "@def"
     res <- gvar_fixed a b $ \ui_list -> 
-      Spine defered $ var <$> y:((ui_list !!) <$> ilst)
+      Spine defered $ var y:((ui_list !!) <$>ilst)
     modify $ addToHead Exists defered $ bty ~> foldr (\_ a -> bty ~> a) bty ilst
     return res
 
 gvar_const _ _ = error "gvar-const is not made for this case"
-
 
 gvar_uvar_outside a@(Spine x yl,_) b@(Spine y _,bty) = do
 {-  let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
@@ -284,39 +294,48 @@ gvar_uvar_outside a@(Spine x yl,_) b@(Spine y _,bty) = do
     [i] -> vtrace ("-ic-") $ gvar_fixed a b lookup
       where lookup list = case length list <= i of
               True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
-              False -> var $ list !! i
+              False -> list !! i
     ilst -> vtrace ("-il-") $ do
       defered <- lift $ getNewWith "@def"
       res <- gvar_fixed a b $ \ui_list -> 
-        Spine defered $ var <$> (ui_list !!) <$> ilst
-      modify $ addToHead Exists defered $ foldr (\_ a -> bty ~> a) bty ilst
+        Spine defered $ (ui_list !!) <$> ilst
+      modify $ addToHead Exists defered $ foldr (\_ a-> bty ~> a) bty ilst
       return res
 
 gvar_uvar_outside _ _ = error "gvar-uvar-outside is not made for this case"
 
 gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
   let m = length y'l
+      cons = a :=: b
   xm <- replicateM m $ lift $ getNewWith "@xm"
   
-  let getArgs (Spine "#forall#" [ty, Abs ui _ r]) = (ui,ty):getArgs r
+  let getArgs (Spine "#forall#" [ty, Abs ui _ r]) = ((var ui,ui),Left ty):getArgs r
+      getArgs (Spine "#imp_forall#" [ty, Abs ui _ r]) = ((tycon ui $ var ui,ui),Right ty):getArgs r
       getArgs _ = []
       
       untylr = getArgs aty
       (un,_) = unzip untylr 
-      
-      vun = var <$> un
+      (vun, _) = unzip un
       
       toLterm (Spine "#forall#" [ty, Abs ui _ r]) = Abs ui ty $ toLterm r
-      toLterm _ = rebuildSpine (action un) $ (flip Spine vun) <$> xm
+      toLterm (Spine "#imp_forall#" [ty, Abs ui _ r]) = imp_abs ui ty $ toLterm r      
+      toLterm _ = rebuildSpine (action vun) $ (flip Spine vun) <$> xm
       
       l = toLterm aty
   
-      vbuild e = foldr (\(nm,ty) a -> forall nm ty a) e untylr
+      vbuild e = foldr (\((_,nm),ty) a -> case ty of
+                           Left ty -> forall nm ty a
+                           Right ty -> imp_forall nm ty a
+                       ) e untylr
 
       substBty sub (Spine "#forall#" [_, Abs vi bi r]) (xi:xmr) = (xi,vbuild $ subst sub bi)
                                                                 :substBty (M.insert vi (Spine xi vun) sub) r xmr
+      substBty sub (Spine "#imp_forall#" [_, Abs vi bi r]) (xi:xmr) = (xi,vbuild $ subst sub bi)
+                                                                    : substBty (M.insert vi (Spine xi vun) sub) r xmr
       substBty _ _ [] = []
-      substBty _ _ _  = error $ "s is not well typed"
+      substBty _ s l  = error $ "is not well typed: "++show s
+                        ++"\nFOR "++show l 
+                        ++ "\nON "++ show cons
       
       sub = x |-> l  -- THIS IS THAT STRANGE BUG WHERE WE CAN'T use x in the output substitution!
   
@@ -342,55 +361,58 @@ rightSearch m goal = vtrace ("-rs- "++show m++" ∈ "++show goal) $ case goal of
   Spine "#forall#" [_, Abs x a b] -> do
     y <- lift $ getNewWith "@sY"
     x' <- lift $ getNewWith "@sX"
-    modify $ addToTail Forall x' a
     let b' = subst (x |-> var x') b
-    modify $ addToTail Exists y b'
-    cons <- rightSearch (var y) b'
-    return $ var y :=: rebuildSpine m [var x'] :&: cons
-
+    modify $ addToTail Forall x' a        
+    modify $ addToTail Exists y b' 
+    return $ var y :=: rebuildSpine m [var x']
+  Spine "#exists#" [ty, l] -> do
+    y <- lift $ getNewWith "@sY"
+    modify $ addToTail Exists y ty
+    return $ m :=: Spine "pack" [ty, l, var y, rebuildSpine l [var y]]
+    
   Spine "#imp_forall#" [_, Abs x a b] -> do
     y <- lift $ getNewWith "@isY"
     x' <- lift $ getNewWith "@isX"
-    modify $ addToTail Forall x' a
     let b' = subst (x |-> var x') b
-    modify $ addToTail Exists y b'
-    cons <- rightSearch (var y) b'
-    return $ var y :=: rebuildSpine m [tycon x $ var x'] :&: cons
+    modify $ addToTail Forall x' a        
+    modify $ addToTail Exists y b' 
+    return $ var y :=: rebuildSpine m [tycon x $ var x']
 
   Spine nm _ -> do
     env <- getEnv
     let envl = M.toList env
-        sameFamily (Abs _ _ _) = False
-        sameFamily s = getFamily s == nm
-    case m of 
-      Spine nm _ | M.member nm env -> do
-        leftSearch m goal (nm, env M.! nm)
-      _ -> F.asum $ leftSearch m goal <$> filter (sameFamily . snd) envl
+        sameFamily (_, Abs _ _ _) = False
+        sameFamily (nm',s) = var nm' /= m && getFamily s == nm
+        
+        
+        targets = filter sameFamily envl
+    F.asum $ fail ("FAIL: "++nm++" @ "++show targets):(leftSearch m goal <$> targets)
 
-leftSearch m goal (x,target) = vtrace "-ls-" $ leftCont (var x) target
-  where leftCont n target = fail ("No proof found:  "++show m ++" ∈ " ++show goal) <|> case target of
-          
+leftSearch m goal (x,target) = vtrace ("-ls- " ++ show m ++" ∈ "++ show goal)
+                             $ vtrace ("\t@ " ++x++" : " ++show target)
+                             $ leftCont (var x) target
+  where leftCont n target = fail ("No proof found:  "++show m ++" ∈ " ++show goal
+                                 ++ "\n\t "++show x++" : "++show target) <|> case target of
           Spine "#forall#" [_, Abs x a b] -> do
             x' <- lift $ getNewWith "@sla"
             modify $ addToTail Exists x' a
-            cons1 <- leftCont (rebuildSpine n [var x']) (subst (x |-> var x') b)
-            cons2 <- rightSearch (var x') a
-            return $ cons1 :&: cons2
             
+            cons1 <- leftCont (rebuildSpine n [var x']) (subst (x |-> var x') b)
+            cons2 <- rightSearch (var x') a             
+            return $ cons1  :&: cons2
           Spine "#imp_forall#" [_ , Abs x a b] -> do  
             x' <- lift $ getNewWith "@isla"
             modify $ addToTail Exists x' a
             cons1 <- leftCont (rebuildSpine n [tycon x $ var x']) (subst (x |-> var x') b)
-            cons2 <- rightSearch (var x') a
+            cons2 <- rightSearch (var x') a             
             return $ cons1 :&: cons2
-
           Spine _ _ -> do
             return $ goal :=: target :&: m :=: n
           _ -> error $ "λ does not have type atom: " ++ show target
 
 search :: Type -> WithContext (Substitution, Term)
 search ty = do
-  e <- lift $ getNewWith "e"
+  e <- lift $ getNewWith "@e"
   sub <- unify $ (∃) e ty $ Top
   return $ (sub, subst sub $ var e)
 
@@ -411,25 +433,6 @@ checkType sp ty = case sp of
     x' <- getNewWith "@inf"
     addToEnv (∃) x' tyA $ do
       checkType (subst (x |-> var x') tyB) ty
-
-  Spine "#pack#" [tp, Abs imp _ interface, tau, e] -> do
-    tp <- checkType tp atom    
-    tau <- checkType tau tp
-    interface <- addToEnv (∀) imp tp $ checkType interface atom
-    e <- checkType e (subst (imp |-> tau) interface)    
-    ty ≐ exists imp tp interface
-    return $ pack e tau imp tp interface
-
-  Spine "#open#" [tp, Abs imp _ interface, closed, Abs _ _ (Abs _ _ c), Abs _ _ (Abs p _ exp)] -> do
-    tp <- checkType tp atom
-    closed <- checkType closed $ exists imp tp interface
-    addToEnv (∀) imp tp $ do
-      interface <- checkType interface atom
-      addToEnv (∀) p interface $ do
-        exp <- checkType exp ty    
-        c <- checkType c atom
-        c ≐ ty
-        return $ open closed (imp,tp) (p,interface) c exp
         
   Spine "#imp_forall#" [_, Abs x tyA tyB] -> do
     tyA <- checkType tyA atom
@@ -442,12 +445,6 @@ checkType sp ty = case sp of
     tyB <- addToEnv (∀) x tyA $ checkType tyB atom
     atom ≐ ty
     return $ forall x tyA tyB
-
-  Spine "#exists#" [_, Abs x tyA tyB] -> do
-    tyA <- checkType tyA atom
-    tyB <- addToEnv (∀) x tyA $ checkType tyB atom
-    atom ≐ ty
-    return $ exists x tyA tyB
     
   -- below are the only cases where bidirectional type checking is useful 
   Spine "#imp_abs#" [_, Abs x tyA sp] -> case ty of
@@ -539,8 +536,8 @@ typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envCon
 
   (val,constraint) <- appendErr ("in name: "++ nm ++" : "++show val) $ 
                       trace ("Checking: " ++nm) $ 
-                      trace ("\tVAL: " ++show val) $ 
-                      trace ("\t:: " ++show ty) $ 
+                      vtrace ("\tVAL: " ++show val) $ 
+                      vtrace ("\t:: " ++show ty) $ 
                       typeCheckToEnv $ checkType val ty
   (sub,ctxt) <- runStateT (unify constraint) emptyContext
   
@@ -596,5 +593,5 @@ typeCheckAll preds = do
   
 solver :: [(Name,Type)] -> Type -> Either String [(Name, Term)]
 solver axioms tp = case runError $ runRWST (runStateT (search tp) emptyContext) (M.union envConsts $ M.fromList axioms) 0 of
-  Right (((s,tm),_),_,_) -> Right $ ("query", tm):(map (\a -> (a,var a)) $ S.toList $ freeVariables tp)
+  Right (((s,tm),_),_,_) -> Right $ [("query", tm)]
   Left s -> Left $ "reification not possible: "++s

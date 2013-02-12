@@ -118,7 +118,7 @@ checkContext s ctx = foldr seq ctx $ zip st ta
 ------------------------
 type WithContext = StateT Context Env 
 
-getElm :: Name -> Name -> WithContext (Either Binding Spine)
+getElm :: String -> Name -> WithContext (Either Binding Spine)
 getElm s x = do
   ty <- lookupConstant x
   case ty of
@@ -134,13 +134,16 @@ getBindings bind = do
 getExists :: WithContext (Maybe (Name,Type))
 getExists = do
   ctx <- get
+  let til = getTail ctx
   return $ case ctx of
     Context _ _ Nothing -> Nothing
-    _ -> snd <$> find (\(q,_) -> q == Exists) (getAfter "IN: getBindings" (getHead ctx) ctx)
+    _ -> snd <$> find (\(q,_) -> q == Exists) ((elmQuant til, (elmName til, elmType til)):getBefore "IN: getBindings" til ctx)
 
 getAllBindings = do
   ctx <- get
-  getBindings $ getTail ctx
+  case ctx of
+    Context _ _ Nothing -> return []
+    _ -> (getBindings $ getTail ctx)
 
 
 isolateForFail m = do
