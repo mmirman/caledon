@@ -77,7 +77,7 @@ unifySearch (a :@: b) | b /= var "atom" = do
     Just cons -> Just (mempty, cons)
 unifySearch r = unifyOther unifySearch r
 
-unifySearchAtom (a :@: b) | b == var "atom" = do
+unifySearchAtom (a :@: b) = do
   cons <- rightSearch a b
   return $ case cons of
     Nothing -> Nothing
@@ -306,22 +306,22 @@ gvar_uvar_inside _ _ = error "gvar-uvar-inside is not made for this case"
 gvar_const a@(Spine x yl, _) b@(Spine y _, bty) = case elemIndex (var y) $ yl of 
   Nothing -> gvar_fixed a b $ var . const y
   Just _ -> do 
---    gvar_uvar_outside a b <|> gvar_fixed a b (var . const y) 
-
+    gvar_uvar_outside a b <|> gvar_fixed a b (var . const y) 
+{-
     let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
     defered <- lift $ getNewWith "@def"
     res <- gvar_fixed a b $ \ui_list -> 
       Spine defered $ var y:((ui_list !!) <$>ilst)
     modify $ addToHead Exists defered $ bty ~> foldr (\_ a -> bty ~> a) bty ilst
     return res
-
+-}
 gvar_const _ _ = error "gvar-const is not made for this case"
 
 gvar_uvar_outside a@(Spine x yl,_) b@(Spine y _,bty) = do
-{-  let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
+  let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
   i <- F.asum $ return <$> ilst
-  gvar_fixed a b $ (!! i) -}
-
+  gvar_fixed a b $ (!! i)
+{-
   case [i | (i,y') <- zip [0..] yl , y' == var y] of
     [i] -> vtrace1 ("-ic-") $ gvar_fixed a b lookup
       where lookup list = case length list <= i of
@@ -333,7 +333,7 @@ gvar_uvar_outside a@(Spine x yl,_) b@(Spine y _,bty) = do
         Spine defered $ (ui_list !!) <$> ilst
       modify $ addToHead Exists defered $ foldr (\_ a-> bty ~> a) bty ilst
       return res
-
+-}
 gvar_uvar_outside _ _ = error "gvar-uvar-outside is not made for this case"
 
 gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
