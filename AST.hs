@@ -69,7 +69,7 @@ instance Show Spine where
   show (Spine "#imp_forall#" [_,Abs nm t t']) = "{"++nm++" : "++show t++"} "++show t'  
   show (Spine "#tycon#" [Spine nm [t]]) = "{"++nm++" = "++show t++"}"
   show (Spine "#exists#" [_,Abs nm t t']) = "∃ "++nm++" : "++show t++". "++show t' 
-  show (Spine "#imp_abs#" [_, Abs nm ty t]) = "?λ "++nm++" : "++showWithParens ty++" . "++show t
+  show (Spine "#imp_abs#" [_,Abs nm ty t]) = "?λ "++nm++" : "++showWithParens ty++" . "++show t
   show (Spine nm (t:t':l)) | isOperator nm = "( "++showWithParens t++" "++nm++" "++ show t'++" )"++show (Spine "" l)
   show (Spine h l) = h++concatMap showWithParens' l
      where showWithParens' t = " "++if case t of
@@ -111,21 +111,27 @@ m1 *** m2 = M.union m2 $ subst m2 <$> m1
 (|->) = M.singleton
 (!) = flip M.lookup
 
+
+findTyconInPrefix nm = fip []
+  where fip l (Spine "#tycon#" [Spine nm' [v]]:r) | nm == nm' = Just (v, reverse l++r)
+        fip l (a@(Spine "#tycon#" [Spine nm' [_]]):r) = fip (a:l) r
+        fip l r = Nothing
+
 rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
-rebuildSpine (Spine "#imp_abs#" [ty, Abs nm _ rst]) (a:apps') = case a of 
-  -- TODO: this is not right!
-  Spine "#tycon#" [Spine nm' [v]] | nm == nm' -> 
-      rebuildSpine (subst (nm |-> v) $ rst) apps'
-
-  Spine "#tycon#" [Spine nm' [v]] -> case apps' of
-    [] -> rst
-    _ -> rebuildSpine (rebuildSpine (imp_abs nm ty $ rst) apps') [a]
-  _ -> rebuildSpine rst (a:apps')
-  
+rebuildSpine (Spine "#imp_abs#" [_, Abs nm ty rst]) apps = case findTyconInPrefix nm apps of 
+  Just (v, apps) -> rebuildSpine (Abs nm ty rst) (v:apps)
+  Nothing -> infer nm ty $ rebuildSpine (subst (nm |-> var nm') rst) apps
+     where nm' = newNameFor nm $ freeVariables apps
 rebuildSpine (Spine c apps) apps' = Spine c (apps ++ apps')
 rebuildSpine (Abs nm _ rst) (a:apps') = rebuildSpine (subst (nm |-> a) $ rst) apps'
 
+newNameFor :: Name -> S.Set Name -> Name
+newNameFor nm fv = nm'
+  where nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/") [0..]
+        free k = not $ S.member k fv
+        
+newName :: Name -> Map Name Spine -> (Name, Map Name Spine)
 newName nm s = (nm',s')
   where s' = if nm == nm' then s else M.insert nm (var nm') s 
         nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/") [0..]

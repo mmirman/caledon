@@ -76,12 +76,12 @@ fixityDef = do
              <|> (reserved "prefix" >> return (\b c -> b { fixityPrefix = c $ fixityPrefix b}))
              <|> (reserved "postfix" >> return (\b c -> b { fixityPostfix = c $ fixityPostfix b}))
   n <- integer
-  op <- operator <|> identifier
+  op <- operator -- <|> identifier
   
   let modify = insertBy (\(n,_) (m,_) -> compare n m) (n,op)
   modifyState $ \b -> b { currentTable = setFixity (currentTable b) modify
                         , currentOps = op:currentOps b}
-  topLevel
+  trace ("OP: "++show op) topLevel
   
 
 query :: Parser Predicate
@@ -194,7 +194,7 @@ tipe = do
                 , binary (flip . imp_forall) AssocLeft $ reservedOp "<=" <|> reservedOp "⇐" 
                 ]
               , [ binary (const ascribe) AssocNone $ reservedOp ":"
-                ]
+                ] 
               ]
              ++union [ reify (binaryOther AssocLeft  <$> left) [] 
                      , reify (binaryOther AssocNone  <$> none) [] 
@@ -259,7 +259,7 @@ tipe = do
       
   ptipe <?> "tipe"
 
-reservedOperators = ["->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", 
+reservedOperators = [ "->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", 
                      "\\", "?\\", 
                      "λ","?λ", 
                      "∀", "?∀", 
