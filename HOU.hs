@@ -48,7 +48,7 @@ unify cons = do
                   Nothing -> backup
                   Just (sub, c') -> do
                     modify $ subst sub
-                    (\(s,c) -> (sub *** s, c)) <$> uniWhile (reduceTops c')
+                    (\(s,c) -> (sub *** s, c)) <$> (uniWhile $! reduceTops c')
   fst <$> uniWhile cons
 
 
@@ -94,8 +94,8 @@ unifyOther wth (c1 :&: c2) = do
       c2' <- wth c2
       return $ case c2' of
         Nothing -> Nothing
-        Just (sub,c2) -> Just $ (sub, subst sub c1 :&: c2)
-    Just (sub,c1) -> return $ Just $ (sub,c1 :&: subst sub c2)
+        Just (sub,c2) -> Just (sub, subst sub c1 :&: c2)
+    Just (sub,c1) -> return $ Just (sub,c1 :&: subst sub c2)
 unifyOther _ _ = return Nothing             
              
 envSearch c = do  
@@ -138,7 +138,8 @@ unifyEq cons@(a :=: b) = case (a,b) of
 
   (Abs nm ty s , Abs nm' ty' s') -> vtrace1 "-aa-" $ do
     return $ Just (mempty, ty :=: ty' :&: ((∀) nm ty $ s :=: subst (nm' |-> var nm) s'))
-  (Abs nm ty s , s') -> vtrace1 "-as-" $ do
+  (Abs nm ty s , s') -> vtrace1 "-as-" 
+                      $ vtrace3 (show cons) $ do
     return $ Just (mempty, (∀) nm ty $  s :=: rebuildSpine s' [var nm])
     
   (s , s') | s == s' -> vtrace1 "-eq-" $ return $ Just (mempty, Top)
@@ -155,9 +156,11 @@ unifyEq cons@(a :=: b) = case (a,b) of
                   vtrace1 ("CANT: -occ'- "++show (a :=: b)) $ 
                   throwError $ "occurs check: "++show (a :=: b)
 
-                Right ty' -> vtrace1 "-gc- " $ vtrace2 (show cons) $ -- gvar-const
+                Right ty' -> vtrace1 "-gc- " $ -- gvar-const
                   if allElementsAreVariables yl
-                  then gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
+                  then do 
+                    a <- gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
+                    vtrace3 ("-gc-ret- "++ show a) $ return a
                   else return Nothing
                 Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> vtrace1 "CANT: -gu-dep-" $ throwError $ "gvar-uvar-depends: "++show (a :=: b)
                 Left Binding{ elmQuant = Forall } | S.member x $ freeVariables y'l -> 
@@ -303,41 +306,25 @@ gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) =
     Just _ -> gvar_uvar_outside a b
 gvar_uvar_inside _ _ = error "gvar-uvar-inside is not made for this case"
   
-gvar_const a@(Spine x yl, _) b@(Spine y _, bty) = case elemIndex (var y) $ yl of 
-  Nothing -> gvar_fixed a b $ var . const y
-  Just _ -> do 
-    gvar_uvar_outside a b <|> gvar_fixed a b (var . const y) 
-{-
-    let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
-    defered <- lift $ getNewWith "@def"
-    res <- gvar_fixed a b $ \ui_list -> 
-      Spine defered $ var y:((ui_list !!) <$>ilst)
-    modify $ addToHead Exists defered $ bty ~> foldr (\_ a -> bty ~> a) bty ilst
-    return res
--}
+gvar_const a@(Spine x yl, _) b@(s'@(Spine y _), bty) = vtrace3 (show a++"   =:=   "++show b) $
+  case elemIndex (var y) $ yl of 
+    Nothing -> gvar_fixed a b $ var . const y
+    Just _ -> do 
+      gvar_uvar_outside a b <|> gvar_fixed a b (var . const y) 
 gvar_const _ _ = error "gvar-const is not made for this case"
 
-gvar_uvar_outside a@(Spine x yl,_) b@(Spine y _,bty) = do
+gvar_uvar_outside a@(s@(Spine x yl),_) b@(s'@(Spine y _),bty) = do
   let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
   i <- F.asum $ return <$> ilst
   gvar_fixed a b $ (!! i)
-{-
-  case [i | (i,y') <- zip [0..] yl , y' == var y] of
-    [i] -> vtrace1 ("-ic-") $ gvar_fixed a b lookup
-      where lookup list = case length list <= i of
-              True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
-              False -> list !! i
-    ilst -> vtrace1 ("-il-") $ vtrace3throw ("-il-") <|> do
-      defered <- lift $ getNewWith "@def"
-      res <- gvar_fixed a b $ \ui_list -> 
-        Spine defered $ (ui_list !!) <$> ilst
-      modify $ addToHead Exists defered $ foldr (\_ a-> bty ~> a) bty ilst
-      return res
--}
 gvar_uvar_outside _ _ = error "gvar-uvar-outside is not made for this case"
 
+getTyLen (Spine "#forall#" [_, Abs _ _ t]) = 1 + getTyLen t
+getTyLen (Spine "#imp_forall#" [_, Abs _ _ t]) = 1 + getTyLen t
+getTyLen _ = 0
+
 gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
-  let m = length y'l
+  let m = max (length y'l) (getTyLen bty)
       cons = a :=: b
   xm <- replicateM m $ lift $ getNewWith "@xm"
   

@@ -1,7 +1,8 @@
 {-# LANGUAGE
  DeriveFunctor,
  FlexibleInstances,
- PatternGuards
+ PatternGuards,
+ BangPatterns
  #-}
 
 module AST where
@@ -28,16 +29,16 @@ type Name = String
 infixr 0 ~>
 (~>) = forall "#"
 
-data Spine = Spine Name [Type]
-           | Abs Name Type Spine 
+data Spine = Spine !Name ![Type]
+           | Abs !Name !Type !Spine 
            deriving (Eq)
 
 type Type = Spine
 type Term = Spine
 
-data Predicate = Predicate { predName :: Name, predType :: Type, predConstructors :: [(Name,Type)] }
-               | Query { predName :: Name, predType ::Spine}
-               | Define { predName :: Name, predValue ::Spine, predType :: Type}
+data Predicate = Predicate { predName :: !Name, predType :: !Type, predConstructors :: ![(Name,Type)] }
+               | Query { predName :: !Name, predType :: !Spine}
+               | Define { predName :: !Name, predValue :: !Spine, predType :: !Type}
                deriving (Eq)
 
 
@@ -87,18 +88,18 @@ instance Show Predicate where
   show (Query nm val) = "query " ++ nm ++ " = " ++ show val
   show (Define nm val ty) = "defn " ++ nm ++ " : " ++ show ty ++"\n as "++show val
                                                
-var nm = Spine nm []
+var !nm = Spine nm []
 atom = var "atom"
-ascribe a t = Spine ("#ascribe#") [t, a]
-forall x tyA v = Spine ("#forall#") [tyA, Abs x tyA v]
-exists x tyA v = Spine ("#exists#") [tyA, Abs x tyA v]
-pack e tau imp tp interface = Spine "pack" [tp, Abs imp tp interface, tau, e]
-open cl (imp,ty) (p,iface) cty inexp = Spine "#open#" [cl, ty,Abs imp ty iface, Abs imp ty (Abs p iface cty), Abs imp ty (Abs p iface inexp)] 
-infer x tyA v = Spine ("#infer#") [tyA, Abs x tyA v]
+ascribe !a !t = Spine ("#ascribe#") [t, a]
+forall !x !tyA !v = Spine ("#forall#") [tyA, Abs x tyA v]
+exists !x !tyA !v = Spine ("#exists#") [tyA, Abs x tyA v]
+pack !e !tau !imp !tp !interface = Spine "pack" [tp, Abs imp tp interface, tau, e]
+open !cl (!imp,!ty) (!p,!iface) !cty !inexp = Spine "#open#" [cl, ty,Abs imp ty iface, Abs imp ty (Abs p iface cty), Abs imp ty (Abs p iface inexp)] 
+infer !x !tyA !v = Spine ("#infer#") [tyA, Abs x tyA v]
 
-imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
-imp_abs x tyA v = Spine ("#imp_abs#") [tyA, Abs x tyA v]
-tycon nm val = Spine "#tycon#" [Spine nm [val]]
+imp_forall !x !tyA !v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
+imp_abs !x !tyA !v = Spine ("#imp_abs#") [tyA, Abs x tyA v]
+tycon !nm !val = Spine "#tycon#" [Spine nm [val]]
 ---------------------
 ---  substitution ---
 ---------------------
@@ -121,10 +122,12 @@ rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
 rebuildSpine (Spine "#imp_abs#" [_, Abs nm ty rst]) apps = case findTyconInPrefix nm apps of 
   Just (v, apps) -> rebuildSpine (Abs nm ty rst) (v:apps)
-  Nothing -> infer nm ty $ rebuildSpine (subst (nm |-> var nm') rst) apps
+  Nothing -> seq sp $ infer nm ty $ rebuildSpine sp apps
      where nm' = newNameFor nm $ freeVariables apps
+           sp = subst (nm |-> var nm') rst
 rebuildSpine (Spine c apps) apps' = Spine c (apps ++ apps')
-rebuildSpine (Abs nm _ rst) (a:apps') = rebuildSpine (subst (nm |-> a) $ rst) apps'
+rebuildSpine (Abs nm _ rst) (a:apps') = let sp = subst (nm |-> a) $ rst
+                                        in seq sp $ rebuildSpine sp apps'
 
 newNameFor :: Name -> S.Set Name -> Name
 newNameFor nm fv = nm'
@@ -144,7 +147,7 @@ class Subst a where
 instance Subst a => Subst [a] where
   subst foo t = subst foo <$> t
 instance (Subst a, Subst b) => Subst (a,b) where
-  subst foo (a,b) = (subst foo a , subst foo b)
+  subst foo (!a,!b) = (subst foo a , subst foo b)
 instance Subst Spine where
   subst s (Abs nm tp rst) = Abs nm' (subst s tp) $ subst s' rst
     where (nm',s') = newName nm s

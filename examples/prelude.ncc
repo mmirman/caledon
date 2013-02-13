@@ -1,3 +1,10 @@
+---------------
+-- searches ---
+---------------
+
+defn findOne : {A : atom} (A -> atom) -> atom
+   | found   = [A : atom][V : A][F : A -> atom] F V -> findOne { A = A } F
+
 ---------------------
 --- Unary Numbers ---
 ---------------------
@@ -15,11 +22,9 @@ infixr 3 ++
 defn ++ : {M} {cm : concatable M} M -> M -> M -> atom
    | ppimp = [M][Foo : M -> M -> M -> atom][M1 M2 M3 : M] (++) {M = M} {cm = concatableImp M Foo} M1 M2 M3 <- Foo M1 M2 M3
 
-
 ---------------------
 --- Unary Numbers ---
 ---------------------
-
 defn natural  : atom
    | zero = natural
    | succ = natural → natural
@@ -33,11 +38,13 @@ defn concatableNatural : concatable natural
 
 query addOne = (++) (succ zero) zero (succ zero)
 
-query addThree = exists A : natural . add (succ zero) zero A
+query addTwo = exists A : natural . add (succ zero) zero A
+
+query addThree = findOne $ add (succ zero) zero
+
 
 defn sub   : natural -> natural -> natural -> atom
    | sub_with_add = {N}{M}{R} sub N M R <- add N R M
-
 
 -------------
 --- Maybe ---
@@ -50,7 +57,7 @@ defn maybe : atom → atom
 --- Lists ---
 -------------
 defn list : atom -> atom
-   | nil = {a} list a
+   | nil  = {a} list a
    | cons = {a} a -> list a -> list a
 
 defn concatList : {A} list A -> list A -> list A -> atom
@@ -83,7 +90,6 @@ defn ==> : {a} bool -> ((a -> a -> a) -> a) -> a -> atom
 
 defn not : bool -> bool -> atom
   as \a . if a ==> false |:| true
-
 
 -------------------
 --- Constraints ---
