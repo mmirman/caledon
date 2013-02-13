@@ -39,8 +39,9 @@ unify cons = do
   cons <- lift $ regenAbsVars cons
   let uniWhile c = uniWith unifyOne 
                  $ uniWith unifySearch
-                 $ uniWith envSearch
-                 $ checkFinished c >> return (mempty, c)
+--                 $ uniWith envSearch
+                 $ --checkFinished c >>
+                 return (mempty, c)
         where uniWith wth backup = do
                 res <- wth c 
                 case res of
@@ -375,11 +376,6 @@ gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
 --------------------
 --- proof search ---  
 --------------------
-getEnv :: WithContext Constants
-getEnv = do  
-  nmMapA <- lift $ ask  
-  nmMapB <- getForalls
-  return $ M.union nmMapB nmMapA
 
 -- need bidirectional search!
 rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal of
@@ -402,15 +398,23 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
           :&: var y :@: b'
     
   Spine nm _ -> do
-    env <- getEnv
-    let envl = M.toList env
+    constants <- lift $ ask  
+    foralls <- getForalls
+    exists <- getExists        
+    
+    
+    let envl = M.toList $ M.union (M.union foralls constants) exists
+        
         sameFamily (_, Abs _ _ _) = False
         sameFamily ("pack",s) = "#exists#" == nm
-        sameFamily (nm',s) = getFamily s == nm
+        sameFamily (nm',s) = (M.notMember nm' exists || var nm' /= m) 
+                             && getFamily s == nm
         targets = filter sameFamily envl
     case targets of
-      [] -> fail ("FAIL: "++nm++" @ "++show targets)
+      [] -> vtrace3throw ("FAIL: "++nm++" @ "++show targets ++ " \n\t "++show exists)
       _ -> F.asum $ (leftSearch m goal <$> reverse targets) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
+
+vtrace3throw s = vtrace3 s $ throwError s
 
 leftSearch m goal (x,target) = vtrace1 ("LS: " ++ show m ++" ∈ "++ show goal)
                              $ vtrace1 ("\t@ " ++x++" : " ++show target)
