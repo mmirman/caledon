@@ -283,7 +283,6 @@ getFamily v = error $ "values don't have families: "++show v
 
 consts = [ ("atom", atom)
          , ("#ascribe#", forall "a" atom $ (var "a") ~> (var "a"))
-         , ("#infer#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))

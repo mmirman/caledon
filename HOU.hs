@@ -28,7 +28,7 @@ import Debug.Trace
 vtrace0 = vtrace1
 vtrace1 = vtrace2
 vtrace2 = vtrace3
-vtrace3 = trace -- const id
+vtrace3 = const id
 
 -----------------------------------------------
 ---  the higher order unification algorithm ---
@@ -39,8 +39,8 @@ unify cons = do
   cons <- lift $ regenAbsVars cons
   let uniWhile c = uniWith unifyOne 
                  $ uniWith unifySearch
---                 $ uniWith envSearch
-                 $ --checkFinished c >>
+                 $ uniWith unifySearchAtom
+                 $ checkFinished c >>
                  return (mempty, c)
         where uniWith wth backup = do
                 res <- wth c 
@@ -68,15 +68,21 @@ checkFinished cval = do
           Bind Forall _ _ c -> cf c
           c1 :&: c2 -> cf c1 >> cf c2
           _ -> throwError $ "ambiguous constraint: " ++show cval
-  
-  binds <- getAnExist
-  unless (binds == Nothing) $ throwError $ "ambiguous constraint: " ++show cval
   cf cval
   
-unifySearch (a :@: b) = do
+unifySearch (a :@: b) | b /= var "atom" = do
   cons <- rightSearch a b
-  return $ Just (mempty, cons)
+  return $ case cons of
+    Nothing -> Nothing
+    Just cons -> Just (mempty, cons)
 unifySearch r = unifyOther unifySearch r
+
+unifySearchAtom (a :@: b) | b == var "atom" = do
+  cons <- rightSearch a b
+  return $ case cons of
+    Nothing -> Nothing
+    Just cons -> Just (mempty, cons)
+unifySearchAtom r = unifyOther unifySearchAtom r
 
 unifyOther wth (Bind quant nm ty c) = do
   modify $ addToTail quant nm ty
@@ -101,7 +107,6 @@ envSearch c = do
       return $ Just (mempty,cons)
 
 unifyOne :: Constraint -> WithContext (Maybe (Substitution , Constraint))
-
 unifyOne (a :=: b) = do
   c' <- isolateForFail $ unifyEq $ a :=: b 
   case c' of 
@@ -301,7 +306,7 @@ gvar_uvar_inside _ _ = error "gvar-uvar-inside is not made for this case"
 gvar_const a@(Spine x yl, _) b@(Spine y _, bty) = case elemIndex (var y) $ yl of 
   Nothing -> gvar_fixed a b $ var . const y
   Just _ -> do 
-{-    gvar_uvar_outside a b <|> gvar_fixed a b (var . const y) -}
+--    gvar_uvar_outside a b <|> gvar_fixed a b (var . const y) 
 
     let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
     defered <- lift $ getNewWith "@def"
@@ -315,14 +320,14 @@ gvar_const _ _ = error "gvar-const is not made for this case"
 gvar_uvar_outside a@(Spine x yl,_) b@(Spine y _,bty) = do
 {-  let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
   i <- F.asum $ return <$> ilst
-  gvar_fixed a b $ (!! i)  -}
+  gvar_fixed a b $ (!! i) -}
 
   case [i | (i,y') <- zip [0..] yl , y' == var y] of
     [i] -> vtrace1 ("-ic-") $ gvar_fixed a b lookup
       where lookup list = case length list <= i of
               True -> error $ show x ++ " "++show yl++"\n\tun: "++show list ++" \n\thas no " ++show i
               False -> list !! i
-    ilst -> vtrace1 ("-il-") $ do
+    ilst -> vtrace1 ("-il-") $ vtrace3throw ("-il-") <|> do
       defered <- lift $ getNewWith "@def"
       res <- gvar_fixed a b $ \ui_list -> 
         Spine defered $ (ui_list !!) <$> ilst
@@ -385,7 +390,8 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
     let b' = rebuildSpine b [var x']
     modify $ addToTail Forall x' a        
     modify $ addToTail Exists y b'
-    return $ var y :=: rebuildSpine m [var x'] 
+    return $ Just 
+           $ var y :=: rebuildSpine m [var x'] 
           :&: var y :@: b'
 
   Spine "#imp_forall#" [_, Abs x a b] -> do
@@ -394,7 +400,8 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
     let b' = subst (x |-> var x') b
     modify $ addToTail Forall x' a        
     modify $ addToTail Exists y b' 
-    return $ var y :=: rebuildSpine m [tycon x $ var x']
+    return $ Just
+           $ var y :=: rebuildSpine m [tycon x $ var x']
           :&: var y :@: b'
     
   Spine nm _ -> do
@@ -402,8 +409,8 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
     foralls <- getForalls
     exists <- getExists        
     
-    
-    let envl = M.toList $ M.union (M.union foralls constants) exists
+    let env = M.union foralls constants
+        envl = M.toList $ M.union (M.union foralls constants) exists
         
         sameFamily (_, Abs _ _ _) = False
         sameFamily ("pack",s) = "#exists#" == nm
@@ -411,8 +418,12 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
                              && getFamily s == nm
         targets = filter sameFamily envl
     case targets of
-      [] -> vtrace3throw ("FAIL: "++nm++" @ "++show targets ++ " \n\t "++show exists)
-      _ -> F.asum $ (leftSearch m goal <$> reverse targets) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
+      [] -> return Nothing
+      _ -> if all (flip M.member env) $ S.toList (freeVariables m)
+           then return $ Just Top
+           else if M.member nm exists 
+                then return Nothing
+                else Just <$> (F.asum $ (leftSearch m goal <$> reverse targets)) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
 
 vtrace3throw s = vtrace3 s $ throwError s
 
@@ -459,6 +470,7 @@ checkType sp ty = case sp of
     tyA <- checkType tyA atom
     x' <- getNewWith "@inf"
     addToEnv (∃) x' tyA $ do
+      var x' .@. tyA
       checkType (subst (x |-> var x') tyB) ty
 
   Spine "#imp_forall#" [_, Abs x tyA tyB] -> do
@@ -486,6 +498,7 @@ checkType sp ty = case sp of
       addToEnv (∃) e (forall x tyA atom) $ do
         imp_forall x tyA (Spine e [var x]) ≐ ty
         sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
+        var e .@. (forall x tyA atom)
         return $ imp_abs x tyA sp
 
   Abs x tyA sp -> case ty of
@@ -500,6 +513,7 @@ checkType sp ty = case sp of
       addToEnv (∃) e (forall x tyA atom) $ do
         forall x tyA (Spine e [var x]) ≐ ty
         sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
+        var e .@. (forall x tyA atom)
         return $ Abs x tyA sp
 
   Spine head args -> do
@@ -513,6 +527,7 @@ checkType sp ty = case sp of
             Nothing    -> do
               x <- getNewWith "@xin"
               addToEnv (∃) x ty' $ do
+                var x .@. ty'
                 chop (subst (nm |-> var x) tyv) lst
             Just (val,lst) -> do
               val <- checkType val ty'
@@ -529,6 +544,8 @@ checkType sp ty = case sp of
               a <- checkType a (var x)
               v <- getNewWith "@v"
               forall v (var x) (Spine tybody [var v]) ≐ mty
+              var tybody .@. tybodyty
+              var x .@. atom              
               (a:) <$> chop (Spine tybody [a]) l
 
     mty <- (M.lookup head) <$> lift ask
@@ -592,7 +609,7 @@ typeCheckAxioms lst = do
         unless (fam == Nothing || Just (getFamily val) == fam)
           $ throwError $ "not the right family: need "++show fam++" for "++nm ++ " = " ++show val
         
-        l' <- typeInfer l (nm,val,ty)
+        l' <- appendErr "infer type" $ typeInfer l (nm,val,ty) -- constrain the breadth first search to be local! 
         inferAll $ case nm of
           '#':'v':':':nm' -> (subst sub <$> l', (\(fam,nm,val,ty) -> (fam,nm, subst sub val, subst sub ty)) <$> toplst) 
             where sub = nm' |-> (l' M.! nm)                                   

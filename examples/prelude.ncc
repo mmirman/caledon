@@ -13,7 +13,7 @@ defn concatable : atom -> atom
 
 infixr 3 ++
 defn ++ : {M} {cm : concatable M} M -> M -> M -> atom
-   | ppimp = [M][Foo : M -> M -> M -> atom][M1 M2 M3 : M] (++) {cm = concatableImp M Foo} M1 M2 M3 <- Foo M1 M2 M3
+   | ppimp = [M][Foo : M -> M -> M -> atom][M1 M2 M3 : M] (++) {M = M} {cm = concatableImp M Foo} M1 M2 M3 <- Foo M1 M2 M3
 
 
 ---------------------
@@ -28,15 +28,16 @@ defn add   : natural -> natural -> natural -> atom
    | add_z = [N] add zero N N
    | add_s = [N][M][R] add N M R -> add (succ N) M (succ R)
 
+defn concatableNatural : concatable natural
+  as concatableImp natural add
+
 query addOne = (++) (succ zero) zero (succ zero)
 
--- query addThree = exists A : natural . add (succ zero) zero A
+query addThree = exists A : natural . add (succ zero) zero A
 
 defn sub   : natural -> natural -> natural -> atom
    | sub_with_add = {N}{M}{R} sub N M R <- add N R M
 
-defn concatableNatural : concatable natural
-  as concatableImp natural add
 
 -------------
 --- Maybe ---
