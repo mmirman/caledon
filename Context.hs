@@ -135,9 +135,15 @@ getExists :: WithContext (Maybe (Name,Type))
 getExists = do
   ctx <- get
   let til = getTail ctx
+      last = (elmQuant til, (elmName til, elmType til))
   return $ case ctx of
     Context _ _ Nothing -> Nothing
-    _ -> snd <$> find (\(q,_) -> q == Exists) ((elmQuant til, (elmName til, elmType til)):getBefore "IN: getBindings" til ctx)
+    _ -> snd <$> find (\(q,_) -> q == Exists) (last:getBefore "IN: getBindings" til ctx)
+    
+getForalls :: WithContext Constants
+getForalls = do
+  ctx <- ctxtMap <$> get
+  return $ elmType <$> M.filter (\q -> elmQuant q == Forall) ctx
 
 getAllBindings = do
   ctx <- get
