@@ -25,9 +25,9 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Debug.Trace
 
-vtrace0 = vtrace1
+vtrace0 = trace -- vtrace1
 vtrace1 = vtrace2
-vtrace2 = vtrace3
+vtrace2 =  vtrace3
 vtrace3 = const id
 
 vtrace0throw s = vtrace0 s $ throwError s
@@ -327,14 +327,15 @@ gvar_uvar_outside a@(s@(Spine x yl),_) b@(s'@(Spine y _),bty) = do
 
 gvar_uvar_outside _ _ = error "gvar-uvar-outside is not made for this case"
 
-getTyLen (Spine "#forall#" [_, Abs _ _ t]) = 1 + getTyLen t
-getTyLen (Spine "#imp_forall#" [_, Abs _ _ t]) = getTyLen t
-getTyLen _ = 0
+getTyNews (Spine "#forall#" [_, Abs _ _ t]) = Nothing:getTyNews t
+getTyNews (Spine "#imp_forall#" [_, Abs nm _ t]) = Just nm:getTyNews t
+getTyNews _ = []
 
 gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
-  let m = max (length y'l) (getTyLen bty)
+  let m = getTyNews bty -- max (length y'l) (getTyLen bty)
       cons = a :=: b
-  xm <- replicateM m $ lift $ getNewWith "@xm"
+--      getNewTys "@xm" bty 
+
   
   let getArgs (Spine "#forall#" [ty, Abs ui _ r]) = ((var ui,ui),Left ty):getArgs r
       getArgs (Spine "#imp_forall#" [ty, Abs ui _ r]) = ((tycon ui $ var ui,ui),Right ty):getArgs r
@@ -344,9 +345,16 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
       (un,_) = unzip untylr 
       (vun, _) = unzip un
       
-      toLterm (Spine "#forall#" [ty, Abs ui _ r]) = Abs ui ty $ toLterm r
+  
+  xm <- forM m $ \j -> do
+    x <- lift $ getNewWith "@xm"
+    return (x, case j of
+      Nothing -> Spine x vun
+      Just a -> tycon a $ Spine x vun)  
+      
+  let toLterm (Spine "#forall#" [ty, Abs ui _ r]) = Abs ui ty $ toLterm r
       toLterm (Spine "#imp_forall#" [ty, Abs ui _ r]) = imp_abs ui ty $ toLterm r      
-      toLterm _ = rebuildSpine (action vun) $ (flip Spine vun) <$> xm
+      toLterm _ = rebuildSpine (action vun) $ map snd xm
       
       l = toLterm aty
   
@@ -355,10 +363,10 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
                            Right ty -> imp_forall nm ty a
                        ) e untylr
 
-      substBty sub (Spine "#forall#" [_, Abs vi bi r]) (xi:xmr) = (xi,vbuild $ subst sub bi)
-                                                                :substBty (M.insert vi (Spine xi vun) sub) r xmr
-      substBty sub (Spine "#imp_forall#" [_, Abs vi bi r]) (xi:xmr) = (xi,vbuild $ subst sub bi)
-                                                                    : substBty (M.insert vi (Spine xi vun) sub) r xmr
+      substBty sub (Spine "#forall#" [_, Abs vi bi r]) ((x,xi):xmr) = (x,vbuild $ subst sub bi)
+                                                                :substBty (M.insert vi xi sub) r xmr
+      substBty sub (Spine "#imp_forall#" [_, Abs vi bi r]) ((x,xi):xmr) = (x,vbuild $ subst sub bi)
+                                                                    : substBty (M.insert vi xi sub) r xmr
       substBty _ _ [] = []
       substBty _ s l  = error $ "is not well typed: "++show s
                         ++"\nFOR "++show l 
