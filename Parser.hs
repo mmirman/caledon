@@ -81,7 +81,7 @@ fixityDef = do
   let modify = insertBy (\(n,_) (m,_) -> compare n m) (n,op)
   modifyState $ \b -> b { currentTable = setFixity (currentTable b) modify
                         , currentOps = op:currentOps b}
-  trace ("OP: "++show op) topLevel
+  topLevel
   
 
 query :: Parser Predicate

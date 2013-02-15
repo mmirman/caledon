@@ -15,6 +15,34 @@ infixr 0 @
 defn @ : {a b c:atom} (b -> c) -> (a -> b) -> a -> c
   as ?\at bt ct : atom . \f : bt -> ct . \ g : at -> bt . \ a : at . f (g a)
 
+-------------------
+--- Constraints ---
+-------------------
+infix 1 =:=
+defn =:= : {a} a -> a -> atom
+   | eq = [a : atom][b] (=:=) {a = a} b b
+
+infix 1 ≐
+defn ≐ : {a : atom} a -> a -> atom
+  as (=:=)
+
+infix 0 /\
+defn /\ : atom -> atom -> atom
+   | and = {a b:atom} a -> b -> a /\ b
+
+infix 0 ∧
+defn ∧ : atom -> atom -> atom
+  as (/\)
+
+infix 0 \/
+defn \/ : atom -> atom -> atom
+   | or1 = {a b:atom} a -> a \/ b
+   | or2 = {a b:atom} b -> a \/ b
+
+infix 0 ∨
+defn ∨ : atom -> atom -> atom 
+  as (\/)
+
 --------------
 --- concat ---
 --------------
@@ -39,15 +67,38 @@ defn add   : natural -> natural -> natural -> atom
 defn concatableNatural : concatable natural
   as concatableImp natural add
 
-query addOne = (++) (succ zero) zero (succ zero)
+-- query addOne = (++) (succ zero) zero (succ zero)
 
-query addTwo = exists A : natural . add (succ zero) zero A
+-- query addTwo = exists A : natural . add (succ zero) zero A
 
 query addThree = any $ add (succ zero) zero
 
-defn sub   : natural -> natural -> natural -> atom
-   | sub_with_add = {N}{M}{R} sub N M R <- add N R M
 
+-- sub N M R is N - M = R
+defn sub   : natural -> natural -> natural -> atom
+   | sub_by_add = [N M R] sub N M R <- add M R N
+
+infix 2 ≤
+defn ≤ : natural -> natural -> atom
+   | is_less_than_or_eq = [A B C] sub B A C -> A ≤ B
+
+infix 2 <
+defn < : natural -> natural -> atom
+  as λ A B . succ A ≤ B
+
+infix 2 ≥
+defn ≥ : natural -> natural -> atom
+  as λ A B . B ≤ A
+
+infix 2 >
+defn > : natural -> natural -> atom
+  as λ A B . succ B ≤ A
+
+query findSat = exists A . zero =:= A
+
+-- zero < A  /\ A < succ (succ zero)
+
+{-
 -------------
 --- Maybe ---
 -------------
@@ -65,7 +116,6 @@ defn list : atom -> atom
 defn concatList : {A} list A -> list A -> list A -> atom
    | concatListNil  = [T][L:list T] concatList {A = T} nil L L
    | concatListCons = [T][A B C : list T][V:T] concatList (cons V A) B (cons V C) <- concatList A B C
-
 
 defn concatableList : {A:atom} concatable (list A)
   as ?\A . concatableImp (list A) concatList
@@ -93,21 +143,8 @@ defn ==> : {a} bool -> ((a -> a -> a) -> a) -> a -> atom
 defn not : bool -> bool -> atom
   as \a . if a ==> false |:| true
 
--------------------
---- Constraints ---
--------------------
-infixr 1 =:=
-defn =:= : {a : atom} a -> a -> atom
-   | eq = [a : atom] a =:= a
 
-infixr 1 /\
-defn /\ : atom -> atom -> atom
-   | and = {a b:atom} a -> b -> a /\ b
 
-infixr 1 \/
-defn \/ : atom -> atom -> atom
-   | or1 = {a b:atom} a -> a \/ b
-   | or2 = {a b:atom} b -> a \/ b
 
 ----------------------
 --- Binomial heaps ---
@@ -117,7 +154,9 @@ defn count-list : (natural -> atom) -> natural -> atom
    | cl-cons = {R}{V} V R -> count-list V R -> count-list V (succ R)
 
 defn binomial-tree : atom {- elements -} -> natural {- rank -} -> atom
-   | binomial-node = {A}{R} A -> count-list (BTree A) R -> binomial-tree A R
+   | binomial-node = {A}{R} A -> count-list (binomial-tree A) R -> binomial-tree A R
 
 defn binomial-heap : atom -> atom
-  as \a . any $ count-list $ Maybe @ binomial-tree a
+  as \a . any $ count-list $ maybe @ binomial-tree a
+
+-}
