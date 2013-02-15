@@ -1,6 +1,7 @@
 ---------------
 -- searches ---
 ---------------
+
 defn any : {A : atom} (A -> atom) -> atom
    | is = [A : atom][V : A][F : A -> atom] F V -> any { A = A } F
 
@@ -9,11 +10,15 @@ defn any : {A : atom} (A -> atom) -> atom
 --------------------------
 infixr 0 $
 defn $ : {a b:atom} (a -> b) -> a -> b
-  as ?\at bt : atom . \f . \ a : at . f a
+  as ?\ at bt . λ f . λ a . f a
 
 infixr 0 @
 defn @ : {a b c:atom} (b -> c) -> (a -> b) -> a -> c
-  as ?\at bt ct : atom . \f : bt -> ct . \ g : at -> bt . \ a : at . f (g a)
+  as ?λat bt ct : atom . λf : bt -> ct . λ g : at -> bt . λ a : at . f (g a)
+
+defn flip : {a b c : atom} (a -> b -> c) -> b -> a -> c
+  as ?λ at bt ct . λ foo . λ b . λ a . foo a b
+
 
 -------------------
 --- Constraints ---
@@ -60,18 +65,22 @@ defn natural  : atom
    | zero = natural
    | succ = natural → natural
 
+query findSatOne = exists A . A =:= zero
+
+
 defn add   : natural -> natural -> natural -> atom
    | add_z = [N] add zero N N
-   | add_s = [N][M][R] add N M R -> add (succ N) M (succ R)
+   | add_s = [N M R] add N M R -> add (succ N) M (succ R)
+
 
 defn concatableNatural : concatable natural
   as concatableImp natural add
 
--- query addOne = (++) (succ zero) zero (succ zero)
+query add1 = (++) (succ zero) zero (succ zero)
 
--- query addTwo = exists A : natural . add (succ zero) zero A
+query add2 = exists A : natural . add (succ zero) zero A
 
-query addThree = any $ add (succ zero) zero
+query add3 = any $ add (succ zero) zero
 
 
 -- sub N M R is N - M = R
@@ -94,11 +103,11 @@ infix 2 >
 defn > : natural -> natural -> atom
   as λ A B . succ B ≤ A
 
-query findSat = exists A . zero =:= A
 
--- zero < A  /\ A < succ (succ zero)
+query findSat2 = exists A . zero < A /\ A < (succ (succ zero))
 
-{-
+
+
 -------------
 --- Maybe ---
 -------------
@@ -118,7 +127,7 @@ defn concatList : {A} list A -> list A -> list A -> atom
    | concatListCons = [T][A B C : list T][V:T] concatList (cons V A) B (cons V C) <- concatList A B C
 
 defn concatableList : {A:atom} concatable (list A)
-  as ?\A . concatableImp (list A) concatList
+  as ?λA . concatableImp (list A) concatList
 
 ----------------
 --- Booleans ---
@@ -128,21 +137,20 @@ defn bool : atom
    | false = bool
 
 defn if : bool -> bool
-  as \b . b
+  as λb . b
 
 infix 1 |:|
 defn |:| : {a:atom} a -> a -> (a -> a -> a) -> a
-  as ?\t : atom . \a b : t. \f : t -> t -> t. f a b
+  as ?λt : atom . λa b : t. λf : t -> t -> t. f a b
 
 
 infix 0 ==>
 defn ==> : {a} bool -> ((a -> a -> a) -> a) -> a -> atom
-   | thentrue  = [a : atom][f: _ -> a] (true ==> f)  (f $ \A B : a. A)
-   | thenfalse = [b][f: _ -> b] (false ==> f) (f $ \A B : b . B)
+   | thentrue  = [a : atom][f: _ -> a] (true ==> f)  (f $ λA B : a. A)
+   | thenfalse = [b][f: _ -> b] (false ==> f) (f $ λA B : b . B)
 
 defn not : bool -> bool -> atom
-  as \a . if a ==> false |:| true
-
+  as λa . if a ==> false |:| true
 
 
 
@@ -157,6 +165,5 @@ defn binomial-tree : atom {- elements -} -> natural {- rank -} -> atom
    | binomial-node = {A}{R} A -> count-list (binomial-tree A) R -> binomial-tree A R
 
 defn binomial-heap : atom -> atom
-  as \a . any $ count-list $ maybe @ binomial-tree a
+  as λa . any $ count-list $ maybe @ binomial-tree a
 
--}

@@ -275,7 +275,7 @@ reservedNames = ["defn", "as", "query"
 
 mydef :: P.GenLanguageDef String ParseState Identity
 mydef = haskellDef
-  { P.identStart = lower
+  { P.identStart = oneOf ['a'..'z']
   , P.identLetter = alphaNum <|> oneOf identStartOps
   , P.reservedNames = reservedNames
   , P.caseSensitive = True

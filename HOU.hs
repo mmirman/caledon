@@ -30,6 +30,10 @@ vtrace1 = vtrace2
 vtrace2 = vtrace3
 vtrace3 = const id
 
+vtrace0throw s = vtrace0 s $ throwError s
+vtrace1throw s = vtrace1 s $ throwError s
+vtrace2throw s = vtrace2 s $ throwError s
+vtrace3throw s = vtrace3 s $ throwError s
 -----------------------------------------------
 ---  the higher order unification algorithm ---
 -----------------------------------------------
@@ -37,29 +41,33 @@ vtrace3 = const id
 unify :: Constraint -> WithContext Substitution
 unify cons = do
   cons <- lift $ regenAbsVars cons
-  let uniWhile c = uniWith unifyOne 
-                 $ uniWith unifySearch
-                 $ uniWith unifySearchAtom
-                 $ checkFinished c >>
-                 return (mempty, c)
+  let uniWhile sub c = 
+                     ( uniWith unifyOne 
+                     $ uniWith unifySearch
+                     $ uniWith unifySearchAtom
+                     $ checkFinished c >> 
+                     return (sub, c))
         where uniWith wth backup = do
                 res <- wth c 
                 case res of
-                  Nothing -> backup
-                  Just (sub, c') -> do
-                    modify $ subst sub
-                    (\(s,c) -> (sub *** s, c)) <$> (uniWhile $! reduceTops c')
-  fst <$> uniWhile cons
+                  Nothing -> do
+                    backup
+                  Just (sub', c') -> do
+                    modify $ subst sub'
+                    -- might need to flip sub and sub' in the future, if we encounter 
+                    -- an unbound bug!
+                    uniWhile (sub *** sub') $! reduceTops c'
+
+  fst <$> uniWhile mempty cons
 
 
 reduceTops (c1 :&: c2) = case (reduceTops c1, reduceTops c2) of
   (Top,b) -> b
   (a,Top) -> a
   (a,b) -> a :&: b
-reduceTops (Bind Exists nm ty b) = Bind Exists nm ty $ reduceTops b 
-reduceTops (Bind Forall nm ty b) = case reduceTops b of
+reduceTops (Bind q nm ty b) = case reduceTops b of
   Top -> Top
-  b -> Bind Forall nm ty b
+  b -> Bind q nm ty b
 reduceTops r = r
 
 checkFinished cval = do
@@ -67,7 +75,7 @@ checkFinished cval = do
           Top -> return ()
           Bind Forall _ _ c -> cf c
           c1 :&: c2 -> cf c1 >> cf c2
-          _ -> throwError $ "ambiguous constraint: " ++show cval
+          _ -> vtrace0throw $ "ambiguous constraint: " ++show cval
   cf cval
   
 unifySearch (a :@: b) | b /= var "atom" = do
@@ -128,7 +136,7 @@ unifyEq cons@(a :=: b) = case (a,b) of
     a <- lift $ getNewWith "@a"
     return $ Just (mempty, (∃) a ty $ b :=: rebuildSpine l (var a:r):&: var a :@: ty)
 
-  (Spine "#tycon#" [Spine nm [_]], Spine "#tycon#" [Spine nm' [_]]) | nm /= nm' -> throwError $ "different type constraints: "++show cons
+  (Spine "#tycon#" [Spine nm [_]], Spine "#tycon#" [Spine nm' [_]]) | nm /= nm' -> vtrace0throw $ "different type constraints: "++show cons
   (Spine "#tycon#" [Spine nm [val]], Spine "#tycon#" [Spine nm' [val']]) | nm == nm' -> 
     return $ Just (mempty, val :=: val')
   (Spine "#tycon#" [Spine _ [val]], val') ->
@@ -143,28 +151,27 @@ unifyEq cons@(a :=: b) = case (a,b) of
     return $ Just (mempty, (∀) nm ty $  s :=: rebuildSpine s' [var nm])
     
   (s , s') | s == s' -> vtrace1 "-eq-" $ return $ Just (mempty, Top)
-  (s@(Spine x yl), s') -> do
+  (s@(Spine x yl), s') -> vtrace3 "-ss-" $ do
     bind <- getElm ("all: "++show cons) x
     case bind of
-      Left bind@Binding{ elmQuant = Exists } -> do
+      Left bind@Binding{ elmQuant = Exists } -> vtrace3 "-e?-" $ do
         raiseToTop bind (Spine x yl) $ \(a@(Spine x yl),ty) sub ->
           case subst sub s' of
             b@(Spine x' y'l) -> do
               bind' <- getElm ("gvar-blah: "++show cons) x'
               case bind' of
-                Right _ | S.member x $ freeVariables y'l -> 
-                  vtrace1 ("CANT: -occ'- "++show (a :=: b)) $ 
-                  throwError $ "occurs check: "++show (a :=: b)
+--                Right _ | S.member x $ freeVariables y'l -> 
+--                  vtrace0throw $ "CANT: occurs check': "++show (a :=: b)
 
                 Right ty' -> vtrace1 "-gc- " $ -- gvar-const
                   if allElementsAreVariables yl
                   then do 
                     a <- gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
-                    vtrace3 ("-gc-ret- "++ show a) $ return a
+                    vtrace3 ("-gc-ret- "++show a) $ return a
                   else return Nothing
-                Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> vtrace1 "CANT: -gu-dep-" $ throwError $ "gvar-uvar-depends: "++show (a :=: b)
+                Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> vtrace1 "CANT: -gu-dep-" $ vtrace3throw $ "gvar-uvar-depends: "++show (a :=: b)
                 Left Binding{ elmQuant = Forall } | S.member x $ freeVariables y'l -> 
-                  vtrace1 "CANT: -occ-" $ throwError $ "occurs check: "++show (a :=: b)
+                  vtrace0throw $ "CANT: occurs check: "++show (a :=: b)
                 Left Binding{ elmQuant = Forall, elmType = ty' } ->vtrace1 "-gui-" $  -- gvar-uvar-inside
                   gvar_uvar_inside (Spine x yl, ty) (Spine x' y'l, ty')
                 Left bind@Binding{ elmQuant = Exists, elmType = ty' } -> 
@@ -175,7 +182,7 @@ unifyEq cons@(a :=: b) = case (a,b) of
                          gvar_gvar_same (Spine x yl, ty) (Spine x' y'l, ty')
                        else -- gvar-gvar-diff
                          if S.member x $ freeVariables y'l 
-                         then vtrace1 "CANT: -ggd-occ-" $ throwError $ "occurs check: "++show (a :=: b)
+                         then vtrace1throw $ "CANT: ggd-occurs check: "++show (a :=: b)
                          else vtrace1 ("-ggd- " ++show cons)
                               $ gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
             _ -> vtrace1 "-ggs-" $ return Nothing
@@ -184,22 +191,22 @@ unifyEq cons@(a :=: b) = case (a,b) of
           bind' <- getElm ("const case: "++show cons) x'
           case bind' of
             Left Binding{ elmQuant = Exists } -> return Nothing
-            _ -> vtrace1 ("CANT: -uud- two different universal equalities: "++show (a :=: b)) -- uvar-uvar 
-                 $ throwError $ "two different universal equalities: "++show (a :=: b) -- uvar-uvar
+            _ -> vtrace0throw ("CANT: -uud- two different universal equalities: "++show (a :=: b)) -- uvar-uvar 
+                 -- uvar-uvar
         Spine x' yl' | x == x' -> vtrace1 ("-uue- ") $ vtrace3 (show (a :=: b)) $ do -- uvar-uvar-eq
           
           let match [] [] = return Top
               match ((Spine "#tycon#" [Spine nm [a]]):al) bl = case findTyconInPrefix nm bl of
                 Nothing -> match al bl
                 Just (b,bl) -> (a :=: b :&:) <$> match al bl
-              -- in this case we know that al has no #tycon#s in its prefix since we exhausted all of them in the previous case
+          -- in this case we know that al has no #tycon#s in its prefix since we exhausted all of them in the previous case
               match al (Spine "#tycon#" [Spine nm [v]]:bl) = match al bl 
-              match (a:al) (b:bl) = (a :=: b :&:) <$>  match al bl
-              match _ _ = throwError $ "different numbers of arguments on constant: "++show cons
+              match (a:al) (b:bl) = (a :=: b :&:) <$>  match al bl 
+              match _ _ = vtrace0throw $ "CANT: different numbers of arguments on constant: "++show cons
                               
           cons <- match yl yl'
           return $ Just (mempty, cons)
-        _ -> vtrace1 "CANT: -uvarpi-" $ throwError $ "uvar against a pi WITH CONS "++show cons
+        _ -> vtrace0throw $ "CANT: uvar against a pi WITH CONS "++show cons
             
 allElementsAreVariables :: [Spine] -> Bool
 allElementsAreVariables = all $ \c -> case c of
@@ -214,8 +221,8 @@ typeToListOfTypes a@(Abs _ _ _) = error $ "not a type" ++ show a
 -- a different number of substitutions than the constraints were.
 -- make sure to check that this is right in the future.
 raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
-  hl <- reverse <$> getBindings bind
   
+  hl <- reverse <$> getBindings bind
   x' <- lift $ getNewWith "@newx"
   
   let newx_args = map (var . fst) hl
@@ -244,8 +251,10 @@ getBase 0 a = a
 getBase n (Spine "#forall#" [_, Abs _ _ r]) = getBase (n - 1) r
 getBase _ a = a
 
+makeBind xN us tyl arg = foldr (uncurry Abs) (Spine xN $ map var arg) $ zip us tyl
+
 -- TODO: make sure this is correct.  its now just a modification of gvar_gvar_diff!
-gvar_gvar_same (Spine x yl, aty) (Spine _ y'l, _) = do
+gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine _ y'l), _) = do
   let n = length yl
                     
       (uNl,atyl) = unzip $ take n $ typeToListOfTypes aty
@@ -254,9 +263,7 @@ gvar_gvar_same (Spine x yl, aty) (Spine _ y'l, _) = do
   
   let perm = [iyt | (iyt,_) <- filter (\(_,(a,b)) -> a == b) $ zip (zip uNl atyl) (zip yl y'l) ]
       
-      makeBind us tyl arg = foldr (uncurry Abs) (Spine xN $ map var arg) $ zip us tyl
-      
-      l = makeBind uNl atyl $ map fst perm
+      l = makeBind xN uNl atyl $ map fst perm
       
       xNty = foldr (uncurry forall) (getBase n aty) perm
       
@@ -264,7 +271,8 @@ gvar_gvar_same (Spine x yl, aty) (Spine _ y'l, _) = do
       
   modify $ addToTail Exists xN xNty -- THIS IS DIFFERENT FROM THE PAPER!!!!
   
-  return $ Just (sub, Top)
+  
+  return (Just (sub, Top)) -- var xN :@: xNty ))
   
 gvar_gvar_same _ _ = error "gvar-gvar-same is not made for this case"
 
@@ -273,7 +281,7 @@ gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(b'@(Spine x' y'l)
       
       -- now x' comes before x 
       -- but we no longer care since I tested it, and switching them twice reduces to original
-  let n = length yl
+      n = length yl
       m = length y'l
                     
       (uNl,atyl) = unzip $ take n $ typeToListOfTypes aty
@@ -286,16 +294,12 @@ gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(b'@(Spine x' y'l)
         (i',_) <- filter (\(_,y') -> y == y') $ zip vNl y'l 
         return (iyt,i')
       
-      makeBind us tyl arg = foldr (uncurry Abs) (Spine xN $ map var arg) $ zip us tyl
-      
-      l = makeBind uNl atyl $ map (fst . fst) perm
-      l' = makeBind vNl btyl $ map snd perm
+      l = makeBind xN uNl atyl $ map (fst . fst) perm
+      l' = makeBind xN vNl btyl $ map snd perm
       
       xNty = foldr (uncurry forall) (getBase n aty) (map fst perm)
       
       sub = M.fromList [(x ,l), (x',l')]
-  
-  
 
   modify $ addToTail Exists xN xNty -- THIS IS DIFFERENT FROM THE PAPER!!!!
   return $ Just (sub, Top)
@@ -306,21 +310,25 @@ gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) =
     Just _ -> gvar_uvar_outside a b
 gvar_uvar_inside _ _ = error "gvar-uvar-inside is not made for this case"
   
-gvar_const a@(Spine x yl, _) b@(s'@(Spine y _), bty) = vtrace3 (show a++"   =:=   "++show b) $
+gvar_const a@(s@(Spine x yl), _) b@(s'@(Spine y _), bty) = vtrace3 (show a++"   ≐   "++show b) $
   case elemIndex (var y) $ yl of 
     Nothing -> gvar_fixed a b $ var . const y
-    Just _ -> do 
-      gvar_uvar_outside a b <|> gvar_fixed a b (var . const y) 
+    Just _ -> do
+     gvar_uvar_outside a b <|> gvar_fixed a b (var . const y) 
+
 gvar_const _ _ = error "gvar-const is not made for this case"
 
 gvar_uvar_outside a@(s@(Spine x yl),_) b@(s'@(Spine y _),bty) = do
   let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
   i <- F.asum $ return <$> ilst
-  gvar_fixed a b $ (!! i)
+  gvar_fixed a b $ (!! i) 
+
+
+
 gvar_uvar_outside _ _ = error "gvar-uvar-outside is not made for this case"
 
 getTyLen (Spine "#forall#" [_, Abs _ _ t]) = 1 + getTyLen t
-getTyLen (Spine "#imp_forall#" [_, Abs _ _ t]) = 1 + getTyLen t
+getTyLen (Spine "#imp_forall#" [_, Abs _ _ t]) = getTyLen t
 getTyLen _ = 0
 
 gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
@@ -412,13 +420,13 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
                 then return Nothing
                 else Just <$> (F.asum $ (leftSearch m goal <$> reverse targets)) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
 
-vtrace3throw s = vtrace3 s $ throwError s
 
-leftSearch m goal (x,target) = vtrace1 ("LS: " ++ show m ++" ∈ "++ show goal)
-                             $ vtrace1 ("\t@ " ++x++" : " ++show target)
+
+leftSearch m goal (x,target) = vtrace1 ("LS: " ++ show m ++" ∈ "++ show goal
+                                        ++"\n\t@ " ++x++" : " ++show target)
                              $ leftCont (var x) target
-  where leftCont n target = fail ("No proof found:  "++show m ++" ∈ " ++show goal
-                                 ++ "\n\t "++show x++" : "++show target) <|> case target of
+  where leftCont n target = vtrace3throw ("LS: " ++ show m ++" ∈ "++ show goal
+                                        ++"\n\t@ " ++x++" : " ++show target) <|> case target of
           Spine "#forall#" [a, b] -> do
             x' <- lift $ getNewWith "@sla"
             modify $ addToTail Exists x' a
@@ -538,7 +546,7 @@ checkType sp ty = case sp of
     mty <- (M.lookup head) <$> lift ask
     
     case mty of 
-      Nothing -> lift $ throwError $ "variable: "++show head++" not found in the environment."
+      Nothing -> lift $ vtrace0throw $ "variable: "++show head++" not found in the environment."
       Just ty' -> Spine head <$> chop ty' args
               
 test :: IO ()
@@ -594,9 +602,13 @@ typeCheckAxioms lst = do
       inferAll (l , (fam,nm,val,ty):toplst) = do
         
         unless (fam == Nothing || Just (getFamily val) == fam)
-          $ throwError $ "not the right family: need "++show fam++" for "++nm ++ " = " ++show val
+          $ vtrace0throw $ "not the right family: need "++show fam++" for "++nm ++ " = " ++show val
         
-        l' <- appendErr "infer type" $ typeInfer l (nm,val,ty) -- constrain the breadth first search to be local! 
+        l' <- appendErr ("can not infer type for: "
+                        ++"\nWITH: "++nm++ " : "++show ty
+                        ++"\nAS:   "++nm++ " = "++show val
+                        ) $ 
+              typeInfer l (nm,val,ty) -- constrain the breadth first search to be local! 
         inferAll $ case nm of
           '#':'v':':':nm' -> (subst sub <$> l', (\(fam,nm,val,ty) -> (fam,nm, subst sub val, subst sub ty)) <$> toplst) 
             where sub = nm' |-> (l' M.! nm)                                   

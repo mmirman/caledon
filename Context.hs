@@ -7,6 +7,7 @@ import qualified Data.Map as M
 import Data.Map (Map)
 import Control.Monad.State (StateT, runStateT, modify, get, put)
 import Data.List
+import Debug.Trace
 
 --------------------------------
 ---  constraint context list ---

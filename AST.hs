@@ -125,7 +125,7 @@ rebuildSpine (Spine "#imp_abs#" [_, Abs nm ty rst]) apps = case findTyconInPrefi
   Nothing -> seq sp $ infer nm ty $ rebuildSpine sp apps
      where nm' = newNameFor nm $ freeVariables apps
            sp = subst (nm |-> var nm') rst
-rebuildSpine (Spine c apps) apps' = Spine c (apps ++ apps')
+rebuildSpine (Spine c apps) apps' = Spine c $ apps ++ apps'
 rebuildSpine (Abs nm _ rst) (a:apps') = let sp = subst (nm |-> a) $ rst
                                         in seq sp $ rebuildSpine sp apps'
 
@@ -206,11 +206,16 @@ instance Show Quant where
 infixr 2 :=:  
 infixr 1 :&:
 
+-- we can make this data structure mostly strict since the only time we don't 
+-- traverse it is when we fail, and in order to fail, we always have to traverse
+-- the lhs!
 data Constraint = Top
-                | Term :@: Type
-                | Spine :=: Spine
-                | Constraint :&: Constraint
-                | Bind Quant Name Type Constraint
+                | !Term :@: !Type
+                | !Spine :=: !Spine
+                  -- we don't necessarily have to traverse the rhs of a combination
+                  -- so we can make it lazy
+                | !Constraint :&: Constraint 
+                | Bind !Quant !Name !Type !Constraint
                 deriving (Eq)
                          
 instance Show Constraint where
@@ -240,7 +245,6 @@ instance Subst Constraint where
     Bind q nm t c -> Bind q nm' (subst s t) $ subst s' c
       where (nm',s') = newName nm s
     where subq e c1 c2 = e (subst s c1) (subst s c2)
-          
 
 (∃) = Bind Exists
 (∀) = Bind Forall
