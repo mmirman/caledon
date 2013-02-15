@@ -1,16 +1,19 @@
 ---------------
 -- searches ---
 ---------------
+defn any : {A : atom} (A -> atom) -> atom
+   | is = [A : atom][V : A][F : A -> atom] F V -> any { A = A } F
 
-defn findOne : {A : atom} (A -> atom) -> atom
-   | found   = [A : atom][V : A][F : A -> atom] F V -> findOne { A = A } F
-
----------------------
---- Unary Numbers ---
----------------------
+--------------------------
+--- useful combinators ---
+--------------------------
 infixr 0 $
 defn $ : {a b:atom} (a -> b) -> a -> b
   as ?\at bt : atom . \f . \ a : at . f a
+
+infixr 0 @
+defn @ : {a b c:atom} (b -> c) -> (a -> b) -> a -> c
+  as ?\at bt ct : atom . \f : bt -> ct . \ g : at -> bt . \ a : at . f (g a)
 
 --------------
 --- concat ---
@@ -40,8 +43,7 @@ query addOne = (++) (succ zero) zero (succ zero)
 
 query addTwo = exists A : natural . add (succ zero) zero A
 
-query addThree = findOne $ add (succ zero) zero
-
+query addThree = any $ add (succ zero) zero
 
 defn sub   : natural -> natural -> natural -> atom
    | sub_with_add = {N}{M}{R} sub N M R <- add N R M
@@ -106,3 +108,16 @@ infixr 1 \/
 defn \/ : atom -> atom -> atom
    | or1 = {a b:atom} a -> a \/ b
    | or2 = {a b:atom} b -> a \/ b
+
+----------------------
+--- Binomial heaps ---
+----------------------
+defn count-list : (natural -> atom) -> natural -> atom
+   | cl-nil = {V } count-list V zero
+   | cl-cons = {R}{V} V R -> count-list V R -> count-list V (succ R)
+
+defn binomial-tree : atom {- elements -} -> natural {- rank -} -> atom
+   | binomial-node = {A}{R} A -> count-list (BTree A) R -> binomial-tree A R
+
+defn binomial-heap : atom -> atom
+  as \a . any $ count-list $ Maybe @ binomial-tree a
