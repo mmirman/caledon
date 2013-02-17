@@ -25,9 +25,9 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Debug.Trace
 
-vtrace0 = trace -- vtrace1
+vtrace0 = vtrace1
 vtrace1 = vtrace2
-vtrace2 =  vtrace3
+vtrace2 = vtrace3
 vtrace3 = const id
 
 vtrace0throw s = vtrace0 s $ throwError s
@@ -43,6 +43,7 @@ unify cons = do
   cons <- lift $ regenAbsVars cons
   let uniWhile sub c = 
                      ( uniWith unifyOne 
+                       -- try a topological sort of the search sequents before performing a search! 
                      $ uniWith unifySearch
                      $ uniWith unifySearchAtom
                      $ checkFinished c >> 
@@ -54,8 +55,6 @@ unify cons = do
                     backup
                   Just (sub', c') -> do
                     modify $ subst sub'
-                    -- might need to flip sub and sub' in the future, if we encounter 
-                    -- an unbound bug!
                     uniWhile (sub *** sub') $! reduceTops c'
 
   fst <$> uniWhile mempty cons
@@ -94,7 +93,7 @@ unifySearchAtom r = unifyOther unifySearchAtom r
 
 unifyOther wth (Bind quant nm ty c) = do
   modify $ addToTail quant nm ty
-  return $ Just (mempty, c)
+  wth c
 unifyOther wth (c1 :&: c2) = do
   c1' <- wth c1 
   case c1' of
@@ -139,10 +138,6 @@ unifyEq cons@(a :=: b) = case (a,b) of
   (Spine "#tycon#" [Spine nm [_]], Spine "#tycon#" [Spine nm' [_]]) | nm /= nm' -> vtrace0throw $ "different type constraints: "++show cons
   (Spine "#tycon#" [Spine nm [val]], Spine "#tycon#" [Spine nm' [val']]) | nm == nm' -> 
     return $ Just (mempty, val :=: val')
-  (Spine "#tycon#" [Spine _ [val]], val') ->
-    return $ Just (mempty, val :=: val')    
-  (val', Spine "#tycon#" [Spine _ [val]]) ->
-    return $ Just (mempty, val' :=: val)
 
   (Abs nm ty s , Abs nm' ty' s') -> vtrace1 "-aa-" $ do
     return $ Just (mempty, ty :=: ty' :&: ((∀) nm ty $ s :=: subst (nm' |-> var nm) s'))
@@ -151,18 +146,15 @@ unifyEq cons@(a :=: b) = case (a,b) of
     return $ Just (mempty, (∀) nm ty $  s :=: rebuildSpine s' [var nm])
     
   (s , s') | s == s' -> vtrace1 "-eq-" $ return $ Just (mempty, Top)
-  (s@(Spine x yl), s') -> vtrace3 "-ss-" $ do
+  (s@(Spine x yl), s') -> do
     bind <- getElm ("all: "++show cons) x
     case bind of
-      Left bind@Binding{ elmQuant = Exists } -> vtrace3 "-e?-" $ do
+      Left bind@Binding{ elmQuant = Exists } -> do
         raiseToTop bind (Spine x yl) $ \(a@(Spine x yl),ty) sub ->
           case subst sub s' of
             b@(Spine x' y'l) -> do
               bind' <- getElm ("gvar-blah: "++show cons) x'
               case bind' of
---                Right _ | S.member x $ freeVariables y'l -> 
---                  vtrace0throw $ "CANT: occurs check': "++show (a :=: b)
-
                 Right ty' -> vtrace1 "-gc- " $ -- gvar-const
                   if allElementsAreVariables yl
                   then do 
@@ -195,13 +187,15 @@ unifyEq cons@(a :=: b) = case (a,b) of
                  -- uvar-uvar
         Spine x' yl' | x == x' -> vtrace1 ("-uue- ") $ vtrace3 (show (a :=: b)) $ do -- uvar-uvar-eq
           
-          let match [] [] = return Top
+          let --match [] [] = return Top
               match ((Spine "#tycon#" [Spine nm [a]]):al) bl = case findTyconInPrefix nm bl of
                 Nothing -> match al bl
                 Just (b,bl) -> (a :=: b :&:) <$> match al bl
           -- in this case we know that al has no #tycon#s in its prefix since we exhausted all of them in the previous case
               match al (Spine "#tycon#" [Spine nm [v]]:bl) = match al bl 
+              match [a] [b] = return (a :=: b)
               match (a:al) (b:bl) = (a :=: b :&:) <$>  match al bl 
+              match [] [] = return Top
               match _ _ = vtrace0throw $ "CANT: different numbers of arguments on constant: "++show cons
                               
           cons <- match yl yl'
@@ -272,7 +266,7 @@ gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine _ y'l), _) = do
   modify $ addToTail Exists xN xNty -- THIS IS DIFFERENT FROM THE PAPER!!!!
   
   
-  return (Just (sub, Top)) -- var xN :@: xNty ))
+  return (Just (sub, Top)) --var xN :@: xNty))
   
 gvar_gvar_same _ _ = error "gvar-gvar-same is not made for this case"
 
@@ -407,7 +401,7 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
            $ var y :=: rebuildSpine m [tycon x $ var x']
           :&: var y :@: b'
     
-  Spine nm _ -> do
+  l@(Spine nm _) -> do
     constants <- lift $ ask  
     foralls <- getForalls
     exists <- getExists        
@@ -417,12 +411,12 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
         
         sameFamily (_, Abs _ _ _) = False
         sameFamily ("pack",s) = "#exists#" == nm
-        sameFamily (nm',s) = (M.notMember nm' exists || var nm' /= m) 
+        sameFamily (nm',s) = (M.notMember nm' exists || nm' /= getFamily m) 
                              && getFamily s == nm
         targets = filter sameFamily envl
     case targets of
       [] -> return Nothing
-      _ -> if all (flip M.member env) $ S.toList (freeVariables m)
+      _ -> if all (flip M.member env) $ S.toList (S.union (freeVariables m) (freeVariables l))
            then return $ Just Top
            else if M.member nm exists 
                 then return Nothing
@@ -640,5 +634,5 @@ typeCheckAll preds = do
   
 solver :: [(Name,Type)] -> Type -> Either String [(Name, Term)]
 solver axioms tp = case runError $ runRWST (runStateT (search tp) emptyContext) (M.union envConsts $ M.fromList axioms) 0 of
-  Right (((s,tm),_),_,_) -> Right $ [("query", tm)]
+  Right (((s,tm),_),_,_) -> Right $ [("query", tm)] -- :M.toList s
   Left s -> Left $ "reification not possible: "++s

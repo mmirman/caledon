@@ -17,36 +17,25 @@ defn @ : {a b c:atom} (b -> c) -> (a -> b) -> a -> c
   as ?λat bt ct : atom . λf : bt -> ct . λ g : at -> bt . λ a : at . f (g a)
 
 defn flip : {a b c : atom} (a -> b -> c) -> b -> a -> c
-  as ?λ at bt ct . λ foo . λ b . λ a . foo a b
+  as ?λ at bt ct : atom . λ foo . λ b . λ a . foo a b
 
 
 -------------------
 --- Constraints ---
 -------------------
 infix 1 =:=
-defn =:= : {a} a -> a -> atom
-   | eq = [a : atom][b] (=:=) {a = a} b b
+defn =:= : {q} q -> q -> atom
+   | eq = [a : atom][b:a] (=:=) {q = a} b b
 
-infix 1 ≐
-defn ≐ : {a : atom} a -> a -> atom
-  as (=:=)
-
+-- searching for these is SLOW
 infix 0 /\
 defn /\ : atom -> atom -> atom
-   | and = {a b:atom} a -> b -> a /\ b
-
-infix 0 ∧
-defn ∧ : atom -> atom -> atom
-  as (/\)
+   | and = [a b:atom] a -> b -> a /\ b
 
 infix 0 \/
 defn \/ : atom -> atom -> atom
    | or1 = [a b:atom] a -> a \/ b
    | or2 = [a b:atom] b -> a \/ b
-
-infix 0 ∨
-defn ∨ : atom -> atom -> atom 
-  as (\/)
 
 --------------
 --- concat ---
@@ -65,7 +54,7 @@ defn natural  : atom
    | zero = natural
    | succ = natural → natural
 
-query findSat1 = exists A . A =:= zero
+
 
 
 defn add   : natural -> natural -> natural -> atom
@@ -76,11 +65,6 @@ defn add   : natural -> natural -> natural -> atom
 defn concatableNatural : concatable natural
   as concatableImp natural add
 
-query add1 = (++) (succ zero) zero (succ zero)
-
-query add2 = exists A : natural . add (succ zero) zero A
-
-query add3 = any $ add (succ zero) zero
 
 
 -- sub N M R is N - M = R
@@ -89,7 +73,8 @@ defn sub   : natural -> natural -> natural -> atom
 
 infix 2 ≤
 defn ≤ : natural -> natural -> atom
-   | is_less_than_or_eq = [A B C] sub B A C -> A ≤ B
+   | leqZero = [B] zero ≤ B
+   | leqSucc = [A B] succ A ≤ succ B <- A ≤ B
 
 infix 2 <
 defn < : natural -> natural -> atom
@@ -103,8 +88,21 @@ infix 2 >
 defn > : natural -> natural -> atom
   as λ A B . succ B ≤ A
 
-query findSat2 = exists A . zero < A /\ A < (succ (succ zero))
+query findSat1 = exists A . A =:= zero
 
+query add1 = (++) (succ zero) zero (succ zero)
+
+query add2 = exists A : natural . add (succ zero) zero A
+
+query add3 = any $ add (succ zero) zero
+
+
+query findSat2 = zero < succ (succ zero) /\ zero < succ zero
+
+defn pred : natural -> atom
+   | predimp = [A : natural] zero < A -> A < succ (succ zero) -> pred A
+
+query findSat3 = exists A: natural.  pred A
 
 
 -------------

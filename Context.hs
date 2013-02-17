@@ -107,9 +107,9 @@ getBefore s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
             Just c -> c
             
 checkContext _ c@(Context Nothing _ Nothing) = c
-checkContext s ctx = foldr seq ctx $ zip st ta
+checkContext s ctx = ctx {- foldr seq ctx $ zip st ta
   where st = getBefore s (getTail ctx) ctx
-        ta = getAfter s (getHead ctx) ctx
+        ta = getAfter s (getHead ctx) ctx -}
 
 
 
