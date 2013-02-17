@@ -106,7 +106,7 @@ getBefore s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
             Nothing -> error $ "element "++show p++" not in map \n\twith ctxt: "++show ctx++" \n\t for bind: "++show bind++"\n\t"++s
             Just c -> c
             
-checkContext _ c@(Context Nothing _ Nothing) = c
+--checkContext _ c@(Context Nothing _ Nothing) = c
 checkContext s ctx = ctx {- foldr seq ctx $ zip st ta
   where st = getBefore s (getTail ctx) ctx
         ta = getAfter s (getHead ctx) ctx -}

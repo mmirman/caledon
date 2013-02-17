@@ -19,7 +19,7 @@ import Control.Monad.RWS (RWST, ask, local, censor, runRWST, get, put)
 import Control.Monad.Trans.Cont
 import Control.Monad.Trans (lift)
 import Choice
-import Debug.Trace
+
 -----------------------------
 ---  abstract syntax tree ---
 -----------------------------
@@ -57,8 +57,8 @@ showWithParens t = if (case t of
                       ) then "("++show t++")" else show t 
 
 isOperator [] = False
-isOperator ('#':l) = False
-isOperator (a:l) = not $ elem a ('_':['a'..'z']++['A'..'Z']++['0'..'9'])
+isOperator ('#':_) = False
+isOperator (a:_) = not $ elem a ('_':['a'..'z']++['A'..'Z']++['0'..'9'])
 
 
 instance Show Spine where
@@ -115,8 +115,8 @@ m1 *** m2 = M.union m2 $ subst m2 <$> m1
 
 findTyconInPrefix nm = fip []
   where fip l (Spine "#tycon#" [Spine nm' [v]]:r) | nm == nm' = Just (v, reverse l++r)
-        fip l (a@(Spine "#tycon#" [Spine nm' [_]]):r) = fip (a:l) r
-        fip l r = Nothing
+        fip l (a@(Spine "#tycon#" [Spine _ [_]]):r) = fip (a:l) r
+        fip _ _ = Nothing
 
 rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
@@ -151,6 +151,7 @@ instance (Subst a, Subst b) => Subst (a,b) where
 instance Subst Spine where
   subst s (Abs nm tp rst) = Abs nm' (subst s tp) $ subst s' rst
     where (nm',s') = newName nm s
+  subst s (Spine "#tycon#" [Spine c [v]]) = Spine "#tycon#" [Spine c [subst s v]]
   subst s (Spine nm apps) = let apps' = subst s <$> apps  in
     case s ! nm of
       Just nm -> rebuildSpine nm apps'
@@ -209,48 +210,62 @@ infixr 1 :&:
 -- we can make this data structure mostly strict since the only time we don't 
 -- traverse it is when we fail, and in order to fail, we always have to traverse
 -- the lhs!
-data Constraint = Top
-                | !Term :@: !Type
-                | !Spine :=: !Spine
+data SCons = !Term :@: !Type
+           | !Spine :=: !Spine
+           deriving (Eq)
+data Constraint = SCons [SCons]
                   -- we don't necessarily have to traverse the rhs of a combination
                   -- so we can make it lazy
                 | !Constraint :&: Constraint 
                 | Bind !Quant !Name !Type !Constraint
                 deriving (Eq)
                          
-instance Show Constraint where
+instance Show SCons where
   show (a :=: b) = show a++" ≐ "++show b
   show (a :@: b) = show a++" ∈ "++show b
+  
+instance Show Constraint where
+  show (SCons []) = " ⊤ "
+  show (SCons l) = concat $ intersperse " ∧ " $ map show l
   show (a :&: b) = show a++" ∧ "++show b
-  show Top = " ⊤ "
+  
   show (Bind q n ty c) = show q++" "++ n++" : "++show ty++" . "++showWithParens c
     where showWithParens Bind{} = show c
           showWithParens _ = "( "++show c++" )"
 
 instance Monoid Constraint where
-  mempty = Top
+  mempty = SCons []
   
-  mappend Top b = b
-  mappend a Top = a
-  mappend (Spine a [] :=: Spine b []) c | a == b = c
-  mappend c (Spine a [] :=: Spine b []) | a == b = c
+  mappend (SCons []) b = b
+
+  mappend a (SCons []) = a
+ -- mappend (SCons a) (SCons b) = SCons $ a++b
   mappend a b = a :&: b
 
+instance Subst SCons where
+  subst s c = case c of
+    s1 :@: s2 -> subq s (:@:) s1 s2
+    s1 :=: s2 -> subq s (:=:) s1 s2    
 instance Subst Constraint where
   subst s c = case c of
-    Top -> Top
-    s1 :@: s2 -> subq (:@:) s1 s2
-    s1 :=: s2 -> subq (:=:) s1 s2
-    s1 :&: s2 -> subq (:&:) s1 s2
+    SCons l -> SCons $ map (subst s) l
+    s1 :&: s2 -> subq s (:&:) s1 s2
     Bind q nm t c -> Bind q nm' (subst s t) $ subst s' c
       where (nm',s') = newName nm s
-    where subq e c1 c2 = e (subst s c1) (subst s c2)
+
+subq s e c1 c2 = e (subst s c1) (subst s c2)
 
 (∃) = Bind Exists
 (∀) = Bind Forall
 
 class RegenAbsVars a where
   regenAbsVars :: a -> Env a
+  
+instance RegenAbsVars SCons where
+  regenAbsVars cons = case cons of
+    a :=: b -> regen (:=:) a b
+    a :@: b -> regen (:@:) a b
+    
 instance RegenAbsVars Constraint where  
   regenAbsVars cons = case cons of
     Bind q nm ty cons -> do
@@ -261,15 +276,14 @@ instance RegenAbsVars Constraint where
           let sub = nm |-> var nm'
           Bind q nm' ty' <$> regenAbsVars (subst sub cons)
         _ -> Bind q nm ty' <$> regenAbsVars cons
-    Spine a [] :=: Spine b [] | a == b -> return Top
-    a :=: b -> regen (:=:) a b
+    SCons l -> SCons <$> mapM regenAbsVars l
     a :&: b -> regen (:&:) a b
-    a :@: b -> regen (:@:) a b
-    Top -> return Top
-    where regen e a b = do
-            a' <- regenAbsVars a 
-            b' <- regenAbsVars b 
-            return $ e a' b'
+
+
+regen e a b = do
+  a' <- regenAbsVars a 
+  b' <- regenAbsVars b 
+  return $ e a' b'
 instance RegenAbsVars Spine where  
   regenAbsVars (Abs a ty r) = do
     a' <- getNewWith "@new"
@@ -279,7 +293,7 @@ instance RegenAbsVars Spine where
   regenAbsVars (Spine a l) = Spine a <$> mapM regenAbsVars l
  
 getFamily (Spine "#infer#" [_, Abs _ _ lm]) = getFamily lm
-getFamily (Spine "#ascribe#"  (_:v:l)) = getFamily v
+getFamily (Spine "#ascribe#"  (_:v:_)) = getFamily v
 getFamily (Spine "#forall#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#imp_forall#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#exists#" [_, Abs _ _ lm]) = getFamily lm

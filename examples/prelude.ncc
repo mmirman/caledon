@@ -1,7 +1,6 @@
 ---------------
 -- searches ---
 ---------------
-
 defn any : {A : atom} (A -> atom) -> atom
    | is = [A : atom][V : A][F : A -> atom] F V -> any { A = A } F
 
@@ -47,6 +46,22 @@ infixr 3 ++
 defn ++ : {M} {cm : concatable M} M -> M -> M -> atom
    | ppimp = [M][Foo : M -> M -> M -> atom][M1 M2 M3 : M] (++) {M = M} {cm = concatableImp M Foo} M1 M2 M3 <- Foo M1 M2 M3
 
+
+-------------
+--- Order ---
+-------------
+
+defn orderable : atom -> atom
+   | orderableImp = [M] (M -> M -> atom) -> orderable M
+
+infixr 3 ≤ 
+defn ≤ : {M} {cm : orderable M} M -> M -> atom
+   | ooimp = [M][Foo : M -> M -> atom][M1 M2 : M] (≤) {M = M} {cm = orderableImp M Foo} M1 M2 <- Foo M1 M2
+
+infix 2 ≥
+defn ≥ : {M : atom} {cm : orderable M} M -> M -> atom
+  as ?\M . ?\ cm : orderable M . \M1 M2 : M . M2 ≤ M1
+
 ---------------------
 --- Unary Numbers ---
 ---------------------
@@ -54,40 +69,29 @@ defn natural  : atom
    | zero = natural
    | succ = natural → natural
 
-
-
-
 defn add   : natural -> natural -> natural -> atom
    | add_z = [N] add zero N N
    | add_s = [N M R] add N M R -> add (succ N) M (succ R)
-
-
-defn concatableNatural : concatable natural
-  as concatableImp natural add
-
-
 
 -- sub N M R is N - M = R
 defn sub   : natural -> natural -> natural -> atom
    | sub_by_add = [N M R] sub N M R <- add M R N
 
-infix 2 ≤
-defn ≤ : natural -> natural -> atom
-   | leqZero = [B] zero ≤ B
-   | leqSucc = [A B] succ A ≤ succ B <- A ≤ B
+defn concatableNatural : concatable natural
+  as concatableImp natural add
 
-infix 2 <
+defn lte-nat : natural -> natural -> atom
+   | leqZero = [B] lte-nat zero B
+   | leqSucc = [A B] lte-nat (succ A) (succ B) <- lte-nat A B
+
+infix 3 <
 defn < : natural -> natural -> atom
-  as λ A B . succ A ≤ B
+   | ltZero = [B] zero < succ B
+   | ltSucc = [A B] succ A < succ B <- A < B
 
-infix 2 ≥
-defn ≥ : natural -> natural -> atom
-  as λ A B . B ≤ A
-
-infix 2 >
-defn > : natural -> natural -> atom
-  as λ A B . succ B ≤ A
-
+defn orderableNatural : orderable natural
+  as orderableImp natural lte-nat
+{-
 query findSat1 = exists A . A =:= zero
 
 query add1 = (++) (succ zero) zero (succ zero)
@@ -96,15 +100,14 @@ query add2 = exists A : natural . add (succ zero) zero A
 
 query add3 = any $ add (succ zero) zero
 
-
-query findSat2 = zero < succ (succ zero) /\ zero < succ zero
+query findSat2 = succ zero ≤ succ (succ zero) /\ succ zero ≤ succ zero
 
 defn pred : natural -> atom
    | predimp = [A : natural] zero < A -> A < succ (succ zero) -> pred A
 
 query findSat3 = exists A: natural.  pred A
 
-
+-}
 -------------
 --- Maybe ---
 -------------
@@ -142,12 +145,14 @@ defn |:| : {a:atom} a -> a -> (a -> a -> a) -> a
 
 
 infix 0 ==>
-defn ==> : {a} bool -> ((a -> a -> a) -> a) -> a -> atom
-   | thentrue  = [a : atom][f: _ -> a] (true ==> f)  (f $ λA B : a. A)
-   | thenfalse = [b][f: _ -> b] (false ==> f) (f $ λA B : b . B)
+defn ==> : {a : atom} bool -> ((a -> a -> a) -> a) -> a -> atom
+   | thentrue  = [a : atom][f: _ -> a] (true ==> f)  (f (λA B : a. A))
+   | thenfalse = [b : atom][f: _ -> b] (false ==> f) (f (λA B : b . B))
 
 defn not : bool -> bool -> atom
   as λa . if a ==> false |:| true
+
+
 
 
 
@@ -162,5 +167,16 @@ defn binomial-tree : atom {- elements -} -> natural {- rank -} -> atom
    | binomial-node = {A}{R} A -> count-list (binomial-tree A) R -> binomial-tree A R
 
 defn binomial-heap : atom -> atom
-  as λa . any $ count-list $ maybe @ binomial-tree a
+  as λa : atom . any $ count-list $ maybe @ binomial-tree a
 
+defn tree-merge : {R: natural}{M : atom}{cm : orderable M} binomial-tree M R -> binomial-tree M R -> binomial-tree M (succ R) -> atom
+   | tree-merge-ord-lt = [R: natural][M : atom][a a' : M][bl b'l : count-list (binomial-tree M) R][cm : orderable M] 
+-- curiously enough, switching cons makes this easier to infer!
+          		 tree-merge (binomial-node a bl) (binomial-node a' b'l)  (binomial-node a (cl-cons (binomial-node a' b'l) bl))
+	   	      <- a ≤ a'
+{-
+   | tree-merge-ord-gt = [R : natural][M : atom][a a' : M][bl b'l][cm : orderable M] 
+          		 tree-merge (binomial-node a bl) (binomial-node a' b'l)  (binomial-node a' $ cl-cons {R = R} b'l (binomial-node a bl))
+	   	      <- a' ≤ a
+
+-}
