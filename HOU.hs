@@ -311,7 +311,7 @@ gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(b'@(Spine x' y'l)
 
   modify $ addToTail Exists xN xNty -- THIS IS DIFFERENT FROM THE PAPER!!!!
   
-  vtrace3 ("SUBST: -ggd- "++show sub) $ return $ Just (sub, [])
+  vtrace3 ("SUBST: -ggd- "++show sub) $ return $ Just (sub, []) -- var xN :@: xNty])
   
 gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) = 
   case elemIndex (var y) $ reverse yl of
@@ -414,9 +414,9 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
     return $ Just [ var y :=: rebuildSpine m [tycon x $ var x']
                   , var y :@: b'
                   ]
-  Spine "putChar" [Spine ['\'',l,'\''] []] ->
+  Spine "putChar" [c@(Spine ['\'',l,'\''] [])] ->
     case unsafePerformIO $ putStr $ l:[] of
-      () -> return $ Just []
+      () -> return $ Just [ m :=: Spine "putCharImp" [c]]
   Spine "putChar" [_] -> return Nothing
   
   l@(Spine nm _) -> do

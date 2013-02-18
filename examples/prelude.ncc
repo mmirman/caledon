@@ -1,6 +1,7 @@
 ---------------
 -- builtins ---
 ---------------
+
 defn string : atom
   as list char
 
@@ -173,7 +174,6 @@ defn not : bool -> bool -> atom
 ----------------------
 --- Binomial heaps ---
 ----------------------
-{-
 
 defn count-list : (natural -> atom) -> natural -> atom
    | cl-nil = {V} count-list V zero
@@ -186,7 +186,7 @@ defn binomial-heap : atom -> atom
   as λ r : atom . any $ count-list $ maybe @ binomial-tree r
 
 
--- curiously enough, switching cons makes this easier to infer!
+{-
 defn tree-merge : {R: natural}{M : atom}{cm : orderable M} binomial-tree M R -> binomial-tree M R -> binomial-tree M (succ R) -> atom
 
    | tree-merge-ord-lt = [R: natural][M : atom][a a' : M][bl b'l : count-list (binomial-tree M) R][cm : orderable M] 
@@ -197,9 +197,10 @@ defn tree-merge : {R: natural}{M : atom}{cm : orderable M} binomial-tree M R -> 
           		 tree-merge {R = R} (binomial-node a bl) (binomial-node a' b'l)  (binomial-node {A = M}{R = succ R} a' $ cl-cons {R = R}{V = binomial-tree M} (binomial-node {A = M}{R = R} a bl) b'l)
 	   	      <- a' ≤ a
 
-
+-}
 
 defn main : atom
-   | _ = main <- putStr "hello\n"
-       	      <- putStr "world!\n"
+   | _ = main <- putStr "hello world!\n"
+
 query tryshow = main
+

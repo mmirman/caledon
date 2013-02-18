@@ -300,6 +300,7 @@ consts = [ ("atom", atom)
                   $ exists "z" (var "tp") (Spine "iface" [var "z"]))
          , ("char", atom)
          , ("putChar", var "char" ~> atom)
+         , ("putCharImp", forall "z" (var "char") $ Spine "putChar" [var "z"])
          ]
 
 envConsts = M.fromList consts
