@@ -175,7 +175,7 @@ unifyEq cons@(a :=: b) = case (a,b) of
                     a <- gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
                     vtrace3 ("-gc-ret- "++show a) $ return a
                   else return Nothing
-                Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> vtrace1 "CANT: -gu-dep-" $ vtrace3throw $ "gvar-uvar-depends: "++show (a :=: b)
+                Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> vtrace1 "CANT: -gu-dep-" $ vtrace1throw $ "gvar-uvar-depends: "++show (a :=: b)
                 Left Binding{ elmQuant = Forall } | S.member x $ freeVariables y'l -> 
                   vtrace0throw $ "CANT: occurs check: "++show (a :=: b)
                 Left Binding{ elmQuant = Forall, elmType = ty' } ->vtrace1 "-gui-" $  -- gvar-uvar-inside
@@ -188,7 +188,7 @@ unifyEq cons@(a :=: b) = case (a,b) of
                          gvar_gvar_same (Spine x yl, ty) (Spine x' y'l, ty')
                        else -- gvar-gvar-diff
                          if S.member x $ freeVariables y'l 
-                         then vtrace1throw $ "CANT: ggd-occurs check: "++show (a :=: b)
+                         then vtrace0throw $ "CANT: ggd-occurs check: "++show (a :=: b)
                          else vtrace1 ("-ggd- " ++show cons)
                               $ gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
             _ -> vtrace1 "-ggs-" $ return Nothing
@@ -488,13 +488,13 @@ checkType sp ty = case sp of
   Spine "#imp_forall#" [_, Abs x tyA tyB] -> do
     tyA <- checkType tyA atom
     tyB <- addToEnv (∀) x tyA $ checkType tyB atom
-    atom ≐ ty
+    ty ≐ atom
     return $ imp_forall x tyA tyB
     
   Spine "#forall#" [_, Abs x tyA tyB] -> do
     tyA <- checkType tyA atom
     tyB <- addToEnv (∀) x tyA $ checkType tyB atom
-    atom ≐ ty
+    ty ≐ atom
     return $ forall x tyA tyB
     
   -- below are the only cases where bidirectional type checking is useful 
@@ -510,7 +510,6 @@ checkType sp ty = case sp of
       addToEnv (∃) e (forall x tyA atom) $ do
         imp_forall x tyA (Spine e [var x]) ≐ ty
         sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
-        var e .@. (forall x tyA atom)
         return $ imp_abs x tyA sp
 
   Abs x tyA sp -> case ty of
@@ -524,9 +523,7 @@ checkType sp ty = case sp of
       tyA <- checkType tyA atom
       addToEnv (∃) e (forall x tyA atom) $ do
         forall x tyA (Spine e [var x]) ≐ ty
-        sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
-        var e .@. (forall x tyA atom)
-        return $ Abs x tyA sp
+        Abs x tyA <$> (addToEnv (∀) x tyA $ checkType sp (Spine e [var x]))
 
   Spine head args -> do
     let chop mty [] = do
@@ -536,12 +533,14 @@ checkType sp ty = case sp of
         chop mty lst@(a:l) = case mty of 
           
           Spine "#imp_forall#" [ty', Abs nm _ tyv] -> case findTyconInPrefix nm lst of
-            Nothing    -> do
+            Nothing -> do
               x <- getNewWith "@xin"
               addToEnv (∃) x ty' $ do
-                var x .@. ty'
-                chop (subst (nm |-> var x) tyv) lst
-            Just (val,lst) -> do
+                var x .@. ty' 
+                -- we need to make sure that the type is satisfiable such that we can reapply it!
+                (tycon nm (var x):) <$> (chop (subst (nm |-> var x) tyv) lst)
+
+            Just (val,l) -> do
               val <- checkType val ty'
               (tycon nm val:) <$> chop (subst (nm |-> val) tyv) l
           Spine "#forall#" [ty', c] -> do
@@ -556,14 +555,14 @@ checkType sp ty = case sp of
               a <- checkType a (var x)
               v <- getNewWith "@v"
               forall v (var x) (Spine tybody [var v]) ≐ mty
-              var tybody .@. tybodyty
-              var x .@. atom              
               (a:) <$> chop (Spine tybody [a]) l
 
     mty <- (M.lookup head) <$> lift ask
     
     case mty of 
       Nothing -> lift $ vtrace0throw $ "variable: "++show head++" not found in the environment."
+                                     ++ "\n\t from "++ show sp
+                                     ++ "\n\t from "++ show ty
       Just ty' -> Spine head <$> chop ty' args
 
 ----------------------
@@ -572,21 +571,22 @@ checkType sp ty = case sp of
 typeInfer :: Constants -> (Name,Spine,Type) -> Choice Constants
 typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) 0) $ do
 
-  (val,constraint) <- appendErr ("in name: "++ nm ++" : "++show val) $ 
+  (val,constraint) <- appendErr ("in name: "++nm++" : "++show val) $ 
                       trace ("Checking: " ++nm) $ 
                       vtrace0 ("\tVAL: " ++show val) $ 
                       vtrace0 ("\t:: " ++show ty) $ 
                       typeCheckToEnv $ checkType val ty
   (sub,ctxt) <- runStateT (unify constraint) emptyContext
   
-  return $ M.insert nm (unsafeSubst sub val) env
+  let res = unsafeSubst sub val
+  vtrace0 ("RESULT: "++nm++" : "++show res) $
+      return $ M.insert nm res env
 
 unsafeSubst s (Spine nm apps) = let apps' = unsafeSubst s <$> apps in case s ! nm of 
   Just nm -> rebuildSpine nm apps'
   _ -> Spine nm apps'
 unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
   
-
 ----------------------------
 --- the public interface ---
 ----------------------------
@@ -606,7 +606,7 @@ typeCheckAxioms lst = do
                         ++"\nWITH: "++nm++ " : "++show ty
                         ++"\nAS:   "++nm++ " = "++show val
                         ) $ 
-              typeInfer l (nm,val,ty) -- constrain the breadth first search to be local! 
+              typeInfer l (nm, val,ty) -- constrain the breadth first search to be local! 
         inferAll $ case nm of
           '#':'v':':':nm' -> (subst sub <$> l', (\(fam,nm,val,ty) -> (fam,nm, subst sub val, subst sub ty)) <$> toplst) 
             where sub = nm' |-> (l' M.! nm)                                   
@@ -619,7 +619,6 @@ typeCheckAll preds = do
   let toAxioms (Predicate nm ty cs) = (Just "atom",nm,ty,atom):map (\(nm',ty') -> (Just nm,nm',ty',atom)) cs
       toAxioms (Query nm val) = [(Nothing, nm,val,atom)]
       toAxioms (Define nm val ty) = [(Nothing, nm,ty,atom), (Nothing, "#v:"++nm,val,ty)]
-
   tyMap <- typeCheckAxioms $ concatMap toAxioms preds
   
   let newPreds (Predicate nm _ cs) = Predicate nm (tyMap M.! nm) $ map (\(nm,_) -> (nm,tyMap M.! nm)) cs

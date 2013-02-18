@@ -131,16 +131,16 @@ rebuildSpine (Abs nm _ rst) (a:apps') = let sp = subst (nm |-> a) $ rst
 
 newNameFor :: Name -> S.Set Name -> Name
 newNameFor nm fv = nm'
-  where nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/") [0..]
+  where nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/?") [0..]
         free k = not $ S.member k fv
         
 newName :: Name -> Map Name Spine -> (Name, Map Name Spine)
-newName nm s = (nm',s')
-  where s' = if nm == nm' then s else M.insert nm (var nm') s 
+newName nm so = (nm',s')
+  where s = M.delete nm so
+        s' = if nm == nm' then s else M.insert nm (var nm') s 
         nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/") [0..]
         fv = mappend (M.keysSet s) (freeVariables s)
         free k = not $ S.member k fv
-
 
 class Subst a where
   subst :: Substitution -> a -> a
@@ -168,7 +168,8 @@ instance (FV a, F.Foldable f) => FV (f a) where
 instance FV Spine where
   freeVariables t = case t of
     Abs nm t p -> (S.delete nm $ freeVariables p) `mappend` freeVariables t
-    Spine head others -> mappend (S.singleton head) $ mconcat $ freeVariables <$> others
+    Spine "#tycon#" [Spine nm [v]] -> freeVariables v
+    Spine head others -> mappend (S.singleton head) $ mconcat $ map freeVariables others
 
 -------------------------
 ---  Traversal Monad  ---
