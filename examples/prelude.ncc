@@ -1,4 +1,10 @@
 ---------------
+-- builtins ---
+---------------
+defn string : atom
+  as list char
+
+---------------
 -- searches ---
 ---------------
 defn any : {A : atom} (A -> atom) -> atom
@@ -17,7 +23,6 @@ defn @ : {a b c:atom} (b -> c) -> (a -> b) -> a -> c
 
 defn flip : {a b c : atom} (a -> b -> c) -> b -> a -> c
   as ?λ at bt ct : atom . λ foo . λ b . λ a . foo a b
-
 
 -------------------
 --- Constraints ---
@@ -45,7 +50,6 @@ defn concatable : atom -> atom
 infixr 3 ++
 defn ++ : {M} {cm : concatable M} M -> M -> M -> atom
    | ppimp = [M][Foo : M -> M -> M -> atom][M1 M2 M3 : M] (++) {M = M} {cm = concatableImp M Foo} M1 M2 M3 <- Foo M1 M2 M3
-
 
 -------------
 --- Order ---
@@ -91,9 +95,9 @@ defn < : natural -> natural -> atom
 
 defn orderableNatural : orderable natural
   as orderableImp natural lte-nat
-{-
-query findSat1 = exists A . A =:= zero
 
+query findSat1 = exists A . A =:= zero
+{-
 query add1 = (++) (succ zero) zero (succ zero)
 
 query add2 = exists A : natural . add (succ zero) zero A
@@ -130,6 +134,16 @@ defn concatList : {A} list A -> list A -> list A -> atom
 defn concatableList : {A:atom} concatable (list A)
   as ?λA . concatableImp (list A) concatList
 
+----------------
+--- printing ---
+----------------
+
+defn putStr : string -> atom
+   | putStr_Nil = putStr $ nil {a = char}
+   | putStr_Cons = [v:char][l: list char] 
+                   putStr $ cons {a = char} v l 
+                <- putChar v
+                <- putStr l
 
 ----------------
 --- Booleans ---
@@ -159,6 +173,7 @@ defn not : bool -> bool -> atom
 ----------------------
 --- Binomial heaps ---
 ----------------------
+{-
 
 defn count-list : (natural -> atom) -> natural -> atom
    | cl-nil = {V} count-list V zero
@@ -170,6 +185,7 @@ defn binomial-tree : atom {- elements -} -> natural {- rank -} -> atom
 defn binomial-heap : atom -> atom
   as λ r : atom . any $ count-list $ maybe @ binomial-tree r
 
+
 -- curiously enough, switching cons makes this easier to infer!
 defn tree-merge : {R: natural}{M : atom}{cm : orderable M} binomial-tree M R -> binomial-tree M R -> binomial-tree M (succ R) -> atom
 
@@ -180,3 +196,10 @@ defn tree-merge : {R: natural}{M : atom}{cm : orderable M} binomial-tree M R -> 
    | tree-merge-ord-gt = [R : natural][M : atom][a a' : M][bl b'l : count-list (binomial-tree M) R][cm : orderable M] 
           		 tree-merge {R = R} (binomial-node a bl) (binomial-node a' b'l)  (binomial-node {A = M}{R = succ R} a' $ cl-cons {R = R}{V = binomial-tree M} (binomial-node {A = M}{R = R} a bl) b'l)
 	   	      <- a' ≤ a
+
+
+
+defn main : atom
+   | _ = main <- putStr "hello\n"
+       	      <- putStr "world!\n"
+query tryshow = main

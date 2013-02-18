@@ -116,13 +116,13 @@ decPred :: (Parser String, String)
 decPred = (operator <|> getId lower, "=")
 
 idVar :: Parser String
-idVar = getId $ upper <|> char '\''
+idVar = getId $ upper
 
 decVar :: (Parser String, String)
 decVar = (idVar <|> getId lower, "=")
 
 decAnon :: (Parser String, String)
-decAnon = (getId $ letter <|> char '\'' , ":")
+decAnon = (getId $ letter , ":")
 
 named :: (Parser a, String) -> Parser (a, Type)
 named (ident, sep) = do
@@ -139,6 +139,20 @@ tmpState nm m = do
   r <- m
   unless b $ modifyState $ modifySet $ S.delete nm
   return r
+
+
+toChar c = Spine ['\'',c,'\''] []
+
+pChar = do
+  c <- charLiteral
+  return $ toChar c
+  
+pString = do
+  s <- stringLiteral
+  let char = Spine "char" []
+      nil = Spine "nil" [tycon "a" char]
+      cons a l = Spine "cons" [tycon "a" char, a,l]
+  return $ foldr cons nil $ map toChar s
 
 
 tipe = do
@@ -165,7 +179,6 @@ tipe = do
         nm'' <- getNextVar
         return (nml,fromMaybe (infer nm' atom $ infer nm'' (var nm') $ var nm'') ty)
 
-  
       binary fun assoc name = flip Infix assoc $ do 
         name
         fun <$> getNextVar
@@ -220,7 +233,8 @@ tipe = do
                 tps <- many pArg
                 return $ rebuildSpine t tps
          <?> "term"
-            
+
+      
       pHead = pParens pAt (pOp <|> ptipe <|> pAsc) "head"
       pArg  = pParens (pAt <|> pTycon) (pOp <|> ptipe) "argument"
       
@@ -249,6 +263,8 @@ tipe = do
                 return $ var r
          <|> do r <- identifier
                 return $ var r
+         <|> pChar
+         <|> pString
          <?> "atom"
 
       pTycon = braces $ do
@@ -266,7 +282,7 @@ reservedOperators = [ "->", "=>", "<=", "⇐", "⇒", "→", "<-", "←",
                      "?", 
                      "??", "∃", "=", 
                      ":", ";", "|"]
-identStartOps = "_'-/"                     
+identRegOps = "_'-/"              
                     
 reservedNames = ["defn", "as", "query"    
                 , "forall", "exists", "?forall"
@@ -275,13 +291,13 @@ reservedNames = ["defn", "as", "query"
 
 mydef :: P.GenLanguageDef String ParseState Identity
 mydef = haskellDef
-  { P.identStart = oneOf ['a'..'z']
-  , P.identLetter = alphaNum <|> oneOf identStartOps
+  { P.identStart = oneOf $"_"++['a'..'z']
+  , P.identLetter = alphaNum <|> oneOf identRegOps
   , P.reservedNames = reservedNames
   , P.caseSensitive = True
   , P.reservedOpNames = reservedOperators
-  , P.opStart = noneOf $ "# \n\t\r\f\v"++['a'..'z']++['A'..'Z']
-  , P.opLetter = noneOf $ " \n\t\r\f\v"++['a'..'z']++['A'..'Z']
+  , P.opStart = noneOf $ "'# \n\t\r\f\v"++['a'..'z']++['A'..'Z']
+  , P.opLetter = noneOf $ "' \n\t\r\f\v"++['a'..'z']++['A'..'Z']
   }
 P.TokenParser{..} = P.makeTokenParser mydef
 

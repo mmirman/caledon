@@ -25,7 +25,9 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Debug.Trace
 
-vtrace0 = trace -- vtrace1
+import System.IO.Unsafe
+
+vtrace0 = vtrace1
 vtrace1 = vtrace2
 vtrace2 = vtrace3
 vtrace3 = const id
@@ -65,7 +67,7 @@ unify cons = do
       uniWhile sub c' = do
         exists <- getExists        
             
-        let c = reverse $ topoSort (heuristic $ M.keysSet exists) c'
+        let c = c' -- reverse $ topoSort (heuristic $ M.keysSet exists) c'
             -- eventually we can make the entire algorithm a graph modification algorithm for speed, 
             -- such that we don't have to topologically sort every time.  Currently this only takes us from O(n log n) to O(n) per itteration, it is
             -- not necessarily worth it.
@@ -392,6 +394,7 @@ gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
 --- proof search ---  
 --------------------
 
+
 -- need bidirectional search!
 rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal of
   Spine "#forall#" [a, b] -> do
@@ -411,7 +414,11 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
     return $ Just [ var y :=: rebuildSpine m [tycon x $ var x']
                   , var y :@: b'
                   ]
-    
+  Spine "putChar" [Spine ['\'',l,'\''] []] ->
+    case unsafePerformIO $ putStr $ l:[] of
+      () -> return $ Just []
+  Spine "putChar" [_] -> return Nothing
+  
   l@(Spine nm _) -> do
     constants <- lift $ ask  
     foralls <- getForalls
@@ -426,15 +433,18 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
         sameFamily (_, Abs _ _ _) = False
         sameFamily ("pack",s) = "#exists#" == nm
         sameFamily (nm',s) = (M.notMember nm' exists || (notAbs m && nm' /= getFamily m)) 
-                             && getFamily s == nm
+                           && getFamily s == nm
+                             
         targets = filter sameFamily envl
-    case targets of
+        
+        isEnv a = isChar a || M.member a env
+    if all isEnv $ S.toList (S.union (freeVariables m) (freeVariables l))
+      then return $ Just []
+      else case targets of
       [] -> return Nothing
-      _ -> if all (flip M.member env) $ S.toList (S.union (freeVariables m) (freeVariables l))
-           then return $ Just []
-           else if M.member nm exists 
-                then return Nothing
-                else Just <$> (F.asum $ (leftSearch m goal <$> reverse targets)) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
+      _ ->  if M.member nm exists 
+            then return Nothing
+            else Just <$> (F.asum $ (leftSearch m goal <$> reverse targets)) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
 
 
 
@@ -524,7 +534,9 @@ checkType sp ty = case sp of
       addToEnv (∃) e (forall x tyA atom) $ do
         forall x tyA (Spine e [var x]) ≐ ty
         Abs x tyA <$> (addToEnv (∀) x tyA $ checkType sp (Spine e [var x]))
-
+  Spine nm [] | isChar nm -> do
+    ty ≐ Spine "char" []
+    return sp
   Spine head args -> do
     let chop mty [] = do
           ty ≐ mty

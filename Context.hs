@@ -124,6 +124,8 @@ checkContext s ctx = ctx {- foldr seq ctx $ zip st ta
 type WithContext = StateT Context Env 
 
 getElm :: String -> Name -> WithContext (Either Binding Spine)
+getElm _ x | isChar x = do
+  return $ Right $ var "char"
 getElm s x = do
   ty <- lookupConstant x
   case ty of
@@ -193,4 +195,3 @@ typeCheckToEnv m = do
 
 addToEnv :: (Name -> Spine -> Constraint -> Constraint) -> Name  -> Spine -> TypeChecker a -> TypeChecker a
 addToEnv e x ty = mapContT (censor $ e x ty) . liftLocal ask local (M.insert x ty) 
-        

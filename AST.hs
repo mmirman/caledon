@@ -62,6 +62,7 @@ isOperator (a:_) = not $ elem a ('_':['a'..'z']++['A'..'Z']++['0'..'9'])
 
 
 instance Show Spine where
+  show (Spine ['\'',c,'\''] []) = show c
   show (Spine "#infer#" [_, Abs nm t t']) = "<"++nm++" : "++show t++"> "++show t'
   show (Spine "#ascribe#" (ty:v:l)) = "( "++showWithParens v++ " : " ++ show ty++" ) "++show (Spine "" l)  
   show (Spine "#forall#" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " → " ++ show t'
@@ -297,6 +298,16 @@ consts = [ ("atom", atom)
                   $ forall "tau" (var "tp") 
                   $ forall "e" (Spine "iface" [var "tau"]) 
                   $ exists "z" (var "tp") (Spine "iface" [var "z"]))
+         , ("char", atom)
+         , ("putChar", var "char" ~> atom)
          ]
 
 envConsts = M.fromList consts
+
+
+
+isChar  ['\'',l,'\''] = True
+isChar _ = False
+
+
+
