@@ -1,6 +1,24 @@
 ---------------
 -- builtins ---
 ---------------
+defn char : atom  -- builtin
+
+defn putChar    :  char -> atom -- builtin
+   | putCharImp = [A] putChar A
+
+-- for sequencing io actions
+fixity left 1 ,
+defn io : atom
+   | do = io
+   | ,  = io -> atom -> io 
+
+defn run : io -> atom
+   | runDo = run do
+   | runSeq = [A][B] run (A , B) <- run A 
+                     	         <- B
+
+defn readLine    : (string -> io) -> atom -- builtin
+   | readLineImp = [Foo : string -> io] [A : string] readLine Foo <- run (Foo A)
 
 defn string : atom
   as list char
@@ -11,14 +29,19 @@ defn string : atom
 defn any : {A : atom} (A -> atom) -> atom
    | is = [A : atom][V : A][F : A -> atom] F V -> any { A = A } F
 
+fixity lambda findOne 
+defn findOne : [A : atom] (A -> atom) -> atom
+  as \a: atom . any { A = a }
+
 --------------------------
 --- useful combinators ---
 --------------------------
-infixr 0 $
+fixity right 0 $
 defn $ : {a b:atom} (a -> b) -> a -> b
   as ?\ at bt . λ f . λ a . f a
 
-infixr 0 @
+
+fixity right 0 @
 defn @ : {a b c:atom} (b -> c) -> (a -> b) -> a -> c
   as ?λat bt ct : atom . λf : bt -> ct . λ g : at -> bt . λ a : at . f (g a)
 
@@ -28,16 +51,16 @@ defn flip : {a b c : atom} (a -> b -> c) -> b -> a -> c
 -------------------
 --- Constraints ---
 -------------------
-infix 1 =:=
+fixity none 1 =:=
 defn =:= : {q} q -> q -> atom
    | eq = [a : atom][b:a] (=:=) {q = a} b b
 
 -- searching for these is SLOW
-infix 0 /\
+fixity none 0 /\
 defn /\ : atom -> atom -> atom
    | and = [a b:atom] a -> b -> a /\ b
 
-infix 0 \/
+fixity none 0 \/
 defn \/ : atom -> atom -> atom
    | or1 = [a b:atom] a -> a \/ b
    | or2 = [a b:atom] b -> a \/ b
@@ -48,7 +71,7 @@ defn \/ : atom -> atom -> atom
 defn concatable : atom -> atom
    | concatableImp = [M] (M -> M -> M -> atom) -> concatable M
 
-infixr 3 ++
+fixity right 3 ++
 defn ++ : {M} {cm : concatable M} M -> M -> M -> atom
    | ppimp = [M][Foo : M -> M -> M -> atom][M1 M2 M3 : M] (++) {M = M} {cm = concatableImp M Foo} M1 M2 M3 <- Foo M1 M2 M3
 
@@ -59,11 +82,11 @@ defn ++ : {M} {cm : concatable M} M -> M -> M -> atom
 defn orderable : atom -> atom
    | orderableImp = [M] (M -> M -> atom) -> orderable M
 
-infixr 3 ≤ 
+fixity right 3 ≤ 
 defn ≤ : {M} {cm : orderable M} M -> M -> atom
    | ooimp = [M][Foo : M -> M -> atom][M1 M2 : M] (≤) {M = M} {cm = orderableImp M Foo} M1 M2 <- Foo M1 M2
 
-infix 2 ≥
+fixity none 2 ≥
 defn ≥ : {M : atom} {cm : orderable M} M -> M -> atom
   as ?\M . ?\ cm : orderable M . \M1 M2 : M . M2 ≤ M1
 
@@ -89,7 +112,7 @@ defn lte-nat : natural -> natural -> atom
    | leqZero = [B] lte-nat zero B
    | leqSucc = [A B] lte-nat (succ A) (succ B) <- lte-nat A B
 
-infix 3 <
+fixity none 3 <
 defn < : natural -> natural -> atom
    | ltZero = [B] zero < succ B
    | ltSucc = [A B] succ A < succ B <- A < B
@@ -156,12 +179,12 @@ defn bool : atom
 defn if : bool -> bool
   as λb . b
 
-infix 1 |:|
+fixity none 1 |:|
 defn |:| : {a:atom} a -> a -> (a -> a -> a) -> a
   as ?λt : atom . λa b : t. λf : t -> t -> t. f a b
 
 
-infix 0 ==>
+fixity none 0 ==>
 defn ==> : {a : atom} bool -> ((a -> a -> a) -> a) -> a -> atom
    | thentrue  = [a : atom][f: _ -> a] (true ==> f)  (f (λA B : a. A))
    | thenfalse = [b : atom][f: _ -> b] (false ==> f) (f (λA B : b . B))
@@ -171,36 +194,8 @@ defn not : bool -> bool -> atom
 
 
 
-----------------------
---- Binomial heaps ---
-----------------------
-
-defn count-list : (natural -> atom) -> natural -> atom
-   | cl-nil = {V} count-list V zero
-   | cl-cons = {R}{V} V R -> count-list V R -> count-list V (succ R)
-
-defn binomial-tree : atom {- elements -} -> natural {- rank -} -> atom
-   | binomial-node = {A}{R} A -> count-list (binomial-tree A) R -> binomial-tree A R
-
-defn binomial-heap : atom -> atom
-  as λ r : atom . any $ count-list $ maybe @ binomial-tree r
-
-
-{-
-defn tree-merge : {R: natural}{M : atom}{cm : orderable M} binomial-tree M R -> binomial-tree M R -> binomial-tree M (succ R) -> atom
-
-   | tree-merge-ord-lt = [R: natural][M : atom][a a' : M][bl b'l : count-list (binomial-tree M) R][cm : orderable M] 
-          		 tree-merge (binomial-node a bl) (binomial-node a' b'l)  (binomial-node a $ cl-cons {R = R} (binomial-node a' b'l) bl)
-	   	      <- a ≤ a'
-
-   | tree-merge-ord-gt = [R : natural][M : atom][a a' : M][bl b'l : count-list (binomial-tree M) R][cm : orderable M] 
-          		 tree-merge {R = R} (binomial-node a bl) (binomial-node a' b'l)  (binomial-node {A = M}{R = succ R} a' $ cl-cons {R = R}{V = binomial-tree M} (binomial-node {A = M}{R = R} a bl) b'l)
-	   	      <- a' ≤ a
-
--}
-
-defn main : atom
-   | _ = main <- putStr "hello world!\n"
-
-query tryshow = main
-
+query main = run $ do 
+                 , putStr "hey!\n"
+	  	 , readLine ( \A . do 
+   		 , putStr A
+                 , putStr "\nbye!\n")

@@ -119,6 +119,9 @@ findTyconInPrefix nm = fip []
         fip l (a@(Spine "#tycon#" [Spine _ [_]]):r) = fip (a:l) r
         fip _ _ = Nothing
 
+apply :: Spine -> Spine -> Spine
+apply a l = rebuildSpine a [l]
+
 rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
 rebuildSpine (Spine "#imp_abs#" [_, Abs nm ty rst]) apps = case findTyconInPrefix nm apps of 
@@ -189,7 +192,8 @@ instance Show Quant where
   show Exists = "∃"
 
 -- as ineficient as it is, I'll make this the constraint representation.
-infixr 2 :=:  
+infix 2 :=:  
+infix 2 :@:  
 infixr 1 :&:
 
 -- we can make this data structure mostly strict since the only time we don't 
@@ -298,10 +302,17 @@ consts = [ ("atom", atom)
                   $ forall "tau" (var "tp") 
                   $ forall "e" (Spine "iface" [var "tau"]) 
                   $ exists "z" (var "tp") (Spine "iface" [var "z"]))
-         , ("char", atom)
-         , ("putChar", var "char" ~> atom)
-         , ("putCharImp", forall "z" (var "char") $ Spine "putChar" [var "z"])
+--         , ("char", atom)
+--         , ("putChar", var "char" ~> atom)
+--         , ("putCharImp", forall "z" (var "char") $ Spine "putChar" [var "z"])
          ]
+
+toNCCchar c = Spine ['\'',c,'\''] []
+toNCCstring s = foldr cons nil $ map toNCCchar s
+  where char = Spine "char" []
+        nil = Spine "nil" [tycon "a" char]
+        cons a l = Spine "cons" [tycon "a" char, a,l]
+
 
 envConsts = M.fromList consts
 

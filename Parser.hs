@@ -34,14 +34,15 @@ data ParseState = ParseState { currentVar :: Integer
 
 data Fixity = FixLeft | FixRight | FixNone
 
-data FixityTable = FixityTable { fixityLeft :: [(Integer,String)] 
-                               , fixityNone :: [(Integer, String)]
-                               , fixityRight :: [(Integer, String)]
-                               , fixityPrefix :: [(Integer, String)]
-                               , fixityPostfix :: [(Integer, String)]
-                               } deriving (Show)
+data FixityTable = FixityTable { fixityBinary :: [(Integer,String, Assoc)] 
+                               , fixityPrefix :: [(Integer, String, Assoc)]
+                               , fixityPostfix :: [(Integer, String, Assoc)]
+                               , opLambdas :: [String]
+                               , strLambdas :: [String]
+                               , binds :: [(String,String,String)]
+                               }
 
-emptyTable = FixityTable [] [] [] [] []
+emptyTable = FixityTable [] [] [] [] [] []
 emptyState = (ParseState 0 mempty emptyTable [])
 
 type Parser = ParsecT String ParseState Identity
@@ -69,19 +70,42 @@ topLevel = fixityDef <|> query <|> defn
 
 
 fixityDef = do 
+  reserved "fixity"
+  infixDef <|> bindDef <|> lamDef
+  topLevel
+  
+bindDef = do  
+  reserved "bind"
+  op <- operator
+  place <- identifier
+  del <- operator
+  modifyState $ \b -> b { currentTable = let ct = currentTable b in ct { binds = (op,place,del):binds ct} }
+                                                                    
+lamDef = do
+  reserved "lambda"
+  opLam <|> strLam
+
+opLam = do  
+  op <- operator
+  modifyState $ \b -> b { currentTable = let ct = currentTable b in ct { opLambdas = op:opLambdas ct} }
+                                                                    
+strLam = do
+  op <- identifier
+  modifyState $ \b -> b { currentTable = let ct = currentTable b in ct { strLambdas = op:strLambdas ct} }
+                                                                    
+infixDef = do  
   -- I wish template haskell worked with record wild cards!
-  (setFixity) <- (reserved "infixl" >> return (\b c -> b { fixityLeft = c $ fixityLeft b} )) 
-             <|> (reserved "infix" >> return (\b c -> b { fixityNone = c $ fixityNone b}))
-             <|> (reserved "infixr" >> return (\b c -> b { fixityRight = c $ fixityRight b}))
-             <|> (reserved "prefix" >> return (\b c -> b { fixityPrefix = c $ fixityPrefix b}))
-             <|> (reserved "postfix" >> return (\b c -> b { fixityPostfix = c $ fixityPostfix b}))
+  (setFixity) <- (reserved "left" >> return (\b c -> b { fixityBinary = c AssocLeft $ fixityBinary b} )) 
+             <|> (reserved "none" >> return (\b c -> b { fixityBinary = c AssocNone $ fixityBinary b} )) 
+             <|> (reserved "right" >> return (\b c -> b { fixityBinary = c AssocRight $ fixityBinary b} )) 
+             <|> (reserved "pre" >> return (\b c -> b { fixityPrefix = c undefined $ fixityPrefix b}))
+             <|> (reserved "post" >> return (\b c -> b { fixityPostfix = c undefined $ fixityPostfix b}))
   n <- integer
   op <- operator -- <|> identifier
   
-  let modify = insertBy (\(n,_) (m,_) -> compare n m) (n,op)
+  let modify assoc = insertBy (\(n,_,_) (m,_,_) -> compare n m) (n,op, assoc)
   modifyState $ \b -> b { currentTable = setFixity (currentTable b) modify
                         , currentOps = op:currentOps b}
-  topLevel
   
 
 query :: Parser Predicate
@@ -141,22 +165,14 @@ tmpState nm m = do
   return r
 
 
-toChar c = Spine ['\'',c,'\''] []
 
-pChar = do
-  c <- charLiteral
-  return $ toChar c
-  
-pString = do
-  s <- stringLiteral
-  let char = Spine "char" []
-      nil = Spine "nil" [tycon "a" char]
-      cons a l = Spine "cons" [tycon "a" char, a,l]
-  return $ foldr cons nil $ map toChar s
+
+pChar = toNCCchar <$> charLiteral
+pString = toNCCstring <$> stringLiteral
 
 
 tipe = do
-  FixityTable left none right prefix postfix <- currentTable <$> getState 
+  FixityTable bin prefix postfix opLams strLams binds <- currentTable <$> getState 
   
   let getSnd [] = []
       getSnd (a:l) = l
@@ -186,20 +202,21 @@ tipe = do
       altPostfix = prefixGen id
       regPostfix bind = prefixGen (bind anonNamed <|>)
         
-      prefixGen bind opsl nm out = Prefix $ do
+      prefixGen bind opsl nms out = Prefix $ do
         (nml,tp) <- bind $ between 
-                   (choice $ reserved nm:(reservedOp <$> opsl))
+                   (choice $ (reserved <$> nms)++(reservedOp <$> opsl))
                    (symbol ".")  
                    (parens anonNamed <|> anonNamed)
         return $ \input -> foldr (flip out tp) input nml
       
-      table = [ [ altPostfix ["λ", "\\"] "lambda" Abs
-                , altPostfix ["?λ", "?\\"] "?lambda" imp_abs
-                , altPostfix ["∃"] "exists" exists
-                , regPostfix angles ["??"] "infer" infer
-                , regPostfix brackets ["∀"] "forall" forall
-                , regPostfix braces ["?∀"] "?forall" imp_forall
-                ]
+      table = [ [ altPostfix ["λ", "\\"] ["lambda"] Abs
+                , altPostfix ["?λ", "?\\"] ["?lambda"] imp_abs
+                , altPostfix ["∃"] ["exists"] exists
+                , regPostfix angles ["??"] ["infer"] infer
+                , regPostfix brackets ["∀"] ["forall"] forall
+                , regPostfix braces ["?∀"] ["?forall"] imp_forall
+                ]++[ altPostfix [op] [] (\nm t s -> Spine op [t,Abs nm t s] ) | op <- opLams ]
+                ++[ altPostfix [] [op] (\nm t s -> Spine op [t,Abs nm t s] ) | op <- strLams ]
               , [ binary forall AssocRight $ reservedOp "->" <|> reservedOp "→" 
                 , binary imp_forall AssocRight $ reservedOp "=>" <|> reservedOp "⇒"
                 ]
@@ -208,19 +225,19 @@ tipe = do
                 ]
               , [ binary (const ascribe) AssocNone $ reservedOp ":"
                 ] 
+
+                
               ]
-             ++union [ reify (binaryOther AssocLeft  <$> left) [] 
-                     , reify (binaryOther AssocNone  <$> none) [] 
-                     , reify (binaryOther AssocRight <$> right) []
+             ++union [ reify (binaryOther <$> bin) [] 
                      , reify (unary Prefix <$> prefix) []
                      , reify (unary Postfix <$> postfix) []
                      ]
       
-      binaryOther assoc (v,nm) = (v,flip Infix assoc $ do
+      binaryOther (v,nm, assoc) = (v,flip Infix assoc $ do
         reservedOp nm
         return $ \a b -> Spine nm [a , b])
 
-      unary fix (v,nm) = (v,fix $ do
+      unary fix (v,nm,_) = (v,fix $ do
         reservedOp nm
         return $ \a -> Spine nm [a])
 
@@ -286,18 +303,17 @@ identRegOps = "_'-/"
                     
 reservedNames = ["defn", "as", "query"    
                 , "forall", "exists", "?forall"
-                , "_" , "infer", "postfix", "prefix"
-                , "infixl", "infixr", "infix"]
+                , "_" , "infer", "fixity"]
 
 mydef :: P.GenLanguageDef String ParseState Identity
 mydef = haskellDef
-  { P.identStart = oneOf $"_"++['a'..'z']
+  { P.identStart = oneOf $ "_"++['a'..'z']
   , P.identLetter = alphaNum <|> oneOf identRegOps
   , P.reservedNames = reservedNames
   , P.caseSensitive = True
   , P.reservedOpNames = reservedOperators
-  , P.opStart = noneOf $ "'# \n\t\r\f\v"++['a'..'z']++['A'..'Z']
-  , P.opLetter = noneOf $ "' \n\t\r\f\v"++['a'..'z']++['A'..'Z']
+  , P.opStart = noneOf $ "# \n\t\r\f\v"++['a'..'z']++['A'..'Z']
+  , P.opLetter = noneOf $ " \n\t\r\f\v"++['a'..'z']++['A'..'Z']
   }
 P.TokenParser{..} = P.makeTokenParser mydef
 

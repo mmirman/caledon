@@ -130,11 +130,11 @@ unifyEq cons@(a :=: b) = case (a,b) of
   (Spine "#imp_forall#" [ty, l], b) -> vtrace1 "-implicit-" $ do
     a' <- lift $ getNewWith "@aL"
     modify $ addToTail Exists a' ty
-    return $ Just (mempty, [rebuildSpine l [var a'] :=: b , var a' :@: ty])
+    return $ Just (mempty, [l `apply` var a' :=: b , var a' :@: ty])
   (b, Spine "#imp_forall#" [ty, l]) -> vtrace1 "-implicit-" $ do
     a' <- lift $ getNewWith "@aR"
     modify $ addToTail Exists a' ty
-    return $ Just (mempty,  [b :=: rebuildSpine l [var a'] , var a' :@: ty])
+    return $ Just (mempty,  [b :=: l `apply` var a' , var a' :@: ty])
 
   (Spine "#imp_abs#" (ty:l:r), b) -> vtrace1 ("-imp_abs- : "++show a ++ "\n\t"++show b) $ do
     a <- lift $ getNewWith "@iaL"
@@ -155,11 +155,11 @@ unifyEq cons@(a :=: b) = case (a,b) of
   (Abs nm ty s , s') -> vtrace1 "-as-" 
                       $ vtrace3 (show cons) $ do
     modify $ addToTail Forall nm ty
-    return $ Just (mempty, [s :=: rebuildSpine s' [var nm]])
+    return $ Just (mempty, [s :=: s' `apply` var nm])
 
   (s, Abs nm ty s' ) -> vtrace1 "-as-" $ vtrace3 (show cons) $ do
     modify $ addToTail Forall nm ty
-    return $ Just (mempty, [rebuildSpine s [var nm] :=: s'])
+    return $ Just (mempty, [s `apply` var nm :=: s'])
 
   (s , s') | s == s' -> vtrace1 "-eq-" $ return $ Just (mempty, [])
   (Spine x yl, s') -> do
@@ -245,9 +245,10 @@ raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
 
         modify $ subst sub'
         return $ Just (sub'', cons)
-  modify $ removeFromContext x
-  modify $ subst sub
-  modify $ addToHead Exists x' ty' 
+  modify $ addToHead Exists x' ty' . removeFromContext x
+  vtrace3 ("RAISING: "++x' ++" +@+ "++ show newx_args ++ " ::: "++show ty'
+         ++"\nFROM: "++x ++" ::: "++ show ty
+          ) modify $ subst sub
   
   -- now we can match against the right hand side
   r <- addSub =<< m (subst sub sp, ty') sub
@@ -382,8 +383,8 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
                         ++ "\nON "++ show cons
       
       sub = x |-> l  -- THIS IS THAT STRANGE BUG WHERE WE CAN'T use x in the output substitution!
-  
-  modify $ flip (foldr ($)) $ uncurry (addToHead Exists) <$> substBty mempty bty xm  
+      addExists s t = vtrace3 ("adding: "++show s++" ::: "++show t) $ addToHead Exists s t
+  modify $ flip (foldr ($)) $ uncurry addExists <$> substBty mempty bty xm  
   modify $ subst sub
   
   return $ Just (sub, [subst sub $ a :=: b])
@@ -400,10 +401,10 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
   Spine "#forall#" [a, b] -> do
     y <- lift $ getNewWith "@sY"
     x' <- lift $ getNewWith "@sX"
-    let b' = rebuildSpine b [var x']
+    let b' = b `apply` var x'
     modify $ addToTail Forall x' a        
     modify $ addToTail Exists y b'
-    return $ Just [ var y :=: rebuildSpine m [var x'] , var y :@: b']
+    return $ Just [ var y :=: m `apply` var x' , var y :@: b']
 
   Spine "#imp_forall#" [_, Abs x a b] -> do
     y <- lift $ getNewWith "@isY"
@@ -411,13 +412,21 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
     let b' = subst (x |-> var x') b
     modify $ addToTail Forall x' a        
     modify $ addToTail Exists y b'
-    return $ Just [ var y :=: rebuildSpine m [tycon x $ var x']
+    return $ Just [ var y :=: m `apply` (tycon x $ var x')
                   , var y :@: b'
                   ]
   Spine "putChar" [c@(Spine ['\'',l,'\''] [])] ->
     case unsafePerformIO $ putStr $ l:[] of
       () -> return $ Just [ m :=: Spine "putCharImp" [c]]
-  Spine "putChar" [_] -> return Nothing
+  Spine "putChar" [_] -> vtrace0 "FAILING PUTCHAR" $ return Nothing
+  
+  Spine "readLine" [l] ->
+    case toNCCstring $ unsafePerformIO $ getLine of
+      s -> do
+        y <- lift $ getNewWith "@isY"
+        let ls = l `apply` s
+        modify $ addToTail Exists y ls
+        return $ Just [m :=: Spine "readLineImp" [l,s, var y], var y :@: Spine "run" [ls]]
   
   l@(Spine nm _) -> do
     constants <- lift $ ask  
@@ -456,13 +465,13 @@ leftSearch m goal (x,target) = vtrace1 ("LS: " ++ show m ++" ∈ "++ show goal
           Spine "#forall#" [a, b] -> do
             x' <- lift $ getNewWith "@sla"
             modify $ addToTail Exists x' a
-            cons <- leftCont (rebuildSpine n [var x']) (rebuildSpine b [var x'])
+            cons <- leftCont (n `apply` var x') (b `apply` var x')
             return $ cons++[var x' :@: a]
 
           Spine "#imp_forall#" [_ , Abs x a b] -> do  
             x' <- lift $ getNewWith "@isla"
             modify $ addToTail Exists x' a
-            cons <- leftCont (rebuildSpine n [tycon x $ var x']) (subst (x |-> var x') b)
+            cons <- leftCont (n `apply` (tycon x $ var x')) (subst (x |-> var x') b)
             return $ cons++[var x' :@: a]
           Spine _ _ -> do
             return $ [goal :=: target , m :=: n]
@@ -557,7 +566,7 @@ checkType sp ty = case sp of
               (tycon nm val:) <$> chop (subst (nm |-> val) tyv) l
           Spine "#forall#" [ty', c] -> do
             a <- checkType a ty'
-            (a:) <$> chop (rebuildSpine c [a]) l
+            (a:) <$> chop (c `apply` a) l
           _ -> do  
             x <- getNewWith "@xin"
             z <- getNewWith "@zin"
