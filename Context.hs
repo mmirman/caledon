@@ -6,6 +6,10 @@ import Data.Functor
 import qualified Data.Map as M
 import Data.Map (Map)
 import Control.Monad.State (StateT, runStateT, modify, get, put)
+import Control.Monad.RWS (RWST, ask, local, censor, runRWST, get, put)
+import Control.Monad.Trans (lift)
+import Control.Monad.Trans.Cont
+import Choice
 import Data.List
 import Debug.Trace
 
@@ -166,3 +170,27 @@ isolateForFail m = do
       put s
       return Nothing
     _ -> return c
+    
+    
+    
+
+-------------------------
+---  traversal monads ---
+-------------------------
+
+
+lookupConstant x = (M.lookup x) <$> lift ask 
+
+type TypeChecker = ContT Spine (RWST Constants Constraint Integer Choice)
+
+typeCheckToEnv :: TypeChecker Spine -> Env (Spine,Constraint)
+typeCheckToEnv m = do
+  r <- ask
+  s <- get
+  (a,s',w) <- lift $ runRWST (runContT m return) r s 
+  put s'
+  return (a,w)
+
+addToEnv :: (Name -> Spine -> Constraint -> Constraint) -> Name  -> Spine -> TypeChecker a -> TypeChecker a
+addToEnv e x ty = mapContT (censor $ e x ty) . liftLocal ask local (M.insert x ty) 
+        

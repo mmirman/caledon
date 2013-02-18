@@ -15,9 +15,9 @@ import Data.Functor
 import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
-import Control.Monad.RWS (RWST, ask, local, censor, runRWST, get, put)
-import Control.Monad.Trans.Cont
-import Control.Monad.Trans (lift)
+import Control.Monad.RWS (RWST)
+
+
 import Choice
 
 -----------------------------
@@ -171,27 +171,10 @@ instance FV Spine where
     Spine head others -> mappend (S.singleton head) $ mconcat $ freeVariables <$> others
 
 -------------------------
----  traversal monads ---
+---  Traversal Monad  ---
 -------------------------
 type Constants = Map Name Type
-
 type Env = RWST Constants () Integer Choice
-
-lookupConstant x = (M.lookup x) <$> lift ask 
-
-type TypeChecker = ContT Spine (RWST Constants Constraint Integer Choice)
-
-typeCheckToEnv :: TypeChecker Spine -> Env (Spine,Constraint)
-typeCheckToEnv m = do
-  r <- ask
-  s <- get
-  (a,s',w) <- lift $ runRWST (runContT m return) r s 
-  put s'
-  return (a,w)
-
-addToEnv :: (Name -> Spine -> Constraint -> Constraint) -> Name  -> Spine -> TypeChecker a -> TypeChecker a
-addToEnv e x ty = mapContT (censor $ e x ty) . liftLocal ask local (M.insert x ty) 
-    
   
 -------------------------
 ---  Constraint types ---

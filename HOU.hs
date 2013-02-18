@@ -48,35 +48,51 @@ flatten (c1 :&: c2) = do
   return $ l1 ++ l2
 flatten (SCons l) = return l
 
+heuristic exists (a :@: b) = (nm , edges)
+  where searches = S.intersection (freeVariables a) exists
+        satisfying = S.intersection (freeVariables b) exists
+        nm = case S.toList satisfying of
+          [] -> getFamily b
+          a:_ -> a
+        edges = searches
+heuristic exists (a :=: b) = ("##"++show a++":=:"++show b, mempty)
+
 unify :: Constraint -> WithContext Substitution
 unify cons = do
   cons <- lift $ regenAbsVars cons
   cons <- flatten cons
   let uniWhile :: Substitution -> [SCons] -> WithContext (Substitution, [SCons])
-      uniWhile sub c = vtrace3 ("CONST: "++show c)
-                     ( uniWith unifyOne 
-                       -- try a topological sort of the search sequents before performing a search! 
-                     $ uniWith unifySearch
-                     $ uniWith unifySearchAtom
-                     $ checkFinished c >> 
-                     return (sub, c))
-        where uniWith wth backup = do
-                let searchIn [] r = return Nothing
-                    searchIn (next:l) r = do
-                      c1' <- wth next 
-                      case c1' of
-                        Just (sub',next') -> return $ Just (sub', (subst sub' $ reverse r)++
-                                                                  next'
-                                                                  ++subst sub' l)
-                        Nothing -> searchIn l (next:r)
-                res <- searchIn c []
-                case res of
-                  Nothing -> do
-                    backup
-                  Just (sub', c') -> do
-                    let sub'' = sub *** sub'
-                    modify $ subst sub'
-                    uniWhile sub'' $! c'
+      uniWhile sub c' = do
+        exists <- getExists        
+            
+        let c = reverse $ topoSort (heuristic $ M.keysSet exists) c'
+            -- eventually we can make the entire algorithm a graph modification algorithm for speed, 
+            -- such that we don't have to topologically sort every time.  Currently this only takes us from O(n log n) to O(n) per itteration, it is
+            -- not necessarily worth it.
+            uniWith wth backup = do
+              let searchIn [] r = return Nothing
+                  searchIn (next:l) r = do
+                    c1' <- wth next 
+                    case c1' of
+                      Just (sub',next') -> return $ Just (sub', (subst sub' $ reverse r)++
+                                                                next'
+                                                                ++subst sub' l)
+                      Nothing -> searchIn l (next:r)
+              res <- searchIn c []
+              case res of
+                Nothing -> do
+                  backup
+                Just (sub', c') -> do
+                  let sub'' = sub *** sub'
+                  modify $ subst sub'
+                  uniWhile sub'' $! c'
+
+        vtrace3 ("CONST: "++show c)
+          ( uniWith unifyOne 
+          $ uniWith unifySearch
+          $ uniWith unifySearchAtom
+          $ checkFinished c >> 
+          return (sub, c))
 
   fst <$> uniWhile mempty cons
 
@@ -391,7 +407,7 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
     x' <- lift $ getNewWith "@isX"
     let b' = subst (x |-> var x') b
     modify $ addToTail Forall x' a        
-    modify $ addToTail Exists y b' 
+    modify $ addToTail Exists y b'
     return $ Just [ var y :=: rebuildSpine m [tycon x $ var x']
                   , var y :@: b'
                   ]
@@ -404,9 +420,12 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal o
     let env = M.union foralls constants
         envl = M.toList $ M.union (M.union foralls constants) exists
         
+        notAbs (Abs _ _ _) = False
+        notAbs _ = True
+        
         sameFamily (_, Abs _ _ _) = False
         sameFamily ("pack",s) = "#exists#" == nm
-        sameFamily (nm',s) = (M.notMember nm' exists || nm' /= getFamily m) 
+        sameFamily (nm',s) = (M.notMember nm' exists || (notAbs m && nm' /= getFamily m)) 
                              && getFamily s == nm
         targets = filter sameFamily envl
     case targets of
@@ -452,6 +471,7 @@ search ty = do
 (≐) a b = lift $ tell $ SCons [a :=: b]
 (.@.) a b = lift $ tell $ SCons [a :@: b]
 
+-- TODO: flatten constraints here for even more speed (never should we have to deal with the heirarchy)!
 checkType :: Spine -> Type -> TypeChecker Spine
 checkType sp ty = case sp of
   Spine "#ascribe#" (t:v:l) -> do
