@@ -42,7 +42,7 @@ data Predicate = Predicate { predName :: !Name, predType :: !Type, predConstruct
                deriving (Eq)
 
 
-getNewWith s = (++s) <$> getNew
+getNewWith s = {- (++s) <$> -} getNew
 
 showWithParens t = if (case t of
                           Abs{} -> True
@@ -120,7 +120,7 @@ findTyconInPrefix nm = fip []
         fip _ _ = Nothing
 
 apply :: Spine -> Spine -> Spine
-apply a l = rebuildSpine a [l]
+apply !a !l = rebuildSpine a [l]
 
 rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
@@ -149,14 +149,14 @@ newName nm so = (nm',s')
 class Subst a where
   subst :: Substitution -> a -> a
 instance Subst a => Subst [a] where
-  subst foo t = subst foo <$> t
+  subst foo !t = subst foo <$> t
 instance (Subst a, Subst b) => Subst (a,b) where
   subst foo (!a,!b) = (subst foo a , subst foo b)
 instance Subst Spine where
-  subst s (Abs nm tp rst) = Abs nm' (subst s tp) $ subst s' rst
+  subst s (Abs !nm !tp !rst) = Abs nm' (subst s tp) $ subst s' rst
     where (nm',s') = newName nm s
-  subst s (Spine "#tycon#" [Spine c [v]]) = Spine "#tycon#" [Spine c [subst s v]]
-  subst s (Spine nm apps) = let apps' = subst s <$> apps  in
+  subst s (Spine "#tycon#" [Spine c [!v]]) = Spine "#tycon#" [Spine c [subst s v]]
+  subst s (Spine !nm !apps) = let apps' = subst s <$> apps  in
     case s ! nm of
       Just nm -> rebuildSpine nm apps'
       _ -> Spine nm apps'
@@ -228,8 +228,16 @@ instance Monoid Constraint where
   mappend (SCons []) b = b
 
   mappend a (SCons []) = a
- -- mappend (SCons a) (SCons b) = SCons $ a++b
+  mappend (SCons a) (SCons b) = SCons $ a++b
   mappend a b = a :&: b
+
+{-# RULES
+ "mappendmempty" mappend mempty = id
+ #-}
+
+{-# RULES
+ "memptymappend" flip mappend mempty = id
+ #-}
 
 instance Subst SCons where
   subst s c = case c of
@@ -302,9 +310,6 @@ consts = [ ("atom", atom)
                   $ forall "tau" (var "tp") 
                   $ forall "e" (Spine "iface" [var "tau"]) 
                   $ exists "z" (var "tp") (Spine "iface" [var "z"]))
---         , ("char", atom)
---         , ("putChar", var "char" ~> atom)
---         , ("putCharImp", forall "z" (var "char") $ Spine "putChar" [var "z"])
          ]
 
 toNCCchar c = Spine ['\'',c,'\''] []
@@ -313,10 +318,7 @@ toNCCstring s = foldr cons nil $ map toNCCchar s
         nil = Spine "nil" [tycon "a" char]
         cons a l = Spine "cons" [tycon "a" char, a,l]
 
-
 envConsts = M.fromList consts
-
-
 
 isChar  ['\'',l,'\''] = True
 isChar _ = False

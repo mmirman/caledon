@@ -3,7 +3,8 @@
  FlexibleInstances,
  PatternGuards,
  UnicodeSyntax,
- TupleSections
+ TupleSections,
+ BangPatterns
  #-}
 module HOU where
 
@@ -64,14 +65,14 @@ unify cons = do
   cons <- lift $ regenAbsVars cons
   cons <- flatten cons
   let uniWhile :: Substitution -> [SCons] -> WithContext (Substitution, [SCons])
-      uniWhile sub c' = do
+      uniWhile !sub !c' = do
         exists <- getExists        
             
         let c = c' -- reverse $ topoSort (heuristic $ M.keysSet exists) c'
             -- eventually we can make the entire algorithm a graph modification algorithm for speed, 
             -- such that we don't have to topologically sort every time.  Currently this only takes us from O(n log n) to O(n) per itteration, it is
             -- not necessarily worth it.
-            uniWith wth backup = do
+            uniWith !wth !backup = do
               let searchIn [] r = return Nothing
                   searchIn (next:l) r = do
                     c1' <- wth next 
@@ -84,8 +85,8 @@ unify cons = do
               case res of
                 Nothing -> do
                   backup
-                Just (sub', c') -> do
-                  let sub'' = sub *** sub'
+                Just (!sub', c') -> do
+                  let !sub'' = sub *** sub'
                   modify $ subst sub'
                   uniWhile sub'' $! c'
 
@@ -162,7 +163,7 @@ unifyEq cons@(a :=: b) = case (a,b) of
     return $ Just (mempty, [s `apply` var nm :=: s'])
 
   (s , s') | s == s' -> vtrace1 "-eq-" $ return $ Just (mempty, [])
-  (Spine x yl, s') -> do
+  (s@(Spine x yl), s') -> do
     bind <- getElm ("all: "++show cons) x
     case bind of
       Left bind@Binding{ elmQuant = Exists } -> do

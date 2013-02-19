@@ -1,6 +1,6 @@
 Name: caledon
 
-Version: 0.0.0.0
+Version: 1.0.0.0
 
 Description:         a dependently typed, polymorphic, higher order logic programming language. ie, everything you need to have a conversation with your computer.
 
@@ -28,7 +28,7 @@ Source-repository head
 
 executable caledon
   main-is: Main.hs
-  other-modules: Solver, Choice, Parser
+  other-modules: HOU, Choice, Parser, AST, TopoSortAxioms, Context
 
   Build-depends: base >= 4.0 && < 5.0,
                  mtl >= 2.0 && < 3.0,
@@ -43,4 +43,7 @@ executable caledon
               PatternGuards,
               RecordWildCards,
               TupleSections,
+              BangPatterns,
               TypeSynonymInstances
+  ghc-options:  -O2 -optc-O3 -funfolding-use-threshold=16 -fspec-constr-count=10 -fdo-lambda-eta-expansion
+  

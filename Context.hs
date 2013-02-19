@@ -1,3 +1,6 @@
+{-# LANGUAGE
+ BangPatterns
+ #-}
 module Context where
 
 import AST
@@ -26,15 +29,15 @@ data Binding = Binding { elmQuant :: Quant
                        } deriving (Show)
                
 instance Subst Binding where
-  subst sub b = b { elmType = subst sub $ elmType b }
+  subst !sub !b = b { elmType = subst sub $! elmType b }
                     
-data Context = Context { ctxtHead :: Maybe Name  
-                       , ctxtMap  :: Map Name Binding 
-                       , ctxtTail :: Maybe Name 
+data Context = Context { ctxtHead :: Maybe Name
+                       , ctxtMap  :: Map Name Binding
+                       , ctxtTail :: Maybe Name
                        } deriving (Show)
                                   
 instance Subst Context where               
-  subst sub b = b { ctxtMap = subst sub <$> ctxtMap b }
+  subst !sub !b = b { ctxtMap = subst sub <$> ctxtMap b }
 
 lookupWith s a ctxt = case M.lookup a ctxt of
   Just r -> r
@@ -117,16 +120,15 @@ checkContext s ctx = ctx {- foldr seq ctx $ zip st ta
 
 
 
-
 ------------------------        
 -- env with a context --        
 ------------------------
 type WithContext = StateT Context Env 
 
 getElm :: String -> Name -> WithContext (Either Binding Spine)
-getElm _ x | isChar x = do
+getElm _ !x | isChar x = do
   return $ Right $ var "char"
-getElm s x = do
+getElm s !x = do
   ty <- lookupConstant x
   case ty of
     Nothing -> Left <$> (\ctxt -> lookupWith ("looking up "++x++"\n\t in context: "++show ctxt++"\n\t"++s) x ctxt) <$> ctxtMap <$> get
@@ -179,8 +181,6 @@ isolateForFail m = do
 -------------------------
 ---  traversal monads ---
 -------------------------
-
-
 lookupConstant x = (M.lookup x) <$> lift ask 
 
 type TypeChecker = ContT Spine (RWST Constants Constraint Integer Choice)
