@@ -177,7 +177,6 @@ unifyEq cons@(a :=: b) = case (a,b) of
                   --then gvar_const (Spine x yl, ty) (Spine x' y'l, ty')  
                   -- else return Nothing
                   gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
-                   
                 Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> vtrace1 "CANT: -gu-dep-" $ vtrace1throw $ "gvar-uvar-depends: "++show (a :=: b)
                 Left Binding{ elmQuant = Forall } | S.member x $ freeVariables y'l -> 
                   vtrace0throw $ "CANT: occurs check: "++show (a :=: b)
@@ -460,10 +459,10 @@ rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $
           return $ filter sameFamily $ M.toList searchMap
       
       if all isFixed $ S.toList $ S.union (freeVariables m) (freeVariables goal)
-      then return $ Just []
-      else case targets of
-        [] -> return Nothing
-        _  -> Just <$> (F.asum $ (leftSearch m goal <$> reverse targets)) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
+        then return $ Just []
+        else case targets of
+          [] -> return Nothing
+          _  -> Just <$> (F.asum $ (leftSearch m goal <$> reverse targets)) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
 
 leftSearch m goal (x,target) = vtrace1 ("LS: " ++ show m ++" ∈ "++ show goal
                                         ++"\n\t@ " ++x++" : " ++show target)
@@ -627,7 +626,8 @@ typeCheckAxioms lst = do
   -- check the closedness of families.  this gets done
   -- after typechecking since family checking needs to evaluate a little bit
   -- in order to allow defs in patterns
-  let inferAll (l , []) = return l
+  let tys = M.fromList $ map (\(_,nm,ty,_) -> (nm,ty)) lst
+      inferAll (l , []) = return l
       inferAll (l , (fam,nm,val,ty):toplst) = do
         
         unless (fam == Nothing || Just (getFamily val) == fam)
@@ -637,7 +637,7 @@ typeCheckAxioms lst = do
                         ++"\nWITH: "++nm++ " : "++show ty
                         ++"\nAS:   "++nm++ " = "++show val
                         ) $ 
-              typeInfer l (nm, val,ty) -- constrain the breadth first search to be local! 
+              typeInfer (tys *** l) (nm, val,ty) -- constrain the breadth first search to be local! 
         inferAll $ case nm of
           '#':'v':':':nm' -> (subst sub <$> l', (\(fam,nm,val,ty) -> (fam,nm, subst sub val, subst sub ty)) <$> toplst) 
             where sub = nm' |-> (l' M.! nm)                                   

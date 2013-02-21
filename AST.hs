@@ -28,7 +28,9 @@ import Choice
 type Name = String
 
 infixr 0 ~>
+infixr 0 ~~>
 (~>) = forall "#"
+(~~>) = imp_forall "#"
 
 data Spine = Spine !Name ![Type]
            | Abs !Name !Type !Spine 
@@ -306,7 +308,9 @@ getFamily (Spine "#ascribe#"  (_:v:_)) = getFamily v
 getFamily (Spine "#forall#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#imp_forall#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#exists#" [_, Abs _ _ lm]) = getFamily lm
-getFamily (Spine "#open#" (_:_:_:_:Abs _ _ (Abs _ _ c):_)) = getFamily c
+getFamily (Spine "#open#" (_:_:c:_)) = getFamily c
+getFamily (Spine "open" (_:_:c:_)) = getFamily c
+getFamily (Spine "pack" [_,_,_,e]) = getFamily e
 getFamily (Spine nm' _) = nm'
 getFamily v = error $ "values don't have families: "++show v
 
@@ -322,6 +326,16 @@ consts = [ ("atom", atom)
                   $ forall "tau" (var "tp") 
                   $ forall "e" (Spine "iface" [var "tau"]) 
                   $ exists "z" (var "tp") (Spine "iface" [var "z"]))
+         , ("open", forall "a" atom 
+                  $ forall "f" (var "a" ~> atom) 
+                  $ exists "z" (var "a") (Spine "f" [var "z"])
+                  ~> (forall "v" (var "a") 
+                     $ Spine "f" [var "v"] ~> atom ))
+         , ("openDef", forall "a" atom 
+                    $ forall "f" (var "a" ~> atom) 
+                    $ forall "v" (var "a")
+                    $ forall "fv" (Spine "f" [var "z"])
+                    $ Spine "open" [var "a",  var "f", Spine "pack" [var "a", var "f", var "v", var "fv"] , var "v", var "fv"])
          ]
 
 toNCCchar c = Spine ['\'',c,'\''] []

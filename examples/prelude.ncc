@@ -29,7 +29,13 @@ defn string : atom
 defn any : {A : atom} (A -> atom) -> atom
    | is = [A : atom][V : A][F : A -> atom] F V -> any { A = A } F
 
-fixity lambda findOne 
+defn openAny : [A][F : A -> atom] any F -> [V : A] F V -> atom
+   | openAnyDef = [A][F : A -> atom][V : A][FV : F V] openAny A F (is A V F FV) V FV
+
+defn sopen : {A : atom }{F : A -> atom} [V : A] F V => (exists v : A . F v) -> atom 
+  as ?\a : atom . ?\ f : a -> atom . \vt : a . ?\ fv : f vt . \an : (exists v : a . f v) . open a f an vt fv
+
+fixity lambda findOne
 defn findOne : [A : atom] (A -> atom) -> atom
   as \a: atom . any { A = a }
 
@@ -69,11 +75,18 @@ defn \/ : atom -> atom -> atom
 --- concat ---
 --------------
 defn concatable : atom -> atom
-   | concatableImp = [M] (M -> M -> M -> atom) -> concatable M
+   | concatableImp = [M : atom] (M -> M -> M -> atom) -> concatable M
+
+defn concatableP : [M : atom] exists A : (M -> M -> M -> atom) . atom
+   | concatableImpP = open (natural -> natural -> natural -> atom) _ (concatableP natural) add _
+
 
 fixity right 3 ++
-defn ++ : {M} {cm : concatable M} M -> M -> M -> atom
-   | ppimp = [M][Foo : M -> M -> M -> atom][M1 M2 M3 : M] (++) {M = M} {cm = concatableImp M Foo} M1 M2 M3 <- Foo M1 M2 M3
+defn ++ : {M}{cm : concatable M} M -> M -> M -> atom
+   | ppimp = [M][Foo : M -> M -> M -> atom][M1 M2 M3 : M] 
+             (++) {M = M} {cm = concatableImp M Foo } M1 M2 M3
+          <- Foo M1 M2 M3
+
 
 -------------
 --- Order ---
@@ -122,7 +135,7 @@ defn orderableNatural : orderable natural
 
 query findSat1 = exists A . A =:= zero
 
--- query add1 = (++) (succ zero) zero (succ zero)
+query add1 = (++) (succ zero) zero (succ zero)
 
 -- query add2 = exists A : natural . add (succ zero) zero A
 
