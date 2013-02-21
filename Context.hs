@@ -16,11 +16,14 @@ import Choice
 import Data.List
 import Debug.Trace
 
+--------------------
+---  context map ---
+--------------------
+type ContextMap = Map Name Type
+
 --------------------------------
 ---  constraint context list ---
 --------------------------------
-
-
 data Binding = Binding { elmQuant :: Quant
                        , elmName :: Name
                        , elmType :: Type
@@ -120,51 +123,20 @@ checkContext s ctx = ctx {- foldr seq ctx $ zip st ta
 
 
 
-------------------------        
--- env with a context --        
-------------------------
-type WithContext = StateT Context Env 
+-------------------------
+---  Traversal Monad  ---
+-------------------------
+data ContextState = ContextState { stateNum :: !Integer
+                                 , stateCtxt :: Context 
+                                 }
+                    
+emptyState = ContextState 0 emptyContext
 
-getElm :: String -> Name -> WithContext (Either Binding Spine)
-getElm _ !x | isChar x = do
-  return $ Right $ var "char"
-getElm s !x = do
-  ty <- lookupConstant x
-  case ty of
-    Nothing -> Left <$> (\ctxt -> lookupWith ("looking up "++x++"\n\t in context: "++show ctxt++"\n\t"++s) x ctxt) <$> ctxtMap <$> get
-    Just a -> return $ Right a
-
--- | This gets all the bindings outside of a given bind and returns them in a list (not including that binding).
-getBindings :: Binding -> WithContext [(Name,Type)]
-getBindings bind = do
-  ctx <- get
-  return $ snd <$> getBefore "IN: getBindings" bind ctx
+instance ValueTracker ContextState where
+  putValue i c = c { stateNum = i }
+  takeValue c = stateNum c
   
-getAnExist :: WithContext (Maybe (Name,Type))
-getAnExist = do
-  ctx <- get
-  let til = getTail ctx
-      last = (elmQuant til, (elmName til, elmType til))
-  return $ case ctx of
-    Context _ _ Nothing -> Nothing
-    _ -> snd <$> find (\(q,_) -> q == Exists) (last:getBefore "IN: getBindings" til ctx)
-    
-getForalls :: WithContext Constants
-getForalls = do
-  ctx <- ctxtMap <$> get
-  return $ elmType <$> M.filter (\q -> elmQuant q == Forall) ctx
-  
-getExists :: WithContext Constants
-getExists = do
-  ctx <- ctxtMap <$> get
-  return $ elmType <$> M.filter (\q -> elmQuant q == Exists) ctx
-
-getAllBindings = do
-  ctx <- get
-  case ctx of
-    Context _ _ Nothing -> return []
-    _ -> (getBindings $ getTail ctx)
-
+type Env = RWST ContextMap Constraint ContextState Choice
 
 isolateForFail m = do
   s <- get
@@ -174,16 +146,79 @@ isolateForFail m = do
       put s
       return Nothing
     _ -> return c
+
+------------------------        
+-- env with a context --        
+------------------------
+
+
+getElm :: String -> Name -> Env (Either Binding Spine)
+getElm _ !x | isChar x = do
+  return $ Right $ var "char"
+getElm s !x = do
+  ty <- lookupConstant x
+  case ty of
+    Nothing -> Left <$> (\ctxt -> lookupWith ("looking up "++x++"\n\t in context: "++show ctxt++"\n\t"++s) x ctxt) <$> ctxtMap <$> stateCtxt <$> get
+    Just a -> return $ Right a
+
+-- | This gets all the bindings outside of a given bind and returns them in a list (not including that binding).
+getBindings :: Binding -> Env [(Name,Type)]
+getBindings bind = do
+  ctx <- stateCtxt <$> get
+  return $ snd <$> getBefore "IN: getBindings" bind ctx
+  
+getAnExist :: Env (Maybe (Name,Type))
+getAnExist = do
+  ctx <- stateCtxt <$> get
+  let til = getTail ctx
+      last = (elmQuant til, (elmName til, elmType til))
+  return $ case ctx of
+    Context _ _ Nothing -> Nothing
+    _ -> snd <$> find (\(q,_) -> q == Exists) (last:getBefore "IN: getBindings" til ctx)
+
+getAllBindings = do
+  ctx <- stateCtxt <$> get
+  case ctx of
+    Context _ _ Nothing -> return []
+    _ -> (getBindings $ getTail ctx)
     
-    
-    
+getForalls :: Env ContextMap
+getForalls = do
+  ctx <- ctxtMap <$> stateCtxt <$> get
+  return $ elmType <$> M.filter (\q -> elmQuant q == Forall) ctx
+  
+getExists :: Env ContextMap
+getExists = do
+  ctx <- ctxtMap <$> stateCtxt <$> get
+  return $ elmType <$> M.filter (\q -> elmQuant q == Exists) ctx
+
+getConstants :: Env ContextMap
+getConstants = ask  
+
+getFullCtxt :: Env ContextMap
+getFullCtxt = do
+  constants <- getConstants
+  ctx <- ctxtMap <$> stateCtxt <$> get
+  return $ M.union (elmType <$> ctx) constants
+
+getVariablesBeforeExists :: Name -> Env ContextMap
+getVariablesBeforeExists nm = do
+  constants <- getConstants
+  ctx <- stateCtxt <$> get  
+  let bind = ctxtMap ctx M.! nm
+  return $ M.union constants $ M.fromList $ snd <$> getBefore "IN: getVariablesBeforeExists" bind ctx
+  
+
+modifyCtxt :: (Context -> Context) -> Env ()
+modifyCtxt f = modify $ \m -> m { stateCtxt = f $ stateCtxt m }
+
 
 -------------------------
 ---  traversal monads ---
 -------------------------
-lookupConstant x = (M.lookup x) <$> lift ask 
+lookupConstant x = (M.lookup x) <$> ask 
 
-type TypeChecker = ContT Spine (RWST Constants Constraint Integer Choice)
+type TypeChecker = ContT Spine Env
 
 typeCheckToEnv :: TypeChecker Spine -> Env (Spine,Constraint)
 typeCheckToEnv m = do
@@ -194,4 +229,4 @@ typeCheckToEnv m = do
   return (a,w)
 
 addToEnv :: (Name -> Spine -> Constraint -> Constraint) -> Name  -> Spine -> TypeChecker a -> TypeChecker a
-addToEnv e x ty = mapContT (censor $ e x ty) . liftLocal ask local (M.insert x ty) 
+addToEnv e x ty = mapContT (censor $ e x ty) . liftLocal ask local (M.insert x ty)

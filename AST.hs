@@ -2,7 +2,8 @@
  DeriveFunctor,
  FlexibleInstances,
  PatternGuards,
- BangPatterns
+ BangPatterns,
+ FlexibleContexts
  #-}
 
 module AST where
@@ -16,7 +17,7 @@ import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
 import Control.Monad.RWS (RWST)
-
+import Control.Monad.State.Class (MonadState(), get, modify)
 
 import Choice
 
@@ -41,8 +42,23 @@ data Predicate = Predicate { predName :: !Name, predType :: !Type, predConstruct
                | Define { predName :: !Name, predValue :: !Spine, predType :: !Type}
                deriving (Eq)
 
+class ValueTracker c where
+  putValue :: Integer -> c -> c
+  takeValue :: c -> Integer
 
-getNewWith s = {- (++s) <$> -} getNew
+instance ValueTracker Integer where
+  putValue _ i = i
+  takeValue i = i
+
+getNew :: (Functor m, MonadState c m, ValueTracker c) => m String
+getNew = do
+  st <- takeValue <$> get
+  let n = 1 + st
+  modify $ putValue n
+  return $! show n
+  
+getNewWith :: (Functor f, MonadState c f, ValueTracker c) => String -> f String
+getNewWith s = (++s) <$> getNew
 
 showWithParens t = if (case t of
                           Abs{} -> True
@@ -175,11 +191,7 @@ instance FV Spine where
     Spine "#tycon#" [Spine nm [v]] -> freeVariables v
     Spine head others -> mappend (S.singleton head) $ mconcat $ map freeVariables others
 
--------------------------
----  Traversal Monad  ---
--------------------------
-type Constants = Map Name Type
-type Env = RWST Constants () Integer Choice
+
   
 -------------------------
 ---  Constraint types ---
@@ -256,7 +268,7 @@ subq s e c1 c2 = e (subst s c1) (subst s c2)
 (∀) = Bind Forall
 
 class RegenAbsVars a where
-  regenAbsVars :: a -> Env a
+  regenAbsVars :: (Functor f, MonadState c f, ValueTracker c) => a -> f a
   
 instance RegenAbsVars SCons where
   regenAbsVars cons = case cons of

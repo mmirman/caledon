@@ -38,15 +38,15 @@ defn findOne : [A : atom] (A -> atom) -> atom
 --------------------------
 fixity right 0 $
 defn $ : {a b:atom} (a -> b) -> a -> b
-  as ?\ at bt . λ f . λ a . f a
+  as ?\ at bt . \ f . \a . f a
 
 
 fixity right 0 @
 defn @ : {a b c:atom} (b -> c) -> (a -> b) -> a -> c
-  as ?λat bt ct : atom . λf : bt -> ct . λ g : at -> bt . λ a : at . f (g a)
+  as ?\at bt ct : atom . \f : bt -> ct . \ g : at -> bt . \ a : at . f (g a)
 
 defn flip : {a b c : atom} (a -> b -> c) -> b -> a -> c
-  as ?λ at bt ct : atom . λ foo . λ b . λ a . foo a b
+  as ?\ at bt ct : atom . \ foo . \ b . \ a . foo a b
 
 -------------------
 --- Constraints ---
@@ -95,7 +95,7 @@ defn ≥ : {M : atom} {cm : orderable M} M -> M -> atom
 ---------------------
 defn natural  : atom
    | zero = natural
-   | succ = natural → natural
+   | succ = natural -> natural
 
 defn add   : natural -> natural -> natural -> atom
    | add_z = [N] add zero N N
@@ -121,28 +121,28 @@ defn orderableNatural : orderable natural
   as orderableImp natural lte-nat
 
 query findSat1 = exists A . A =:= zero
-{-
-query add1 = (++) (succ zero) zero (succ zero)
 
-query add2 = exists A : natural . add (succ zero) zero A
+-- query add1 = (++) (succ zero) zero (succ zero)
 
-query add3 = any $ add (succ zero) zero
+-- query add2 = exists A : natural . add (succ zero) zero A
 
-query findSat2 = succ zero ≤ succ (succ zero) /\ succ zero ≤ succ zero
+-- query add3 = any $ add (succ zero) zero
 
-defn pred : natural -> atom
-   | predimp = [A : natural] zero < A -> A < succ (succ zero) -> pred A
+-- query findSat2 = succ zero ≤ succ (succ zero) /\ succ zero ≤ succ zero
 
-query findSat3 = exists A: natural.  pred A
+-- defn pred : natural -> atom
+--   | predimp = [A : natural] zero < A -> A < succ (succ zero) -> pred A
 
--}
+-- query findSat3 = exists A: natural.  pred A
+
+
 -------------
 --- Maybe ---
 -------------
 
-defn maybe : atom → atom
+defn maybe : atom -> atom
    | nothing = {a} maybe a
-   | just = {a} a → maybe a
+   | just = {a} a -> maybe a
 
 -------------
 --- Lists ---
@@ -156,7 +156,7 @@ defn concatList : {A} list A -> list A -> list A -> atom
    | concatListCons = [T][A B C : list T][V:T] concatList (cons V A) B (cons V C) <- concatList A B C
 
 defn concatableList : {A:atom} concatable (list A)
-  as ?λA . concatableImp (list A) concatList
+  as ?\A . concatableImp (list A) concatList
 
 ----------------
 --- printing ---
@@ -177,22 +177,20 @@ defn bool : atom
    | false = bool
 
 defn if : bool -> bool
-  as λb . b
+  as \b . b
 
 fixity none 1 |:|
 defn |:| : {a:atom} a -> a -> (a -> a -> a) -> a
-  as ?λt : atom . λa b : t. λf : t -> t -> t. f a b
+  as ?\t : atom . \a b : t. \f : t -> t -> t. f a b
 
 
 fixity none 0 ==>
 defn ==> : {a : atom} bool -> ((a -> a -> a) -> a) -> a -> atom
-   | thentrue  = [a : atom][f: _ -> a] (true ==> f)  (f (λA B : a. A))
-   | thenfalse = [b : atom][f: _ -> b] (false ==> f) (f (λA B : b . B))
+   | thentrue  = [a : atom][f: _ -> a] (true ==> f)  (f (\A B : a. A))
+   | thenfalse = [b : atom][f: _ -> b] (false ==> f) (f (\A B : b . B))
 
 defn not : bool -> bool -> atom
-  as λa . if a ==> false |:| true
-
-
+  as \a . if a ==> false |:| true
 
 query main = run $ do 
                  , putStr "hey!\n"

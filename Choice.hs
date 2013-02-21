@@ -12,7 +12,7 @@ import Control.Monad
 import Data.Functor
 import Control.Applicative
 import Control.Monad.Error.Class (catchError, throwError, MonadError)
-import Control.Monad.State.Class
+
 
 data Choice a = Choice a :<|>: Choice a
               | Fail String
@@ -70,9 +70,3 @@ instance MonadError String Choice where
     Left s -> foo_try2 s
     Right a -> Success a
 
-getNew :: (MonadState Integer m) => m String
-getNew = do
-  st <- get
-  let n = 1 + st
-  put n
-  return $! show n

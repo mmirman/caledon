@@ -41,9 +41,9 @@ vtrace3throw s = vtrace3 s $ throwError s
 ---  the higher order unification algorithm ---
 -----------------------------------------------
 
-flatten :: Constraint -> WithContext [SCons]
+flatten :: Constraint -> Env [SCons]
 flatten (Bind quant nm ty c) = do
-  modify $ addToTail quant nm ty
+  modifyCtxt $ addToTail quant nm ty
   flatten c
 flatten (c1 :&: c2) = do
   l1 <- flatten c1
@@ -60,11 +60,11 @@ heuristic exists (a :@: b) = (nm , edges)
         edges = searches
 heuristic exists (a :=: b) = ("##"++show a++":=:"++show b, mempty)
 
-unify :: Constraint -> WithContext Substitution
+unify :: Constraint -> Env Substitution
 unify cons = do
-  cons <- lift $ regenAbsVars cons
+  cons <- regenAbsVars cons
   cons <- flatten cons
-  let uniWhile :: Substitution -> [SCons] -> WithContext (Substitution, [SCons])
+  let uniWhile :: Substitution -> [SCons] -> Env (Substitution, [SCons])
       uniWhile !sub !c' = do
         exists <- getExists        
             
@@ -87,7 +87,7 @@ unify cons = do
                   backup
                 Just (!sub', c') -> do
                   let !sub'' = sub *** sub'
-                  modify $ subst sub'
+                  modifyCtxt $ subst sub'
                   uniWhile sub'' $! c'
 
         vtrace3 ("CONST: "++show c)
@@ -104,7 +104,7 @@ unify cons = do
 checkFinished [] = return ()
 checkFinished cval = vtrace0throw $ "ambiguous constraint: " ++show cval
 
-unifySearch :: SCons -> WithContext (Maybe (Substitution, [SCons]))
+unifySearch :: SCons -> Env (Maybe (Substitution, [SCons]))
 unifySearch (a :@: b) | b /= var "atom" = do
   cons <- rightSearch a b
   return $ case cons of
@@ -119,7 +119,7 @@ unifySearchAtom (a :@: b) = do
     Just cons -> Just (mempty, cons)
 unifySearchAtom _ = return Nothing
 
-unifyOne :: SCons -> WithContext (Maybe (Substitution , [SCons]))
+unifyOne :: SCons -> Env (Maybe (Substitution , [SCons]))
 unifyOne (a :=: b) = do
   c' <- isolateForFail $ unifyEq $ a :=: b 
   case c' of 
@@ -129,21 +129,21 @@ unifyOne _ = return Nothing
 
 unifyEq cons@(a :=: b) = case (a,b) of 
   (Spine "#imp_forall#" [ty, l], b) -> vtrace1 "-implicit-" $ do
-    a' <- lift $ getNewWith "@aL"
-    modify $ addToTail Exists a' ty
+    a' <- getNewWith "@aL"
+    modifyCtxt $ addToTail Exists a' ty
     return $ Just (mempty, [l `apply` var a' :=: b , var a' :@: ty])
   (b, Spine "#imp_forall#" [ty, l]) -> vtrace1 "-implicit-" $ do
-    a' <- lift $ getNewWith "@aR"
-    modify $ addToTail Exists a' ty
+    a' <- getNewWith "@aR"
+    modifyCtxt $ addToTail Exists a' ty
     return $ Just (mempty,  [b :=: l `apply` var a' , var a' :@: ty])
 
   (Spine "#imp_abs#" (ty:l:r), b) -> vtrace1 ("-imp_abs- : "++show a ++ "\n\t"++show b) $ do
-    a <- lift $ getNewWith "@iaL"
-    modify $ addToTail Exists a ty
+    a <- getNewWith "@iaL"
+    modifyCtxt $ addToTail Exists a ty
     return $ Just (mempty, [rebuildSpine l (var a:r) :=: b , var a :@: ty])
   (b, Spine "#imp_abs#" (ty:l:r)) -> vtrace1 "-imp_abs-" $ do
-    a <- lift $ getNewWith "@iaR"
-    modify $ addToTail Exists a ty
+    a <- getNewWith "@iaR"
+    modifyCtxt $ addToTail Exists a ty
     return $ Just (mempty, [b :=: rebuildSpine l (var a:r) , var a :@: ty])
 
   (Spine "#tycon#" [Spine nm [_]], Spine "#tycon#" [Spine nm' [_]]) | nm /= nm' -> vtrace0throw $ "different type constraints: "++show cons
@@ -151,15 +151,15 @@ unifyEq cons@(a :=: b) = case (a,b) of
     return $ Just (mempty, [val :=: val'])
 
   (Abs nm ty s , Abs nm' ty' s') -> vtrace1 "-aa-" $ do
-    modify $ addToTail Forall nm ty
+    modifyCtxt $ addToTail Forall nm ty
     return $ Just (mempty, [ty :=: ty' , s :=: subst (nm' |-> var nm) s'])
   (Abs nm ty s , s') -> vtrace1 "-as-" 
                       $ vtrace3 (show cons) $ do
-    modify $ addToTail Forall nm ty
+    modifyCtxt $ addToTail Forall nm ty
     return $ Just (mempty, [s :=: s' `apply` var nm])
 
   (s, Abs nm ty s' ) -> vtrace1 "-as-" $ vtrace3 (show cons) $ do
-    modify $ addToTail Forall nm ty
+    modifyCtxt $ addToTail Forall nm ty
     return $ Just (mempty, [s `apply` var nm :=: s'])
 
   (s , s') | s == s' -> vtrace1 "-eq-" $ return $ Just (mempty, [])
@@ -173,15 +173,15 @@ unifyEq cons@(a :=: b) = case (a,b) of
               bind' <- getElm ("gvar-blah: "++show cons) x'
               case bind' of
                 Right ty' -> vtrace1 "-gc- " $ -- gvar-const
-                  if allElementsAreVariables yl
-                  then do 
-                    a <- gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
-                    vtrace3 ("-gc-ret- "++show a) $ return a
-                  else return Nothing
+                  --if allElementsAreVariables yl
+                  --then gvar_const (Spine x yl, ty) (Spine x' y'l, ty')  
+                  -- else return Nothing
+                  gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
+                   
                 Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> vtrace1 "CANT: -gu-dep-" $ vtrace1throw $ "gvar-uvar-depends: "++show (a :=: b)
                 Left Binding{ elmQuant = Forall } | S.member x $ freeVariables y'l -> 
                   vtrace0throw $ "CANT: occurs check: "++show (a :=: b)
-                Left Binding{ elmQuant = Forall, elmType = ty' } ->vtrace1 "-gui-" $  -- gvar-uvar-inside
+                Left Binding{ elmQuant = Forall, elmType = ty' } -> vtrace1 "-gui-" $  -- gvar-uvar-inside
                   gvar_uvar_inside (Spine x yl, ty) (Spine x' y'l, ty')
                 Left bind@Binding{ elmQuant = Exists, elmType = ty' } -> 
                   if not $ allElementsAreVariables yl && allElementsAreVariables y'l 
@@ -192,8 +192,7 @@ unifyEq cons@(a :=: b) = case (a,b) of
                        else -- gvar-gvar-diff
                          if S.member x $ freeVariables y'l 
                          then vtrace0throw $ "CANT: ggd-occurs check: "++show (a :=: b)
-                         else vtrace1 ("-ggd- " ++show cons)
-                              $ gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
+                         else vtrace1 ("-ggd- " ++show cons) $ gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
             _ -> vtrace1 "-ggs-" $ return Nothing
       _ -> case s' of 
         b@(Spine x' _) | x /= x' -> do
@@ -232,7 +231,7 @@ typeToListOfTypes a@(Abs _ _ _) = error $ "not a type" ++ show a
 raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
   
   hl <- reverse <$> getBindings bind
-  x' <- lift $ getNewWith "@newx"
+  x' <- getNewWith "@newx"
   
   let newx_args = map (var . fst) hl
       sub = x |-> Spine x' newx_args
@@ -244,16 +243,16 @@ raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
         -- we need to solve subst twice because we might reify twice
         let sub'' = ((subst sub' <$> sub) *** sub') 
 
-        modify $ subst sub'
+        modifyCtxt $ subst sub'
         return $ Just (sub'', cons)
-  modify $ addToHead Exists x' ty' . removeFromContext x
+  modifyCtxt $ addToHead Exists x' ty' . removeFromContext x
   vtrace3 ("RAISING: "++x' ++" +@+ "++ show newx_args ++ " ::: "++show ty'
          ++"\nFROM: "++x ++" ::: "++ show ty
-          ) modify $ subst sub
+          ) modifyCtxt $ subst sub
   
   -- now we can match against the right hand side
   r <- addSub =<< m (subst sub sp, ty') sub
-  modify $ removeFromContext x'
+  modifyCtxt $ removeFromContext x'
   return r
 
       
@@ -269,7 +268,7 @@ gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine _ y'l), _) = do
                     
       (uNl,atyl) = unzip $ take n $ typeToListOfTypes aty
       
-  xN <- lift $ getNewWith "@ggs"
+  xN <- getNewWith "@ggs"
   
   let perm = [iyt | (iyt,_) <- filter (\(_,(a,b)) -> a == b) $ zip (zip uNl atyl) (zip yl y'l) ]
       
@@ -279,10 +278,9 @@ gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine _ y'l), _) = do
       
       sub = x |-> l
       
-  modify $ addToTail Exists xN xNty -- THIS IS DIFFERENT FROM THE PAPER!!!!
+  modifyCtxt $ addToHead Exists xN xNty -- THIS IS DIFFERENT FROM THE PAPER!!!!
   
-  
-  return (Just (sub, [])) --var xN :@: xNty))
+  return $ Just (sub, []) -- var xN :@: xNty])
   
 gvar_gvar_same _ _ = error "gvar-gvar-same is not made for this case"
 
@@ -297,7 +295,7 @@ gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(b'@(Spine x' y'l)
       (uNl,atyl) = unzip $ take n $ typeToListOfTypes aty
       (vNl,btyl) = unzip $ take m $ typeToListOfTypes bty
       
-  xN <- lift $ getNewWith "@ggd"
+  xN <- getNewWith "@ggd"
   
   let perm = do
         (iyt,y) <- zip (zip uNl atyl) yl
@@ -311,7 +309,7 @@ gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(b'@(Spine x' y'l)
       
       sub = M.fromList [(x ,l), (x',l')]
 
-  modify $ addToTail Exists xN xNty -- THIS IS DIFFERENT FROM THE PAPER!!!!
+  modifyCtxt $ addToHead Exists xN xNty -- THIS IS DIFFERENT FROM THE PAPER!!!!
   
   vtrace3 ("SUBST: -ggd- "++show sub) $ return $ Just (sub, []) -- var xN :@: xNty])
   
@@ -333,7 +331,6 @@ gvar_uvar_outside a@(s@(Spine x yl),_) b@(s'@(Spine y _),bty) = do
   let ilst = [i | (i,y') <- zip [0..] yl , y' == var y] 
   i <- F.asum $ return <$> ilst
   gvar_fixed a b $ (!! i) 
-
 
 
 gvar_uvar_outside _ _ = error "gvar-uvar-outside is not made for this case"
@@ -358,7 +355,7 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
       
   
   xm <- forM m $ \j -> do
-    x <- lift $ getNewWith "@xm"
+    x <- getNewWith "@xm"
     return (x, case j of
       Nothing -> Spine x vun
       Just a -> tycon a $ Spine x vun)  
@@ -385,8 +382,8 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
       
       sub = x |-> l  -- THIS IS THAT STRANGE BUG WHERE WE CAN'T use x in the output substitution!
       addExists s t = vtrace3 ("adding: "++show s++" ::: "++show t) $ addToHead Exists s t
-  modify $ flip (foldr ($)) $ uncurry addExists <$> substBty mempty bty xm  
-  modify $ subst sub
+  modifyCtxt $ flip (foldr ($)) $ uncurry addExists <$> substBty mempty bty xm  
+  modifyCtxt $ subst sub
   
   return $ Just (sub, [subst sub $ a :=: b])
 
@@ -398,89 +395,99 @@ gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
 
 
 -- need bidirectional search!
-rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ case goal of
-  Spine "#forall#" [a, b] -> do
-    y <- lift $ getNewWith "@sY"
-    x' <- lift $ getNewWith "@sX"
-    let b' = b `apply` var x'
-    modify $ addToTail Forall x' a        
-    modify $ addToTail Exists y b'
-    return $ Just [ var y :=: m `apply` var x' , var y :@: b']
+rightSearch m goal = vtrace1 ("-rs- "++show m++" ∈ "++show goal) $ 
+  case goal of
+    Spine "#forall#" [a, b] -> do
+      y <- getNewWith "@sY"
+      x' <- getNewWith "@sX"
+      let b' = b `apply` var x'
+      modifyCtxt $ addToTail Forall x' a        
+      modifyCtxt $ addToTail Exists y b'
+      return $ Just [ var y :=: m `apply` var x' , var y :@: b']
 
-  Spine "#imp_forall#" [_, Abs x a b] -> do
-    y <- lift $ getNewWith "@isY"
-    x' <- lift $ getNewWith "@isX"
-    let b' = subst (x |-> var x') b
-    modify $ addToTail Forall x' a        
-    modify $ addToTail Exists y b'
-    return $ Just [ var y :=: m `apply` (tycon x $ var x')
-                  , var y :@: b'
-                  ]
-  Spine "putChar" [c@(Spine ['\'',l,'\''] [])] ->
-    case unsafePerformIO $ putStr $ l:[] of
-      () -> return $ Just [ m :=: Spine "putCharImp" [c]]
-  Spine "putChar" [_] -> vtrace0 "FAILING PUTCHAR" $ return Nothing
+    Spine "#imp_forall#" [_, Abs x a b] -> do
+      y <- getNewWith "@isY"
+      x' <- getNewWith "@isX"
+      let b' = subst (x |-> var x') b
+      modifyCtxt $ addToTail Forall x' a        
+      modifyCtxt $ addToTail Exists y b'
+      return $ Just [ var y :=: m `apply` (tycon x $ var x')
+                    , var y :@: b'
+                    ]
+    Spine "putChar" [c@(Spine ['\'',l,'\''] [])] ->
+      case unsafePerformIO $ putStr $ l:[] of
+        () -> return $ Just [ m :=: Spine "putCharImp" [c]]
+    Spine "putChar" [_] -> vtrace0 "FAILING PUTCHAR" $ return Nothing
   
-  Spine "readLine" [l] ->
-    case toNCCstring $ unsafePerformIO $ getLine of
-      s -> do
-        y <- lift $ getNewWith "@isY"
-        let ls = l `apply` s
-        modify $ addToTail Exists y ls
-        return $ Just [m :=: Spine "readLineImp" [l,s, var y], var y :@: Spine "run" [ls]]
+    Spine "readLine" [l] -> 
+      case toNCCstring $ unsafePerformIO $ getLine of
+        !s -> do
+          y <- getNewWith "@isY"
+          let ls = l `apply` s
+          modifyCtxt $ addToTail Exists y ls
+          return $ Just [m :=: Spine "readLineImp" [l,s, var y], var y :@: Spine "run" [ls]]
+    Spine nm _ -> do
+      constants <- getConstants
+      foralls <- getForalls
+      exists <- getExists
+      let env = M.union foralls constants
+      
+          isFixed a = isChar a || M.member a env
+      
+          getFixedType a | isChar a = Just $ var "char"
+          getFixedType a = M.lookup a env
+      
+      let mfam = case m of 
+            Abs _ _ _ -> Nothing
+            Spine nm _ -> case getFixedType nm of
+              Just t -> Just (nm,t)
+              Nothing -> Nothing
   
-  l@(Spine nm _) -> do
-    constants <- lift $ ask  
-    foralls <- getForalls
-    exists <- getExists        
+          sameFamily (_, Abs _ _ _) = False
+          sameFamily ("pack",s) = "#exists#" == nm
+          sameFamily (_,s) = getFamily s == nm
+          
+      targets <- case mfam of
+        Just (nm,t) -> return $ [(nm,t)]
+        Nothing -> do
+--          let excludes = S.toList $ S.intersection (M.keysSet exists) $ freeVariables m
+--          searchMaps <- mapM getVariablesBeforeExists excludes  
     
-    let env = M.union foralls constants
-        envl = M.toList $ M.union (M.union foralls constants) exists
-        
-        notAbs (Abs _ _ _) = False
-        notAbs _ = True
-        
-        sameFamily (_, Abs _ _ _) = False
-        sameFamily ("pack",s) = "#exists#" == nm
-        sameFamily (nm',s) = (M.notMember nm' exists || (notAbs m && nm' /= getFamily m)) 
-                           && getFamily s == nm
-                             
-        targets = filter sameFamily envl
-        
-        isEnv a = isChar a || M.member a env
-    if all isEnv $ S.toList (S.union (freeVariables m) (freeVariables l))
+          let searchMap = env {- M.union env $ case searchMaps of
+                [] -> constants
+                a:l -> foldr (M.intersection) a l -}
+                
+          return $ filter sameFamily $ M.toList searchMap
+      
+      if all isFixed $ S.toList $ S.union (freeVariables m) (freeVariables goal)
       then return $ Just []
       else case targets of
-      [] -> return Nothing
-      _ ->  if M.member nm exists 
-            then return Nothing
-            else Just <$> (F.asum $ (leftSearch m goal <$> reverse targets)) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
-
-
+        [] -> return Nothing
+        _  -> Just <$> (F.asum $ (leftSearch m goal <$> reverse targets)) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
 
 leftSearch m goal (x,target) = vtrace1 ("LS: " ++ show m ++" ∈ "++ show goal
                                         ++"\n\t@ " ++x++" : " ++show target)
                              $ leftCont (var x) target
-  where leftCont n target = vtrace3throw ("LS: " ++ show m ++" ∈ "++ show goal
+  where leftCont n target = vtrace3throw ("DEFER: LS: " ++ show m ++" ∈ "++ show goal
                                         ++"\n\t@ " ++x++" : " ++show target) <|> case target of
           Spine "#forall#" [a, b] -> do
-            x' <- lift $ getNewWith "@sla"
-            modify $ addToTail Exists x' a
+            x' <- getNewWith "@sla"
+            modifyCtxt $ addToTail Exists x' a
             cons <- leftCont (n `apply` var x') (b `apply` var x')
             return $ cons++[var x' :@: a]
 
           Spine "#imp_forall#" [_ , Abs x a b] -> do  
-            x' <- lift $ getNewWith "@isla"
-            modify $ addToTail Exists x' a
+            x' <- getNewWith "@isla"
+            modifyCtxt $ addToTail Exists x' a
             cons <- leftCont (n `apply` (tycon x $ var x')) (subst (x |-> var x') b)
             return $ cons++[var x' :@: a]
           Spine _ _ -> do
             return $ [goal :=: target , m :=: n]
           _ -> error $ "λ does not have type atom: " ++ show target
 
-search :: Type -> WithContext (Substitution, Term)
+search :: Type -> Env (Substitution, Term)
 search ty = do
-  e <- lift $ getNewWith "@e"
+  e <- getNewWith "@e"
   sub <- unify $ (∃) e ty $ SCons [var e :@: ty]
   return $ (sub, subst sub $ var e)
 
@@ -560,7 +567,8 @@ checkType sp ty = case sp of
               addToEnv (∃) x ty' $ do
                 var x .@. ty' 
                 -- we need to make sure that the type is satisfiable such that we can reapply it!
-                (tycon nm (var x):) <$> (chop (subst (nm |-> var x) tyv) lst)
+                {- ( tycon nm (var x):) <$> -}
+                (chop (subst (nm |-> var x) tyv) lst)
 
             Just (val,l) -> do
               val <- checkType val ty'
@@ -579,7 +587,7 @@ checkType sp ty = case sp of
               forall v (var x) (Spine tybody [var v]) ≐ mty
               (a:) <$> chop (Spine tybody [a]) l
 
-    mty <- (M.lookup head) <$> lift ask
+    mty <- (M.lookup head) <$> lift getFullCtxt
     
     case mty of 
       Nothing -> lift $ vtrace0throw $ "variable: "++show head++" not found in the environment."
@@ -587,18 +595,19 @@ checkType sp ty = case sp of
                                      ++ "\n\t from "++ show ty
       Just ty' -> Spine head <$> chop ty' args
 
+checkFullType val ty = typeCheckToEnv $ checkType val ty
+
 ----------------------
 --- type inference ---
 ----------------------
-typeInfer :: Constants -> (Name,Spine,Type) -> Choice Constants
-typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) 0) $ do
+typeInfer :: ContextMap -> (Name,Spine,Type) -> Choice ContextMap
+typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
 
   (val,constraint) <- appendErr ("in name: "++nm++" : "++show val) $ 
                       trace ("Checking: " ++nm) $ 
                       vtrace0 ("\tVAL: " ++show val) $ 
-                      vtrace0 ("\t:: " ++show ty) $ 
-                      typeCheckToEnv $ checkType val ty
-  (sub,ctxt) <- runStateT (unify constraint) emptyContext
+                      vtrace0 ("\t:: " ++show ty) $ checkFullType val ty
+  sub <- unify constraint
   
   let res = unsafeSubst sub val
   vtrace0 ("RESULT: "++nm++" : "++show res) $
@@ -612,7 +621,7 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 ----------------------------
 --- the public interface ---
 ----------------------------
-typeCheckAxioms :: [(Maybe Name,Name,Spine,Type)] -> Choice Constants
+typeCheckAxioms :: [(Maybe Name,Name,Spine,Type)] -> Choice ContextMap
 typeCheckAxioms lst = do
   
   -- check the closedness of families.  this gets done
@@ -650,6 +659,6 @@ typeCheckAll preds = do
   return $ newPreds <$> preds
   
 solver :: [(Name,Type)] -> Type -> Either String [(Name, Term)]
-solver axioms tp = case runError $ runRWST (runStateT (search tp) emptyContext) (M.union envConsts $ M.fromList axioms) 0 of
-  Right (((s,tm),_),_,_) -> Right $ [("query", tm)] -- :M.toList s
+solver axioms tp = case runError $ runRWST (search tp) (M.union envConsts $ M.fromList axioms) emptyState of
+  Right ((_,tm),_,_) -> Right $ [("query", tm)]
   Left s -> Left $ "reification not possible: "++s
