@@ -120,7 +120,12 @@ defn =  do
   reserved "defn"
   (nm,ty) <- named decTipe
   let more =  do reservedOp "|"
-                 lst <- flip sepBy1 (reservedOp "|") $ named decPred
+
+                 lst <- flip sepBy1 (reservedOp "|") $ do
+                        b <- optionMaybe $ reservedOp "#"
+                        (nm,t) <- named decPred
+                        return (nm,(b /= Nothing,t))
+                        
                  optional semi
                  return $ Predicate nm ty lst
       none = do optional semi
@@ -295,7 +300,7 @@ tipe = do
 reservedOperators = [ "->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", 
                      "\\", "?\\", 
                      "λ","?λ", 
-                     "∀", "?∀", 
+                     "∀", "?∀", "#",
                      "?", 
                      "??", "∃", "=", 
                      ":", ";", "|"]

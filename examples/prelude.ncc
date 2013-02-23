@@ -15,9 +15,9 @@ defn io : atom
 defn run : io -> atom
    | runDo = run do
    | runSeq = [A][B] run (A , B) <- run A 
-                     	         <- B
+                         	 <- B
 
-defn readLine    : (string -> io) -> atom -- builtin
+defn readLine    : (string -> io) -> atom -- builtin 
    | readLineImp = [Foo : string -> io] [A : string] readLine Foo <- run (Foo A)
 
 defn string : atom
@@ -54,6 +54,7 @@ defn @ : {a b c:atom} (b -> c) -> (a -> b) -> a -> c
 defn flip : {a b c : atom} (a -> b -> c) -> b -> a -> c
   as ?\ at bt ct : atom . \ foo . \ b . \ a . foo a b
 
+
 -------------------
 --- Constraints ---
 -------------------
@@ -74,18 +75,18 @@ defn \/ : atom -> atom -> atom
 --------------
 --- concat ---
 --------------
-defn concatable : atom -> atom
-   | concatableImp = [M : atom] (M -> M -> M -> atom) -> concatable M
-
-defn concatableP : [M : atom] exists A : (M -> M -> M -> atom) . atom
-   | concatableImpP = open (natural -> natural -> natural -> atom) _ (concatableP natural) add _
+defn concatable : [M : atom] (M -> M -> M -> atom) -> atom
+   | concatableNat = concatable natural add
+   | concatableList = [A] concatable (list A) concatList
 
 
+-- it correctly infers 169, and M (but it eta expands Foo when it infers it) !!
 fixity right 3 ++
-defn ++ : {M}{cm : concatable M} M -> M -> M -> atom
+defn ++ : {M}{Foo}{cm : concatable M Foo} M -> M -> M -> atom
    | ppimp = [M][Foo : M -> M -> M -> atom][M1 M2 M3 : M] 
-             (++) {M = M} {cm = concatableImp M Foo } M1 M2 M3
-          <- Foo M1 M2 M3
+              (++) {Foo = Foo} M1 M2 M3 
+            <- concatable M Foo 
+            <- Foo M1 M2 M3 
 
 
 -------------
@@ -103,6 +104,7 @@ fixity none 2 ≥
 defn ≥ : {M : atom} {cm : orderable M} M -> M -> atom
   as ?\M . ?\ cm : orderable M . \M1 M2 : M . M2 ≤ M1
 
+
 ---------------------
 --- Unary Numbers ---
 ---------------------
@@ -110,16 +112,21 @@ defn natural  : atom
    | zero = natural
    | succ = natural -> natural
 
+query findSat1 = exists A . A =:= zero
+
 defn add   : natural -> natural -> natural -> atom
    | add_z = [N] add zero N N
    | add_s = [N M R] add N M R -> add (succ N) M (succ R)
+
+query add0 = add (succ zero) zero (succ zero)
+query add1 = (++) (succ zero) zero (succ zero)
+
 
 -- sub N M R is N - M = R
 defn sub   : natural -> natural -> natural -> atom
    | sub_by_add = [N M R] sub N M R <- add M R N
 
-defn concatableNatural : concatable natural
-  as concatableImp natural add
+
 
 defn lte-nat : natural -> natural -> atom
    | leqZero = [B] lte-nat zero B
@@ -133,9 +140,8 @@ defn < : natural -> natural -> atom
 defn orderableNatural : orderable natural
   as orderableImp natural lte-nat
 
-query findSat1 = exists A . A =:= zero
 
-query add1 = (++) (succ zero) zero (succ zero)
+
 
 -- query add2 = exists A : natural . add (succ zero) zero A
 
@@ -167,9 +173,6 @@ defn list : atom -> atom
 defn concatList : {A} list A -> list A -> list A -> atom
    | concatListNil  = [T][L:list T] concatList {A = T} nil L L
    | concatListCons = [T][A B C : list T][V:T] concatList (cons V A) B (cons V C) <- concatList A B C
-
-defn concatableList : {A:atom} concatable (list A)
-  as ?\A . concatableImp (list A) concatList
 
 ----------------
 --- printing ---

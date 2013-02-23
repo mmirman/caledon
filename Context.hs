@@ -7,7 +7,9 @@ import AST
 import Data.Monoid
 import Data.Functor
 import qualified Data.Map as M
+import qualified Data.Set as S
 import Data.Map (Map)
+import Data.Set (Set)
 import Control.Monad.State (StateT, runStateT, modify, get, put)
 import Control.Monad.RWS (RWST, ask, local, censor, runRWST, get, put)
 import Control.Monad.Trans (lift)
@@ -20,6 +22,7 @@ import Debug.Trace
 ---  context map ---
 --------------------
 type ContextMap = Map Name Type
+type IgnoreSet = [Name]
 
 --------------------------------
 ---  constraint context list ---
@@ -49,19 +52,19 @@ lookupWith s a ctxt = case M.lookup a ctxt of
 emptyContext = Context Nothing mempty Nothing
 
 -- assumes the element is not already in the context, or it is and the only thing that is changing is it's type.
-addToContext :: Context -> Binding -> Context
-addToContext (Context Nothing ctxt Nothing) elm@(Binding _ nm _ Nothing Nothing) | M.null ctxt = checkContext "addToCtxt N N" $ 
+addToContext :: String -> Context -> Binding -> Context
+addToContext s (Context Nothing ctxt Nothing) elm@(Binding _ nm _ Nothing Nothing) | M.null ctxt = checkContext (s++"\naddToCtxt N N: ") $ 
                                                                                                  Context (Just nm) (M.singleton nm elm) (Just nm)
-addToContext c (Binding _ _ _ Nothing Nothing) = error $ "context not empty so can't add to tail: "++show c
-addToContext (Context h ctxt t) elm@(Binding _ nm _ t'@(Just p) Nothing) | t' == t = checkContext "addToCtxt J N" $ 
+addToContext s c (Binding _ _ _ Nothing Nothing) = error $ "context not empty so can't add to tail: "++show c
+addToContext s c@(Context h ctxt t) elm@(Binding _ nm _ t'@(Just p) Nothing) | t' == t = checkContext (s++"\naddToCtxt J N: "++show elm ++ "\n\tOLD CONTEXT: "++show c) $ 
   Context h (M.insert p t'val $ M.insert nm elm $ ctxt) (Just nm)
   where t'val = (lookupWith "looking up p ctxt" p ctxt) { elmNext = Just nm }
-addToContext _ (Binding _ _ _ _ Nothing) = error "can't add this to tail"
-addToContext (Context h ctxt t) elm@(Binding _ nm _ Nothing h'@(Just n)) | h' == h = checkContext "addToCtxt N J" $ 
+addToContext s _ (Binding _ _ _ _ Nothing) = error "can't add this to tail"
+addToContext s (Context h ctxt t) elm@(Binding _ nm _ Nothing h'@(Just n)) | h' == h = checkContext (s++"\naddToCtxt N J: ") $ 
   Context (Just nm) (M.insert n h'val $ M.insert nm elm $ ctxt) t
   where h'val = (lookupWith "looking up n ctxt" n ctxt) { elmPrev = Just nm }
-addToContext _ (Binding _ _ _ Nothing _) = error "can't add this to head"
-addToContext ctxt@Context{ctxtMap = cmap} elm@(Binding _ nm _ (Just p) (Just n)) = checkContext "addToCtxt J J" $ 
+addToContext s _ (Binding _ _ _ Nothing _) = error "can't add this to head"
+addToContext s ctxt@Context{ctxtMap = cmap} elm@(Binding _ nm _ (Just p) (Just n)) = checkContext (s++"\naddToCtxt J J: ") $ 
   ctxt { ctxtMap = M.insert n n'val $ M.insert p p'val $ M.insert nm elm $ cmap }
   where n'val = (lookupWith "looking up n cmap" n cmap) { elmPrev = Just nm }
         p'val = (lookupWith "looking up p cmap" p cmap) { elmNext = Just nm }
@@ -83,8 +86,8 @@ removeFromContext nm ctxt@(Context h cmap t) = case M.lookup nm cmap of
           p' = M.insert cp $ (lookupWith "looking up a cmap for p'" cp cmap ) { elmNext = Just cn }
   where isSane bool a = if bool then a else error "This doesn't match intended binding"
 
-addToHead quant nm tp ctxt = addToContext ctxt $ Binding quant nm tp Nothing (ctxtHead ctxt)
-addToTail quant nm tp ctxt = addToContext ctxt $ Binding quant nm tp (ctxtTail ctxt) Nothing
+addToHead s quant nm tp ctxt = addToContext s ctxt $ Binding quant nm tp Nothing (ctxtHead ctxt)
+addToTail s quant nm tp ctxt = addToContext s ctxt $ Binding quant nm tp (ctxtTail ctxt) Nothing
 
 removeHead ctxt = case ctxtHead ctxt of 
   Nothing -> ctxt
@@ -101,7 +104,8 @@ getHead (Context (Just h) ctx _) = lookupWith "getting head" h ctx
 getHead (Context Nothing _ _) = error "no head"
 
 -- gets the list of bindings after (below) a given binding
-getAfter s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
+getAfter s bind ctx = tail $ getAfter' s bind ctx            
+getAfter' s bind ctx@(Context{ ctxtMap = ctxt }) = gb bind
   where gb ~(Binding quant nm ty _ n) = (quant, (nm,ty)):case n of
           Nothing -> []
           Just n -> gb $ case M.lookup n ctxt of 
@@ -109,19 +113,23 @@ getAfter s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
             Just c -> c
 
 -- gets the list of bindings before (above) a given binding
-getBefore s bind ctx@(Context{ ctxtMap = ctxt }) = tail $ gb bind
+getBefore s bind ctx = tail $ getBefore' s bind ctx            
+getBefore' s bind ctx@(Context{ ctxtMap = ctxt }) = gb bind
   where gb ~(Binding quant nm ty p _) = (quant, (nm,ty)):case p of
           Nothing -> []
           Just p -> gb $ case M.lookup p ctxt of 
             Nothing -> error $ "element "++show p++" not in map \n\twith ctxt: "++show ctx++" \n\t for bind: "++show bind++"\n\t"++s
             Just c -> c
-            
---checkContext _ c@(Context Nothing _ Nothing) = c
-checkContext s ctx = ctx {- foldr seq ctx $ zip st ta
-  where st = getBefore s (getTail ctx) ctx
-        ta = getAfter s (getHead ctx) ctx -}
 
-
+checkContext _ c = c
+{-
+checkContext _ c@(Context Nothing _ Nothing) = c
+checkContext s ctx = foldr (\v c -> seq (checkEquals v) c) ctx $ zip st (reverse $ ta)
+  where st = getBefore' s (getTail ctx) ctx
+        ta = getAfter' s (getHead ctx) ctx
+        checkEquals (a,b) | (a == b) = ()
+        checkEquals (a,b) = error $ s++" \n\tNOT THE SAME" ++show (a,b) ++ " \n\t IN "++show ctx
+-}
 
 -------------------------
 ---  Traversal Monad  ---
@@ -136,7 +144,7 @@ instance ValueTracker ContextState where
   putValue i c = c { stateNum = i }
   takeValue c = stateNum c
   
-type Env = RWST ContextMap Constraint ContextState Choice
+type Env = RWST (ContextMap,IgnoreSet) Constraint ContextState Choice
 
 isolateForFail m = do
   s <- get
@@ -193,7 +201,11 @@ getExists = do
   return $ elmType <$> M.filter (\q -> elmQuant q == Exists) ctx
 
 getConstants :: Env ContextMap
-getConstants = ask  
+getConstants = fst <$> ask  
+
+getIgnoreSet :: Env IgnoreSet
+getIgnoreSet = snd <$> ask
+
 
 getFullCtxt :: Env ContextMap
 getFullCtxt = do
@@ -216,7 +228,8 @@ modifyCtxt f = modify $ \m -> m { stateCtxt = f $ stateCtxt m }
 -------------------------
 ---  traversal monads ---
 -------------------------
-lookupConstant x = (M.lookup x) <$> ask 
+lookupConstant :: Name -> Env (Maybe Type)
+lookupConstant x = (M.lookup x) <$> fst <$> ask 
 
 type TypeChecker = ContT Spine Env
 
@@ -229,4 +242,4 @@ typeCheckToEnv m = do
   return (a,w)
 
 addToEnv :: (Name -> Spine -> Constraint -> Constraint) -> Name  -> Spine -> TypeChecker a -> TypeChecker a
-addToEnv e x ty = mapContT (censor $ e x ty) . liftLocal ask local (M.insert x ty)
+addToEnv e x ty = mapContT (censor $ e x ty) . liftLocal ask local (\(a,s) -> (M.insert x ty a,s))
