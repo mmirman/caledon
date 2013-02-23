@@ -11,7 +11,7 @@ import qualified Data.Set as S
 import Data.Map (Map)
 import Data.Set (Set)
 import Control.Monad.State (StateT, runStateT, modify, get, put)
-import Control.Monad.RWS (RWST, ask, local, censor, runRWST, get, put)
+import Control.Monad.RWS (RWST, ask, local, censor, runRWST, get, put,listen)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Cont
 import Choice
@@ -22,7 +22,6 @@ import Debug.Trace
 ---  context map ---
 --------------------
 type ContextMap = Map Name Type
-type IgnoreSet = [Name]
 
 --------------------------------
 ---  constraint context list ---
@@ -144,7 +143,7 @@ instance ValueTracker ContextState where
   putValue i c = c { stateNum = i }
   takeValue c = stateNum c
   
-type Env = RWST (ContextMap,IgnoreSet) Constraint ContextState Choice
+type Env = RWST ContextMap Constraint ContextState Choice
 
 isolateForFail m = do
   s <- get
@@ -201,10 +200,9 @@ getExists = do
   return $ elmType <$> M.filter (\q -> elmQuant q == Exists) ctx
 
 getConstants :: Env ContextMap
-getConstants = fst <$> ask  
+getConstants = ask  
 
-getIgnoreSet :: Env IgnoreSet
-getIgnoreSet = snd <$> ask
+
 
 
 getFullCtxt :: Env ContextMap
@@ -229,17 +227,13 @@ modifyCtxt f = modify $ \m -> m { stateCtxt = f $ stateCtxt m }
 ---  traversal monads ---
 -------------------------
 lookupConstant :: Name -> Env (Maybe Type)
-lookupConstant x = (M.lookup x) <$> fst <$> ask 
+lookupConstant x = (M.lookup x) <$> ask 
 
 type TypeChecker = ContT Spine Env
 
 typeCheckToEnv :: TypeChecker Spine -> Env (Spine,Constraint)
-typeCheckToEnv m = do
-  r <- ask
-  s <- get
-  (a,s',w) <- lift $ runRWST (runContT m return) r s 
-  put s'
-  return (a,w)
+typeCheckToEnv m = listen $ runContT m return
+
 
 addToEnv :: (Name -> Spine -> Constraint -> Constraint) -> Name  -> Spine -> TypeChecker a -> TypeChecker a
-addToEnv e x ty = mapContT (censor $ e x ty) . liftLocal ask local (\(a,s) -> (M.insert x ty a,s))
+addToEnv e x ty = mapContT (censor $ e x ty) . liftLocal ask local (M.insert x ty)

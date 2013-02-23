@@ -39,7 +39,7 @@ checkAndRun decs = do
   putStrLn "\nTARGETS: "
   forM_ targets $ \s -> putStrLn $ show s++"\n"
 
-  let allTypes c = (predName c, (False, predType c)):predConstructors c
+  let allTypes c = (predName c, predType c):predConstructors c
       predicates' = sub predicates
       targets' = sub targets
   forM_ targets' $ \target ->

@@ -39,7 +39,7 @@ data Spine = Spine !Name ![Type]
 type Type = Spine
 type Term = Spine
 
-data Predicate = Predicate { predName :: !Name, predType :: !Type, predConstructors :: ![(Name,(Bool,Type))] }
+data Predicate = Predicate { predName :: !Name, predType :: !Type, predConstructors :: ![(Name,Type)] }
                | Query { predName :: !Name, predType :: !Spine}
                | Define { predName :: !Name, predValue :: !Spine, predType :: !Type}
                deriving (Eq)
@@ -103,7 +103,7 @@ instance Show Predicate where
   show (Predicate nm ty []) = "defn " ++ nm ++ " : " ++ show ty ++ ";"
   show (Predicate nm ty (a:cons)) =
     "defn " ++ nm ++ " : " ++ show ty ++ "\n" ++ "   | " ++ showSingle a ++ concatMap (\x-> "\n   | " ++ showSingle x) cons ++ ";"
-      where showSingle (nm,ty) = nm ++ " = " ++ show (snd ty)
+      where showSingle (nm,ty) = nm ++ " = " ++ show ty
   show (Query nm val) = "query " ++ nm ++ " = " ++ show val
   show (Define nm val ty) = "defn " ++ nm ++ " : " ++ show ty ++"\n as "++show val
                                                
@@ -179,7 +179,7 @@ instance Subst Spine where
       Just nm -> rebuildSpine nm apps'
       _ -> Spine nm apps'
 instance Subst Predicate where
-  subst sub (Predicate nm ty cons) = Predicate nm (subst sub ty) ((\(nm,(b,t)) -> (nm,(b,subst sub t))) <$> cons)
+  subst sub (Predicate nm ty cons) = Predicate nm (subst sub ty) ((\(nm,t) -> (nm,subst sub t)) <$> cons)
   subst sub (Query nm ty) = Query nm (subst sub ty)
   subst sub (Define nm val ty) = Define nm (subst sub val) (subst sub ty)
   

@@ -29,7 +29,7 @@ import Debug.Trace
 import System.IO.Unsafe
 
 {-# INLINE level #-}
-level = 0
+level = 1
 
 {-# INLINE vtrace #-}
 vtrace !i | i < level = trace
@@ -460,8 +460,7 @@ rightSearch m goal = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $
 --          let excludes = S.toList $ S.intersection (M.keysSet exists) $ freeVariables m
 --          searchMaps <- mapM getVariablesBeforeExists excludes
           
-          excludes <- getIgnoreSet
-          let searchMap = env .-. excludes {- (.-. excludes) $ M.union env $ case searchMaps of
+          let searchMap = env {- M.union env $ case searchMaps of
                 [] -> mempty
                 a:l -> foldr (M.intersection) a l -}
                 
@@ -609,8 +608,16 @@ checkFullType val ty = typeCheckToEnv $ checkType val ty
 ----------------------
 --- type inference ---
 ----------------------
-typeInfer :: ContextMap -> IgnoreSet -> (Name,Spine,Type) -> Choice ContextMap
-typeInfer env ignoreSet (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env, ignoreSet) emptyState) $ do
+
+--fullProgramInfer :: [(Maybe Name,Name,Spine,Type)] -> Choice ContextMap
+--fullProgramInfer lst = (\r -> (\(a,_,_) -> a) <$> runRWST r (envConsts, mempty) emptyState) $ do
+
+  
+  
+--  return $ undefined
+
+typeInfer :: ContextMap -> (Name,Spine,Type) -> Choice ContextMap
+typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
 
   (val,constraint) <- appendErr ("in name: "++nm++" : "++show val) $ 
                       trace ("Checking: " ++nm) $ 
@@ -630,17 +637,19 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 ----------------------------
 --- the public interface ---
 ----------------------------
-typeCheckAxioms :: [(Maybe Name,Name,Bool,Spine,Type)] -> Choice ContextMap
+typeCheckAxioms :: [(Maybe Name,Name,Spine,Type)] -> Choice ContextMap
 typeCheckAxioms lst = do
   
   -- check the closedness of families.  this gets done
   -- after typechecking since family checking needs to evaluate a little bit
   -- in order to allow defs in patterns
-  let tys = M.fromList $ map (\(_,nm,_,ty,_) -> (nm,ty)) lst
-      ignoreSet = map (\(_,nm,_,_,_) -> nm) $ filter (\(_,_,b,_,_) -> b) lst
+  let notval (_,'#':'v':':':_,_,_) = False
+      notval _ = True
+      
+      tys = M.fromList $ map (\(_,nm,ty,_) -> (nm,ty)) $ filter notval lst
+      
       inferAll (l , []) = return l
       inferAll (l , (fam,nm,val,ty):toplst) = do
-        
         unless (fam == Nothing || Just (getFamily val) == fam)
           $ throwTrace 0 $ "not the right family: need "++show fam++" for "++nm ++ " = " ++show val
         
@@ -648,28 +657,28 @@ typeCheckAxioms lst = do
                         ++"\nWITH: "++nm++ " : "++show ty
                         ++"\nAS:   "++nm++ " = "++show val
                         ) $ 
-              typeInfer (tys *** l) ignoreSet (nm, val,ty) -- constrain the breadth first search to be local! 
+              typeInfer (tys *** l) (nm, val,ty) -- constrain the breadth first search to be local! 
         inferAll $ case nm of
           '#':'v':':':nm' -> (subst sub <$> l', (\(fam,nm,val,ty) -> (fam,nm,subst sub val, subst sub ty)) <$> toplst) 
             where sub = nm' |-> (l' M.! nm)                             
           _ -> (l', toplst)
         
-  inferAll (mempty, topoSortAxioms $ map (\(a,b,_,c,d) -> (a,b,c,d)) $ lst)
+  inferAll (mempty, topoSortAxioms lst)
   
 typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = do
-  let toAxioms (Predicate nm ty cs) = (Just "atom",nm,False,ty,atom):map (\(nm',(b,ty')) -> (Just nm,nm',b,ty',atom)) cs
-      toAxioms (Query nm val) = [(Nothing, nm,True,val,atom)]
-      toAxioms (Define nm val ty) = [(Nothing, nm,False,ty,atom), (Nothing, "#v:"++nm,True,val,ty)]
+  let toAxioms (Predicate nm ty cs) = (Just "atom",nm,ty,atom):map (\(nm',ty') -> (Just nm,nm',ty',atom)) cs
+      toAxioms (Query nm val) = [(Nothing, nm,val,atom)]
+      toAxioms (Define nm val ty) = [(Nothing, nm,ty,atom), (Nothing, "#v:"++nm,val,ty)]
   tyMap <- typeCheckAxioms $ concatMap toAxioms preds
   
-  let newPreds (Predicate nm _ cs) = Predicate nm (tyMap M.! nm) $ map (\(nm,(b,_)) -> (nm,(b,tyMap M.! nm))) cs
+  let newPreds (Predicate nm _ cs) = Predicate nm (tyMap M.! nm) $ map (\(nm,_) -> (nm,tyMap M.! nm)) cs
       newPreds (Query nm _) = Query nm (tyMap M.! nm)
       newPreds (Define nm _ _) = Define nm (tyMap M.! ("#v:"++nm)) (tyMap M.! nm)
   
   return $ newPreds <$> preds
   
-solver :: [(Name,(Bool,Type))] -> Type -> Either String [(Name, Term)]
-solver axioms tp = case runError $ runRWST (search tp) (M.union envConsts $ M.fromList $ map (\(nm,(_,ty)) -> (nm,ty)) axioms, fst <$> filter (\(_,(b,_)) -> b) axioms) emptyState of
+solver :: [(Name,Type)] -> Type -> Either String [(Name, Term)]
+solver axioms tp = case runError $ runRWST (search tp) (M.union envConsts $ M.fromList axioms) emptyState of
   Right ((_,tm),_,_) -> Right $ [("query", tm)]
   Left s -> Left $ "reification not possible: "++s

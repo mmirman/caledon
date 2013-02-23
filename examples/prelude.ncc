@@ -88,21 +88,23 @@ defn ++ : {M}{Foo}{cm : concatable M Foo} M -> M -> M -> atom
             <- concatable M Foo 
             <- Foo M1 M2 M3 
 
-
 -------------
 --- Order ---
 -------------
 
-defn orderable : atom -> atom
-   | orderableImp = [M] (M -> M -> atom) -> orderable M
+defn orderable : [M] (M -> M -> atom) -> atom
+   | orderableNatural = orderable natural lte-nat
 
 fixity right 3 ≤ 
-defn ≤ : {M} {cm : orderable M} M -> M -> atom
-   | ooimp = [M][Foo : M -> M -> atom][M1 M2 : M] (≤) {M = M} {cm = orderableImp M Foo} M1 M2 <- Foo M1 M2
+defn ≤ : {M}{Foo}{co : orderable M Foo} M -> M -> atom
+   | ooimp = [M][Foo : M -> M -> atom][M1 M2 : M] 
+           (≤) {M = M} M1 M2 
+          <- orderable M Foo
+          <- Foo M1 M2
 
-fixity none 2 ≥
-defn ≥ : {M : atom} {cm : orderable M} M -> M -> atom
-  as ?\M . ?\ cm : orderable M . \M1 M2 : M . M2 ≤ M1
+--fixity none 2 ≥
+--defn ≥ : {M : atom}{Foo : M -> M -> atom }{co : orderable M Foo} M -> M -> atom
+--  as ?\M : atom . ?\Foo : M -> M -> atom . ?\co : orderable M Foo . \M1 M2 : M . (≤) {M = M}{Foo = Foo}{co = co} M2 M1
 
 
 ---------------------
@@ -121,11 +123,9 @@ defn add   : natural -> natural -> natural -> atom
 query add0 = add (succ zero) zero (succ zero)
 query add1 = (++) (succ zero) zero (succ zero)
 
-
 -- sub N M R is N - M = R
 defn sub   : natural -> natural -> natural -> atom
    | sub_by_add = [N M R] sub N M R <- add M R N
-
 
 
 defn lte-nat : natural -> natural -> atom
@@ -136,12 +136,6 @@ fixity none 3 <
 defn < : natural -> natural -> atom
    | ltZero = [B] zero < succ B
    | ltSucc = [A B] succ A < succ B <- A < B
-
-defn orderableNatural : orderable natural
-  as orderableImp natural lte-nat
-
-
-
 
 -- query add2 = exists A : natural . add (succ zero) zero A
 

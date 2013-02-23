@@ -122,9 +122,8 @@ defn =  do
   let more =  do reservedOp "|"
 
                  lst <- flip sepBy1 (reservedOp "|") $ do
-                        b <- optionMaybe $ reservedOp "#"
                         (nm,t) <- named decPred
-                        return (nm,(b /= Nothing,t))
+                        return (nm,t)
                         
                  optional semi
                  return $ Predicate nm ty lst
