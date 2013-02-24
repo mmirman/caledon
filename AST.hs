@@ -60,7 +60,7 @@ getNew = do
   return $! show n
   
 getNewWith :: (Functor f, MonadState c f, ValueTracker c) => String -> f String
-getNewWith s = (++s) <$> getNew
+getNewWith s = {- (++s) <$> -} getNew
 
 showWithParens t = if (case t of
                           Abs{} -> True

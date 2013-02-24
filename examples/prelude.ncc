@@ -171,7 +171,7 @@ defn concatList : {A} list A -> list A -> list A -> atom
 
 defn putStr : string -> atom
    | putStr_Nil = putStr $ nil {a = char}
-   | putStr_Cons = [v:char][l: list char] 
+   | putStr_Cons = [v:char][l: string] 
                    putStr $ cons {a = char} v l 
                 <- putChar v
                 <- putStr l

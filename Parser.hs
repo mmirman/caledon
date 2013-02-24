@@ -57,7 +57,7 @@ getNextVar :: Parser String
 getNextVar = do
   v <- currentVar <$> getState
   modifyState $ modifyVar (+1)
-  return $ show v
+  return $ show v++"'"
 
 decls :: Parser [Predicate]
 decls = do

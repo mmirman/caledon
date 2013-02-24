@@ -683,24 +683,26 @@ typeCheckAxioms lst = do
   let notval (_,'#':'v':':':_,_,_) = False
       notval _ = True
       
+      tlst = topoSortAxioms lst
+      
       tys = M.fromList $ map (\(_,nm,ty,_) -> (nm,ty)) $ filter notval lst
       
       inferAll (l , []) = return l
       inferAll (l , (fam,nm,val,ty):toplst) = do
         unless (fam == Nothing || Just (getFamily val) == fam)
-          $ throwTrace 0 $ "not the right family: need "++show fam++" for "++nm ++ " = " ++show val
-        
+          $ throwTrace 0 $ "not the right family: need "++show fam++" for "++nm ++ " = " ++show val        
         l' <- appendErr ("can not infer type for: "
                         ++"\nWITH: "++nm++ " : "++show ty
                         ++"\nAS:   "++nm++ " = "++show val
                         ) $ 
               typeInfer (tys *** l) (nm, val,ty) -- constrain the breadth first search to be local! 
+
         inferAll $ case nm of
           '#':'v':':':nm' -> (subst sub <$> l', (\(fam,nm,val,ty) -> (fam,nm,subst sub val, subst sub ty)) <$> toplst) 
-            where sub = nm' |-> (l' M.! nm)                             
+            where sub = nm' |-> (l' M.! nm)        
           _ -> (l', toplst)
-        
-  inferAll (mempty, topoSortAxioms lst)
+
+  inferAll (mempty, tlst)        
   
 typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = do

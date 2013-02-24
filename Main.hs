@@ -56,6 +56,7 @@ main = do
     [] -> putStrLn "No file specified. Usage is \"caledon file.ncc\""
     [fname] -> do
       file <- readFile fname
+      
       let mError = runP decls emptyState fname file 
       decs <- case mError of
         Left e -> error $ show e
