@@ -12,7 +12,7 @@ import Choice
 import AST
 import Context
 import TopoSortAxioms
-import Control.Monad.State (StateT, runStateT, modify, get)
+import Control.Monad.State (StateT, forM_,runStateT, modify, get)
 import Control.Monad.RWS (RWST, runRWST, ask, tell)
 import Control.Monad.Error (throwError, MonadError)
 import Control.Monad (unless, forM, replicateM, void)
@@ -29,7 +29,7 @@ import Debug.Trace
 import System.IO.Unsafe
 
 {-# INLINE level #-}
-level = 1
+level = 0
 
 {-# INLINE vtrace #-}
 vtrace !i | i < level = trace
@@ -214,7 +214,7 @@ unifyEq cons@(a :=: b) = case (a,b) of
                 Just (b,bl) -> ((a :=: b) :) <$> match al bl
           -- in this case we know that al has no #tycon#s in its prefix since we exhausted all of them in the previous case
               match al (Spine "#tycon#" [Spine _ [_]]:bl) = match al bl 
-              match (a:al) (b:bl) = ((a :=: b) :) <$>  match al bl 
+              match (a:al) (b:bl) = ((a :=: b) :) <$> match al bl 
               match [] [] = return []
               match _ _ = throwTrace 0 $ "CANT: different numbers of arguments on constant: "++show cons
 
@@ -271,8 +271,9 @@ makeBind xN us tyl arg = foldr (uncurry Abs) (Spine xN $ map var arg) $ zip us t
 
 -- TODO: make sure this is correct.  its now just a modification of gvar_gvar_diff!
 gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine _ y'l), _) = do
+  aty <- regenAbsVars aty
   let n = length yl
-                    
+         
       (uNl,atyl) = unzip $ take n $ typeToListOfTypes aty
       
   xN <- getNewWith "@ggs"
@@ -292,14 +293,18 @@ gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine _ y'l), _) = do
 gvar_gvar_same _ _ = error "gvar-gvar-same is not made for this case"
 
 gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(b'@(Spine x' y'l), bty) subO -> do
+  
   let (Spine x yl, aty) = (subst subO a', subst subO aty')
-      
+
       -- now x' comes before x 
       -- but we no longer care since I tested it, and switching them twice reduces to original
       n = length yl
       m = length y'l
-                    
-      (uNl,atyl) = unzip $ take n $ typeToListOfTypes aty
+      
+  aty <- regenAbsVars aty
+  bty <- regenAbsVars bty
+  
+  let (uNl,atyl) = unzip $ take n $ typeToListOfTypes aty
       (vNl,btyl) = unzip $ take m $ typeToListOfTypes bty
       
   xN <- getNewWith "@ggd"
@@ -359,17 +364,19 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
       untylr = getArgs aty
       (un,_) = unzip untylr 
       (vun, _) = unzip un
-      
   
   xm <- forM m $ \j -> do
     x <- getNewWith "@xm"
-    return (x, case j of
+    return (x, (Spine x vun, case j of
       Nothing -> Spine x vun
-      Just a -> tycon a $ Spine x vun)  
+      Just a -> tycon a $ Spine x vun))  
       
-  let toLterm (Spine "#forall#" [ty, Abs ui _ r]) = Abs ui ty $ toLterm r
+  let xml = map (snd . snd) xm
+      -- when rebuilding the spine we want to use typeconstructed variables if bty contains implicit quantifiers
+      toLterm (Spine "#forall#" [ty, Abs ui _ r]) = Abs ui ty $ toLterm r
       toLterm (Spine "#imp_forall#" [ty, Abs ui _ r]) = imp_abs ui ty $ toLterm r      
-      toLterm _ = rebuildSpine (action vun) $ map snd xm
+      toLterm _ = rebuildSpine (action vun) $ xml
+
       
       l = toLterm aty
   
@@ -379,15 +386,15 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
                        ) e untylr
 
       substBty sub (Spine "#forall#" [_, Abs vi bi r]) ((x,xi):xmr) = (x,vbuild $ subst sub bi)
-                                                                :substBty (M.insert vi xi sub) r xmr
+                                                                :substBty (M.insert vi (fst xi) sub) r xmr
       substBty sub (Spine "#imp_forall#" [_, Abs vi bi r]) ((x,xi):xmr) = (x,vbuild $ subst sub bi)
-                                                                    : substBty (M.insert vi xi sub) r xmr
+                                                                    : substBty (M.insert vi (fst xi) sub) r xmr
       substBty _ _ [] = []
       substBty _ s l  = error $ "is not well typed: "++show s
                         ++"\nFOR "++show l 
                         ++ "\nON "++ show cons
       
-      sub = x |-> l  -- THIS IS THAT STRANGE BUG WHERE WE CAN'T use x in the output substitution!
+      sub = x |-> l -- THIS IS THAT STRANGE BUG WHERE WE CAN'T use x in the output substitution!
       addExists s t = vtrace 3 ("adding: "++show s++" ::: "++show t) $ addToHead "-gf-" Exists s t
   modifyCtxt $ flip (foldr ($)) $ uncurry addExists <$> substBty mempty bty xm  
   modifyCtxt $ subst sub
@@ -408,7 +415,7 @@ rightSearch m goal = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $
       y <- getNewWith "@sY"
       x' <- getNewWith "@sX"
       let b' = b `apply` var x'
-      modifyCtxt $ addToTail "-rsFf-" Forall x' a        
+      modifyCtxt $ addToTail "-rsFf-" Forall x' a
       modifyCtxt $ addToTail "-rsFe-" Exists y b'
       return $ Just [ var y :=: m `apply` var x' , var y :@: b']
 
@@ -603,22 +610,52 @@ checkType sp ty = case sp of
                                      ++ "\n\t from "++ show ty
       Just ty' -> Spine head <$> chop ty' args
 
+checkFullType :: Spine -> Type -> Env (Spine, Constraint)
 checkFullType val ty = typeCheckToEnv $ checkType val ty
 
 ----------------------
 --- type inference ---
 ----------------------
-
---fullProgramInfer :: [(Maybe Name,Name,Spine,Type)] -> Choice ContextMap
---fullProgramInfer lst = (\r -> (\(a,_,_) -> a) <$> runRWST r (envConsts, mempty) emptyState) $ do
-
+initInfers :: Spine -> ([(String,Spine)],Spine)
+initInfers (Spine "#infer#" [ty, Abs nm' _ v]) = (lst++(nm',ty'):lst' , v')
+  where (lst , ty') = initInfers ty
+        (lst' , v') = initInfers v
+initInfers (Spine c l) = (concat insts, Spine c l')
+  where (insts,l') = unzip $ map initInfers l
+initInfers (Abs nm ty r) = (l1++l2, Abs nm ty' r')
+  where (l1,ty') = initInfers ty
+        (l2,r') = initInfers r
+        
+-- this is entirely correct, but way slow on bigger programs!
+fullProgramInfer :: [(Maybe Name,Name,Spine,Type)] -> Choice ContextMap
+fullProgramInfer lst = (\r -> (\(a,_,_) -> a) <$> runRWST r envConsts emptyState) $ do
+  lst <- return $ topoSortAxioms lst
   
+  forM_ lst $ \(_,nm,val,ty) -> do
+    let (exis,val') = initInfers val
+        
+    forM_ exis $ \(nm,v) -> do
+      modifyCtxt $ addToTail "-fpi-" Exists nm v
+    modifyCtxt $ addToTail "-fpip-" Forall nm val'
+    
   
---  return $ undefined
+  cons <- forM lst $ \(_,nm,val,ty) -> do
+
+    val :@: ty <- regenAbsVars $ val :@: ty
+    (sp,cons) <- checkFullType val ty
+    return ((nm,sp), cons)
+    
+  let (lst,conses) = unzip cons
+      constraint = foldr (\(nm,ty) b -> (∀) nm ty b) (mconcat conses) lst
+    
+  sub <- unify constraint
+  
+  return $ M.fromList $ map (\(n,v) -> (n,unsafeSubst sub v)) lst
+
+
 
 typeInfer :: ContextMap -> (Name,Spine,Type) -> Choice ContextMap
 typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
-
   (val,constraint) <- appendErr ("in name: "++nm++" : "++show val) $ 
                       trace ("Checking: " ++nm) $ 
                       vtrace 0 ("\tVAL: " ++show val  

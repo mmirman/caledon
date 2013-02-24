@@ -144,9 +144,17 @@ rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
 rebuildSpine (Spine "#imp_abs#" [_, Abs nm ty rst]) apps = case findTyconInPrefix nm apps of 
   Just (v, apps) -> rebuildSpine (Abs nm ty rst) (v:apps)
-  Nothing -> seq sp $ infer nm ty $ rebuildSpine sp apps
+  Nothing -> seq sp $ case ty of -- proof irrelevance hack
+                       Spine "atom" [] -> -- we know we can prove that type "atom" is inhabited
+                         if S.member nm $ freeVariables rs 
+                         then irs -- the proof doesn't matter
+                         else rs -- the proof matters
+                       _ -> irs -- here, the proof might matter, but we don't know if we can prove the thing, 
+                                -- so we need to try
      where nm' = newNameFor nm $ freeVariables apps
            sp = subst (nm |-> var nm') rst
+           rs = rebuildSpine sp apps
+           irs = infer nm ty rs
 rebuildSpine (Spine c apps) apps' = Spine c $ apps ++ apps'
 rebuildSpine (Abs nm _ rst) (a:apps') = let sp = subst (nm |-> a) $ rst
                                         in seq sp $ rebuildSpine sp apps'
@@ -299,8 +307,9 @@ regen e a b = do
   b' <- regenAbsVars b 
   return $ e a' b'
 instance RegenAbsVars Spine where  
+  regenAbsVars (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a ty <$> regenAbsVars r
   regenAbsVars (Abs a ty r) = do
-    a' <- getNewWith "@new"
+    a' <- getNewWith $ "@new"
     ty' <- regenAbsVars ty
     r' <- regenAbsVars $ subst (a |-> var a') r
     return $ Abs a' ty' r'

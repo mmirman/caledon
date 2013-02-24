@@ -65,12 +65,18 @@ defn =:= : {q} q -> q -> atom
 -- searching for these is SLOW
 fixity none 0 /\
 defn /\ : atom -> atom -> atom
-   | and = [a b:atom] a -> b -> a /\ b
+   | and = [a b : atom] a -> b -> a /\ b
 
 fixity none 0 \/
 defn \/ : atom -> atom -> atom
    | or1 = [a b:atom] a -> a \/ b
    | or2 = [a b:atom] b -> a \/ b
+
+fixity left 0 ==
+-- currently we can't do any inference inside of definitional signatures
+defn == : {q : atom} (q -> atom) -> q -> atom 
+  as ?\q . \foo : q -> atom . \v : q . foo v
+
 
 --------------
 --- concat ---
@@ -91,21 +97,15 @@ defn ++ : {M}{Foo}{cm : concatable M Foo} M -> M -> M -> atom
 -------------
 --- Order ---
 -------------
-
-defn orderable : [M] (M -> M -> atom) -> atom
+defn orderable : [M : atom] (M -> M -> atom) -> atom
    | orderableNatural = orderable natural lte-nat
 
-fixity right 3 ≤ 
-defn ≤ : {M}{Foo}{co : orderable M Foo} M -> M -> atom
-   | ooimp = [M][Foo : M -> M -> atom][M1 M2 : M] 
-           (≤) {M = M} M1 M2 
+fixity right 3 =< 
+defn =< : {M : atom}{Foo: M -> M -> atom}{co : orderable M Foo} M -> M -> atom
+   | ooimp = [M][Foo : M -> M -> atom] [M1 M2 : M] 
+           (=<) {M = M} M1 M2 
           <- orderable M Foo
           <- Foo M1 M2
-
---fixity none 2 ≥
---defn ≥ : {M : atom}{Foo : M -> M -> atom }{co : orderable M Foo} M -> M -> atom
---  as ?\M : atom . ?\Foo : M -> M -> atom . ?\co : orderable M Foo . \M1 M2 : M . (≤) {M = M}{Foo = Foo}{co = co} M2 M1
-
 
 ---------------------
 --- Unary Numbers ---
@@ -114,14 +114,15 @@ defn natural  : atom
    | zero = natural
    | succ = natural -> natural
 
-query findSat1 = exists A . A =:= zero
+query findSat0 = exists A . A =:= zero
 
 defn add   : natural -> natural -> natural -> atom
    | add_z = [N] add zero N N
    | add_s = [N M R] add N M R -> add (succ N) M (succ R)
 
 query add0 = add (succ zero) zero (succ zero)
-query add1 = (++) (succ zero) zero (succ zero)
+
+query add1 = succ zero ++ zero == succ zero
 
 -- sub N M R is N - M = R
 defn sub   : natural -> natural -> natural -> atom
@@ -137,17 +138,13 @@ defn < : natural -> natural -> atom
    | ltZero = [B] zero < succ B
    | ltSucc = [A B] succ A < succ B <- A < B
 
--- query add2 = exists A : natural . add (succ zero) zero A
+query add2 = exists A : natural . add (succ zero) zero A
 
--- query add3 = any $ add (succ zero) zero
+query add3 = any $ add (succ zero) zero
 
--- query findSat2 = succ zero ≤ succ (succ zero) /\ succ zero ≤ succ zero
+query findSat1 = succ zero =< succ (succ zero)
 
--- defn pred : natural -> atom
---   | predimp = [A : natural] zero < A -> A < succ (succ zero) -> pred A
-
--- query findSat3 = exists A: natural.  pred A
-
+query findSat2 = succ zero =< succ (succ zero) /\ zero =< succ (succ zero)
 
 -------------
 --- Maybe ---
@@ -207,3 +204,4 @@ query main = run $ do
 	  	 , readLine ( \A . do 
    		 , putStr A
                  , putStr "\nbye!\n")
+
