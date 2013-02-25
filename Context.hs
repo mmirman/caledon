@@ -237,3 +237,9 @@ typeCheckToEnv m = listen $ runContT m return
 
 addToEnv :: (Name -> Spine -> Constraint -> Constraint) -> Name  -> Spine -> TypeChecker a -> TypeChecker a
 addToEnv e x ty = mapContT (censor $ e x ty) . liftLocal ask local (M.insert x ty)
+
+----------------------
+--- Universe Monad ---
+----------------------
+
+  

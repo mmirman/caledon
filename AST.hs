@@ -363,3 +363,9 @@ isChar _ = False
 
 
 
+type Universe = Integer
+
+data UType = UType :~>: UType
+           | UType Universe
+
+data UCons = Universe :<: Universe

@@ -539,7 +539,7 @@ checkType sp ty = case sp of
     tyB <- addToEnv (∀) x tyA $ checkType tyB atom
     ty ≐ atom
     return $ forall x tyA tyB
-    
+
   -- below are the only cases where bidirectional type checking is useful 
   Spine "#imp_abs#" [_, Abs x tyA sp] -> case ty of
     Spine "#imp_forall#" [_, Abs x' tyA' tyF'] -> do
@@ -637,7 +637,6 @@ fullProgramInfer lst = (\r -> (\(a,_,_) -> a) <$> runRWST r envConsts emptyState
     forM_ exis $ \(nm,v) -> do
       modifyCtxt $ addToTail "-fpi-" Exists nm v
     modifyCtxt $ addToTail "-fpip-" Forall nm val'
-    
   
   cons <- forM lst $ \(_,nm,val,ty) -> do
 
@@ -651,8 +650,6 @@ fullProgramInfer lst = (\r -> (\(a,_,_) -> a) <$> runRWST r envConsts emptyState
   sub <- unify constraint
   
   return $ M.fromList $ map (\(n,v) -> (n,unsafeSubst sub v)) lst
-
-
 
 typeInfer :: ContextMap -> (Name,Spine,Type) -> Choice ContextMap
 typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
@@ -683,8 +680,6 @@ typeCheckAxioms lst = do
   let notval (_,'#':'v':':':_,_,_) = False
       notval _ = True
       
-      tlst = topoSortAxioms lst
-      
       tys = M.fromList $ map (\(_,nm,ty,_) -> (nm,ty)) $ filter notval lst
       
       inferAll (l , []) = return l
@@ -702,7 +697,8 @@ typeCheckAxioms lst = do
             where sub = nm' |-> (l' M.! nm)        
           _ -> (l', toplst)
 
-  inferAll (mempty, tlst)        
+  l <- inferAll (mempty, topoSortAxioms lst)
+  return l 
   
 typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = do

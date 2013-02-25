@@ -54,7 +54,6 @@ defn @ : {a b c:atom} (b -> c) -> (a -> b) -> a -> c
 defn flip : {a b c : atom} (a -> b -> c) -> b -> a -> c
   as ?\ at bt ct : atom . \ foo . \ b . \ a . foo a b
 
-
 -------------------
 --- Constraints ---
 -------------------
@@ -201,7 +200,7 @@ defn not : bool -> bool -> atom
 
 query main = run $ do 
                  , putStr "hey!\n"
-	  	 , readLine ( \A . do 
+	  	 , readLine (\A . do 
    		 , putStr A
                  , putStr "\nbye!\n")
 
