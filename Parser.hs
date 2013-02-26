@@ -219,8 +219,8 @@ tipe = do
                 , regPostfix angles ["??"] ["infer"] infer
                 , regPostfix brackets ["∀"] ["forall"] forall
                 , regPostfix braces ["?∀"] ["?forall"] imp_forall
-                ]++[ altPostfix [op] [] (\nm t s -> Spine op [t,Abs nm t s] ) | op <- opLams ]
-                ++[ altPostfix [] [op] (\nm t s -> Spine op [t,Abs nm t s] ) | op <- strLams ]
+                ]++[ altPostfix [op] [] (\nm t s -> Spine op [t,Abs nm hole s] ) | op <- opLams ]
+                ++[ altPostfix [] [op] (\nm t s -> Spine op [t,Abs nm hole s] ) | op <- strLams ]
               , [ binary forall AssocRight $ reservedOp "->" <|> reservedOp "→" 
                 , binary imp_forall AssocRight $ reservedOp "=>" <|> reservedOp "⇒"
                 ]
@@ -295,6 +295,8 @@ tipe = do
       myParens s m = between (symbol "(" <?> ("("++s)) (symbol ")" <?> (s++")")) m
       
   ptipe <?> "tipe"
+
+hole = infer "#" atom $ infer "#" (var "#") $ var "#"
 
 reservedOperators = [ "->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", 
                      "\\", "?\\", 

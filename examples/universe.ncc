@@ -1,0 +1,25 @@
+fixity right 0 $
+defn $ : {a b:atom} (a -> b) -> a -> b
+  as ?\At Bt :atom . \ F . \A . F A  
+
+fixity pre 1 ♢
+fixity lambda Π 
+fixity lambda lam 
+
+{- 
+the implicit argument is pretty much always intiialized to ty
+tm basically says
+t in tm K T has type T where T has kind K.
+-}
+defn tm : {T : tm ty} tm T → atom
+   | ty  = tm ty
+   | ♢   = tm ty -> tm ty
+   | Π   = [T : tm ty] (tm T -> tm T) -> tm $ ♢ T
+   | lam = [T : tm ty][F : tm T -> tm T] tm {T = ♢ T} (Π A : T . F A)
+   | raise = {T : tm ty} tm T -> tm $ ♢ T
+
+defn isTm : {T : tm ty} {A : tm T} tm A -> atom
+   | hasValue = [T : tm ty][S : tm T][A : tm S] isTm A
+
+query whattype0 = isTm (Π A : ty . A)
+query whattype1 = isTm (lam A : ty . A)
