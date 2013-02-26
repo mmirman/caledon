@@ -7,7 +7,7 @@ fixity lambda Π
 fixity lambda lam 
 
 {- 
-the implicit argument is pretty much always intiialized to ty
+the implicit argument is pretty much always intialized to ty
 tm basically says
 t in tm K T has type T where T has kind K.
 -}
