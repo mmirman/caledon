@@ -29,8 +29,8 @@ type Name = String
 
 infixr 0 ~>
 infixr 0 ~~>
-(~>) = forall "#"
-(~~>) = imp_forall "#"
+(~>) = forall ""
+(~~>) = imp_forall ""
 
 data Spine = Spine !Name ![Type]
            | Abs !Name !Type !Spine 
@@ -166,6 +166,7 @@ newNameFor nm fv = nm'
         free k = not $ S.member k fv
         
 newName :: Name -> Map Name Spine -> S.Set Name -> (Name, Map Name Spine, S.Set Name)
+newName "" so fo = ("",so,fo)
 newName nm so fo = (nm',s',f')
   where s = M.delete nm so  
         -- could reduce the size of the free variable set here, but for efficiency it is not really necessary

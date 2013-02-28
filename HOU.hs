@@ -463,12 +463,12 @@ rightSearch m goal = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $
       targets <- case mfam of
         Just (nm,t) -> return $ [(nm,t)]
         Nothing -> do
---          let excludes = S.toList $ S.intersection (M.keysSet exists) $ freeVariables m
---          searchMaps <- mapM getVariablesBeforeExists excludes
+          let excludes = S.toList $ S.intersection (M.keysSet exists) $ freeVariables m
+          searchMaps <- mapM getVariablesBeforeExists excludes
           
-          let searchMap = env {- M.union env $ case searchMaps of
+          let searchMap = M.union env $ case searchMaps of
                 [] -> mempty
-                a:l -> foldr (M.intersection) a l -}
+                a:l -> foldr (M.intersection) a l
                 
           return $ filter sameFamily $ M.toList searchMap
       
