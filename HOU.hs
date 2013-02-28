@@ -269,7 +269,6 @@ getBase _ a = a
 
 makeBind xN us tyl arg = foldr (uncurry Abs) (Spine xN $ map var arg) $ zip us tyl
 
--- TODO: make sure this is correct.  its now just a modification of gvar_gvar_diff!
 gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine _ y'l), _) = do
   aty <- regenAbsVars aty
   let n = length yl
@@ -514,7 +513,6 @@ search ty = do
 (≐) a b = lift $ tell $ SCons [a :=: b]
 (.@.) a b = lift $ tell $ SCons [a :@: b]
 
--- TODO: flatten constraints here for even more speed (never should we have to deal with the heirarchy)!
 checkType :: Spine -> Type -> TypeChecker Spine
 checkType sp ty = case sp of
   Spine "#ascribe#" (t:v:l) -> do
@@ -651,17 +649,21 @@ fullProgramInfer lst = (\r -> (\(a,_,_) -> a) <$> runRWST r envConsts emptyState
   
   return $ M.fromList $ map (\(n,v) -> (n,unsafeSubst sub v)) lst
 
-typeInfer :: ContextMap -> (Name,Spine,Type) -> Choice ContextMap
+typeInfer :: ContextMap -> (Name,Spine,Type) -> Choice (Term,ContextMap)
 typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
+  val <- return $ alphaConvert mempty val
+  (val,mem) <- regenWithMem val
+  
   (val,constraint) <- appendErr ("in name: "++nm++" : "++show val) $ 
                       trace ("Checking: " ++nm) $ 
                       vtrace 0 ("\tVAL: " ++show val  
                                 ++"\n\t:: " ++show ty) $ checkFullType val ty
   sub <- unify constraint
   
-  let res = unsafeSubst sub val
+  let res = rebuildFromMem mem $ unsafeSubst sub val
+
   vtrace 0 ("RESULT: "++nm++" : "++show res) $
-      return $ M.insert nm res env
+      return $ (res, M.insert nm res env)
 
 unsafeSubst s (Spine nm apps) = let apps' = unsafeSubst s <$> apps in case s ! nm of 
   Just nm -> rebuildSpine nm apps'
@@ -684,17 +686,20 @@ typeCheckAxioms lst = do
       
       inferAll (l , []) = return l
       inferAll (l , (fam,nm,val,ty):toplst) = do
+
+        (val,l') <- appendErr ("can not infer type for: "
+                               ++"\nWITH: "++nm++ " : "++show ty
+                               ++"\nAS:   "++nm++ " = "++show val
+                              ) $ 
+                    typeInfer (tys *** l) (nm, val,ty) -- constrain the breadth first search to be local!
+                    
+        -- do the family check after ascription removal and typechecking because it can involve computation!
         unless (fam == Nothing || Just (getFamily val) == fam)
           $ throwTrace 0 $ "not the right family: need "++show fam++" for "++nm ++ " = " ++show val        
-        l' <- appendErr ("can not infer type for: "
-                        ++"\nWITH: "++nm++ " : "++show ty
-                        ++"\nAS:   "++nm++ " = "++show val
-                        ) $ 
-              typeInfer (tys *** l) (nm, val,ty) -- constrain the breadth first search to be local! 
-
+          
         inferAll $ case nm of
           '#':'v':':':nm' -> (subst sub <$> l', (\(fam,nm,val,ty) -> (fam,nm,subst sub val, subst sub ty)) <$> toplst) 
-            where sub = nm' |-> (l' M.! nm)        
+            where sub = nm' |-> val  -- the ascription isn't necessary because we don't have unbound variables
           _ -> (l', toplst)
 
   l <- inferAll (mempty, topoSortAxioms lst)

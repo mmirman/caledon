@@ -9,17 +9,17 @@ fixity lambda lam
 {- 
 the implicit argument is pretty much always intialized to ty
 tm basically says
-t in tm K T has type T where T has kind K.
+t in tm S T has type T where T has sort S.
 -}
-defn tm : {T : tm ty} tm T → atom
+defn tm : {S : tm ty} tm S → atom
    | ty  = tm ty
    | ♢   = tm ty -> tm ty
-   | Π   = [T : tm ty] (tm T -> tm T) -> tm $ ♢ T
-   | lam = [T : tm ty][F : tm T -> tm T] tm {T = ♢ T} (Π A : T . F A)
-   | raise = {T : tm ty} tm T -> tm $ ♢ T
+   | Π   = [T : tm ty] (tm T → tm T) → tm $ ♢ T
+   | lam = [T : tm ty][F : tm T → tm T] tm {S = ♢ T} (Π A : T . F A)
+   | raise = {T : tm ty} tm T → tm $ ♢ T
 
-defn isTm : {T : tm ty} {A : tm T} tm A -> atom
-   | hasValue = [T : tm ty][S : tm T][A : tm S] isTm A
+defn isTm : {S : tm ty} {A : tm S} tm A -> atom
+   | hasValue = [S : tm ty][T : tm S][V : tm T] isTm V
 
 query whattype0 = isTm (Π A : ty . A)
 query whattype1 = isTm (lam A : ty . A)

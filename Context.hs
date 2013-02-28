@@ -34,7 +34,7 @@ data Binding = Binding { elmQuant :: Quant
                        } deriving (Show)
                
 instance Subst Binding where
-  subst !sub !b = b { elmType = subst sub $! elmType b }
+  substFree sub f b = b { elmType = substFree sub f $! elmType b }
                     
 data Context = Context { ctxtHead :: Maybe Name
                        , ctxtMap  :: Map Name Binding
@@ -42,7 +42,7 @@ data Context = Context { ctxtHead :: Maybe Name
                        } deriving (Show)
                                   
 instance Subst Context where               
-  subst !sub !b = b { ctxtMap = subst sub <$> ctxtMap b }
+  substFree sub f b = b { ctxtMap = substFree sub f <$> ctxtMap b }
 
 lookupWith s a ctxt = case M.lookup a ctxt of
   Just r -> r

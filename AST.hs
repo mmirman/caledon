@@ -57,7 +57,7 @@ getNew = do
   st <- takeValue <$> get
   let n = 1 + st
   modify $ putValue n
-  return $! show n
+  return $ show n
   
 getNewWith :: (Functor f, MonadState c f, ValueTracker c) => String -> f String
 getNewWith s = {- (++s) <$> -} getNew
@@ -90,6 +90,7 @@ instance Show Spine where
   show (Spine "#tycon#" [Spine nm [t]]) = "{"++nm++" = "++show t++"}"
   show (Spine "#exists#" [_,Abs nm t t']) = "∃ "++nm++" : "++show t++". "++show t' 
   show (Spine "#imp_abs#" [_,Abs nm ty t]) = "?λ "++nm++" : "++showWithParens ty++" . "++show t
+  show (Spine nm l@[_ , Abs _ _ _]) | isOperator nm = "("++nm++") "++show (Spine "" l)
   show (Spine nm (t:t':l)) | isOperator nm = "( "++showWithParens t++" "++nm++" "++ show t'++" )"++show (Spine "" l)
   show (Spine h l) = h++concatMap showWithParens' l
      where showWithParens' t = " "++if case t of
@@ -164,32 +165,69 @@ newNameFor nm fv = nm'
   where nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/?") [0..]
         free k = not $ S.member k fv
         
-newName :: Name -> Map Name Spine -> (Name, Map Name Spine)
-newName nm so = (nm',s')
-  where s = M.delete nm so
-        s' = if nm == nm' then s else M.insert nm (var nm') s 
+newName :: Name -> Map Name Spine -> S.Set Name -> (Name, Map Name Spine, S.Set Name)
+newName nm so fo = (nm',s',f')
+  where s = M.delete nm so  
+        -- could reduce the size of the free variable set here, but for efficiency it is not really necessary
+        -- for beautification of output it is
+        (s',f') = if nm == nm' then (s,fo) else (M.insert nm (var nm') s , S.insert nm' fo)
         nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/") [0..]
         fv = mappend (M.keysSet s) (freeVariables s)
         free k = not $ S.member k fv
 
 class Subst a where
-  subst :: Substitution -> a -> a
+  substFree :: Substitution -> S.Set Name -> a -> a
+  
+subst s = substFree s $ freeVariables s
+
+class Alpha a where  
+  alphaConvert :: S.Set Name -> a -> a
+  rebuildFromMem :: Map Name Name -> a -> a  
+  
 instance Subst a => Subst [a] where
-  subst foo !t = subst foo <$> t
+  substFree s f t = substFree s f <$> t
+  
+instance Alpha a => Alpha [a] where  
+  alphaConvert s l = alphaConvert s <$> l
+  rebuildFromMem s l = rebuildFromMem s <$> l
+  
 instance (Subst a, Subst b) => Subst (a,b) where
-  subst foo (!a,!b) = (subst foo a , subst foo b)
+  substFree s f ~(a,b) = (substFree s f a , substFree s f b)
+  
 instance Subst Spine where
-  subst s (Abs !nm !tp !rst) = Abs nm' (subst s tp) $ subst s' rst
-    where (nm',s') = newName nm s
-  subst s (Spine "#tycon#" [Spine c [!v]]) = Spine "#tycon#" [Spine c [subst s v]]
-  subst s (Spine !nm !apps) = let apps' = subst s <$> apps  in
+  substFree s f (Spine "#imp_forall#" [_, Abs nm tp rst]) = case S.member nm f of
+    False -> imp_forall nm (substFree s f tp) $ substFree (M.delete nm s) f rst
+    True -> error "can not capture free variables because I can not alpha convert"
+  substFree s f (Spine "#imp_abs#" [_, Abs nm tp rst]) = case S.member nm f of
+    False  -> imp_abs nm (substFree s f tp) $ substFree (M.delete nm s) f rst 
+    True   -> error "can not capture free variables because I can not alpha convert"
+  
+  substFree s f (Abs nm tp rst) = Abs nm' (substFree s f tp) $ substFree s' f' rst
+    where (nm',s',f') = newName nm s f
+  substFree s f (Spine "#tycon#" [Spine c [v]]) = Spine "#tycon#" [Spine c [substFree s f v]]
+  substFree s f (Spine nm apps) = let apps' = substFree s f <$> apps  in
     case s ! nm of
       Just nm -> rebuildSpine nm apps'
       _ -> Spine nm apps'
+      
+instance Alpha Spine where
+  alphaConvert s (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a ty $ alphaConvert (S.insert a s) r
+  alphaConvert s (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a ty $ alphaConvert (S.insert a s) r
+  alphaConvert s (Abs nm ty r) = Abs nm' (alphaConvert s ty) $ alphaConvert (S.insert nm' s) r
+    where nm' = newNameFor nm s
+  alphaConvert s (Spine a l) = Spine a $ alphaConvert s l
+  
+  rebuildFromMem s (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a ty $ rebuildFromMem (M.delete a s) r
+  rebuildFromMem s (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a ty $ rebuildFromMem (M.delete a s) r
+  rebuildFromMem s (Abs nm ty r) = Abs (fromMaybe nm $ M.lookup nm s) (rebuildFromMem s ty) $ rebuildFromMem s r
+  rebuildFromMem s (Spine a l) = Spine a' $ rebuildFromMem s l
+    where a' = fromMaybe a $ M.lookup a s
+                                 
+  
 instance Subst Predicate where
-  subst sub (Predicate nm ty cons) = Predicate nm (subst sub ty) ((\(nm,t) -> (nm,subst sub t)) <$> cons)
-  subst sub (Query nm ty) = Query nm (subst sub ty)
-  subst sub (Define nm val ty) = Define nm (subst sub val) (subst sub ty)
+  substFree sub f (Predicate nm ty cons) = Predicate nm (substFree sub f ty) ((\(nm,t) -> (nm,substFree sub f t)) <$> cons)
+  substFree sub f (Query nm ty) = Query nm (substFree sub f ty)
+  substFree sub f (Define nm val ty) = Define nm (substFree sub f val) (substFree sub f ty)
   
 class FV a where         
   freeVariables :: a -> S.Set Name
@@ -262,31 +300,77 @@ instance Monoid Constraint where
  #-}
 
 instance Subst SCons where
-  subst s c = case c of
-    s1 :@: s2 -> subq s (:@:) s1 s2
-    s1 :=: s2 -> subq s (:=:) s1 s2    
+  substFree s f c = case c of
+    s1 :@: s2 -> subq s f (:@:) s1 s2
+    s1 :=: s2 -> subq s f (:=:) s1 s2
+    
 instance Subst Constraint where
-  subst s c = case c of
-    SCons l -> SCons $ map (subst s) l
-    s1 :&: s2 -> subq s (:&:) s1 s2
-    Bind q nm t c -> Bind q nm' (subst s t) $ subst s' c
-      where (nm',s') = newName nm s
-
-subq s e c1 c2 = e (subst s c1) (subst s c2)
+  substFree s f c = case c of
+    SCons l -> SCons $ map (substFree s f) l
+    s1 :&: s2 -> subq s f (:&:) s1 s2
+    Bind q nm t c -> Bind q nm' (substFree s f t) $ substFree s' f' c
+      where (nm',s',f') = newName nm s f
+            
+subq s f e c1 c2 = e (substFree s f c1) (substFree s f c2)
 
 (∃) = Bind Exists
 (∀) = Bind Forall
+  
+infixr 0 <<$>
+(<<$>) f m = ( \(a,b) -> (f a, b)) <$> m
 
+regenM e a b = do
+  (a',s1) <- regenWithMem a 
+  (b',s2) <- regenWithMem b 
+  return $ (e a' b', M.union s1 s2)
+regen e a b = do
+  a' <- regenAbsVars a 
+  b' <- regenAbsVars b 
+  return $ e a' b'  
+  
 class RegenAbsVars a where
   regenAbsVars :: (Functor f, MonadState c f, ValueTracker c) => a -> f a
+  regenWithMem :: (Functor f, MonadState c f, ValueTracker c) => a -> f (a, Map Name Name)
   
+instance RegenAbsVars l => RegenAbsVars [l] where
+  regenAbsVars cons = mapM regenAbsVars cons
+  
+  regenWithMem cons = together <$> mapM regenWithMem cons
+    where together f = (l',foldr M.union mempty ss)
+            where (l',ss) = unzip f
+  
+
+  
+instance RegenAbsVars Spine where  
+  regenAbsVars (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a ty <$> regenAbsVars r
+  regenAbsVars (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a ty <$> regenAbsVars r
+  regenAbsVars (Abs a ty r) = do
+    a' <- getNewWith $ "@new"
+    ty' <- regenAbsVars ty
+    r' <- regenAbsVars $ subst (a |-> var a') r
+    return $ Abs a' ty' r'
+  regenAbsVars (Spine a l) = Spine a <$> regenAbsVars l
+  
+  regenWithMem (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a ty <<$> regenWithMem r
+  regenWithMem (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a ty <<$> regenWithMem r
+  regenWithMem (Abs a ty r) = do
+    a' <- getNewWith $ "@regm"
+    (ty',s1) <- regenWithMem ty
+    (r', s2) <- regenWithMem $ subst (a |-> var a') r
+    return $ (Abs a' ty' r', M.insert a' a $ M.union s1 s2)
+  regenWithMem (Spine a l) = Spine a <<$> regenWithMem l
+
+
+
+
 instance RegenAbsVars SCons where
   regenAbsVars cons = case cons of
     a :=: b -> regen (:=:) a b
     a :@: b -> regen (:@:) a b
     
-instance RegenAbsVars [SCons] where
-  regenAbsVars cons = mapM regenAbsVars cons    
+  regenWithMem cons = case cons of
+    a :=: b -> regenM (:=:) a b
+    a :@: b -> regenM (:@:) a b    
     
 instance RegenAbsVars Constraint where  
   regenAbsVars cons = case cons of
@@ -300,21 +384,19 @@ instance RegenAbsVars Constraint where
         _ -> Bind q nm ty' <$> regenAbsVars cons
     SCons l -> SCons <$> regenAbsVars l
     a :&: b -> regen (:&:) a b
+    
+  regenWithMem cons = case cons of
+    Bind q nm ty cons -> do
+      (ty',s1) <- regenWithMem ty
+      nm' <- getNewWith "@regm'"
+      let sub = nm |-> var nm'
+      (cons',s2) <- regenWithMem $ subst sub cons
+      return (Bind q nm' ty' cons', M.insert nm' nm $ M.union s1 s2)
+    SCons l -> SCons <<$> regenWithMem l
+    a :&: b -> regenM (:&:) a b    
 
-
-regen e a b = do
-  a' <- regenAbsVars a 
-  b' <- regenAbsVars b 
-  return $ e a' b'
-instance RegenAbsVars Spine where  
-  regenAbsVars (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a ty <$> regenAbsVars r
-  regenAbsVars (Abs a ty r) = do
-    a' <- getNewWith $ "@new"
-    ty' <- regenAbsVars ty
-    r' <- regenAbsVars $ subst (a |-> var a') r
-    return $ Abs a' ty' r'
-  regenAbsVars (Spine a l) = Spine a <$> mapM regenAbsVars l
- 
+  
+  
 getFamily (Spine "#infer#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#ascribe#"  (_:v:_)) = getFamily v
 getFamily (Spine "#forall#" [_, Abs _ _ lm]) = getFamily lm
@@ -358,7 +440,7 @@ toNCCstring s = foldr cons nil $ map toNCCchar s
 
 envConsts = M.fromList consts
 
-isChar  ['\'',l,'\''] = True
+isChar  ['\'',_,'\''] = True
 isChar _ = False
 
 
