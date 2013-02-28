@@ -196,7 +196,7 @@ instance (Subst a, Subst b) => Subst (a,b) where
   substFree s f ~(a,b) = (substFree s f a , substFree s f b)
   
 instance Subst Spine where
-  substFree s f (Spine "#imp_forall#" [_, Abs nm tp rst]) = case S.member nm f of
+  substFree s f (Spine "#imp_forall#" [_, Abs nm tp rst]) = case "" /= nm && S.member nm f of
     False -> imp_forall nm (substFree s f tp) $ substFree (M.delete nm s) f rst
     True -> error "can not capture free variables because I can not alpha convert"
   substFree s f (Spine "#imp_abs#" [_, Abs nm tp rst]) = case S.member nm f of
@@ -443,12 +443,3 @@ envConsts = M.fromList consts
 
 isChar  ['\'',_,'\''] = True
 isChar _ = False
-
-
-
-type Universe = Integer
-
-data UType = UType :~>: UType
-           | UType Universe
-
-data UCons = Universe :<: Universe
