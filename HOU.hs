@@ -29,7 +29,7 @@ import Debug.Trace
 import System.IO.Unsafe
 
 {-# INLINE level #-}
-level = 0
+level = 2
 
 {-# INLINE vtrace #-}
 vtrace !i | i < level = trace
@@ -58,25 +58,15 @@ flatten (c1 :&: c2) = do
   return $ l1 ++ l2
 flatten (SCons l) = return l
 
-heuristic exists (a :@: b) = (nm , edges)
-  where searches = S.intersection (freeVariables a) exists
-        satisfying = S.intersection (freeVariables b) exists
-        nm = case S.toList satisfying of
-          [] -> getFamily b
-          a:_ -> a
-        edges = searches
-heuristic exists (a :=: b) = ("##"++show a++":=:"++show b, mempty)
-
 unify :: Constraint -> Env Substitution
 unify cons = do
   cons <- regenAbsVars cons
   cons <- flatten cons
   let uniWhile :: Substitution -> [SCons] -> Env (Substitution, [SCons])
       uniWhile !sub !c' = do
-        exists <- getExists        
-        c' <- regenAbsVars c'          
-        let c = c' -- reverse $ topoSort (heuristic $ M.keysSet exists) c'
-            -- eventually we can make the entire algorithm a graph modification algorithm for speed, 
+        exists <- getExists       
+        c <- regenAbsVars c'     
+        let -- eventually we can make the entire algorithm a graph modification algorithm for speed, 
             -- such that we don't have to topologically sort every time.  Currently this only takes us from O(n log n) to O(n) per itteration, it is
             -- not necessarily worth it.
             uniWith !wth !backup = do
@@ -112,7 +102,7 @@ checkFinished [] = return ()
 checkFinished cval = throwTrace 0 $ "ambiguous constraint: " ++show cval
 
 unifySearch :: SCons -> Env (Maybe (Substitution, [SCons]))
-unifySearch (a :@: b) | b /= var "atom" = do
+unifySearch (a :@: b) | b /= atom = do
   cons <- rightSearch a b
   return $ case cons of
     Nothing -> Nothing
@@ -135,6 +125,9 @@ unifyOne (a :=: b) = do
 unifyOne _ = return Nothing
 
 unifyEq cons@(a :=: b) = case (a,b) of 
+--  (a,k) | k == kind && (a == atom || a == tipe) -> return $ Just (mempty, [])
+--  (k,a) | k == kind && (a == atom || a == tipe) -> return $ Just (mempty, [])
+  
   (Spine "#imp_forall#" [ty, l], b) -> vtrace 1 "-implicit-" $ do
     a' <- getNewWith "@aL"
     modifyCtxt $ addToTail "-implicit-" Exists a' ty
@@ -439,6 +432,10 @@ rightSearch m goal = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $
           let ls = l `apply` s
           modifyCtxt $ addToTail "-rl-" Exists y ls
           return $ Just [m :=: Spine "readLineImp" [l,s, var y], var y :@: Spine "run" [ls]]
+    _ | goal == kind -> case m of
+      Abs{} -> error $ "improperly typed search: " ++ show m ++ " ∈ " ++ show goal
+      _ | m == atom || m == tipe -> return $ Just []
+      _ -> F.asum $ return . Just . (:[]) . (m :=:) <$> [tipe, atom]
     Spine nm _ -> do
       constants <- getConstants
       foralls <- getForalls
@@ -451,7 +448,7 @@ rightSearch m goal = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $
           getFixedType a = M.lookup a env
       
       let mfam = case m of 
-            Abs _ _ _ -> Nothing
+            Abs{} -> Nothing
             Spine nm _ -> case getFixedType nm of
               Just t -> Just (nm,t)
               Nothing -> Nothing
@@ -476,7 +473,7 @@ rightSearch m goal = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $
         then return $ Just []
         else case targets of
           [] -> return Nothing
-          _  -> Just <$> (F.asum $ (leftSearch m goal <$> reverse targets)) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
+          _  -> Just <$> (F.asum $ leftSearch m goal <$> reverse targets) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
 
 a .-. s = foldr (\k v -> M.delete k v) a s 
 
@@ -520,7 +517,12 @@ checkType sp ty = case sp of
     checkType (rebuildSpine v l) ty
   
   Spine "#infer#" [_, Abs x tyA tyB ] -> do
-    tyA <- checkType tyA atom
+    k <- getNewWith "@k"
+    tyA <- addToEnv (∃) k kind $ do
+      r <- checkType tyA (var k)
+      var k .@. kind
+      return r
+      
     x' <- getNewWith "@inf"
     addToEnv (∃) x' tyA $ do
       var x' .@. tyA
@@ -533,9 +535,14 @@ checkType sp ty = case sp of
     return $ imp_forall x tyA tyB
     
   Spine "#forall#" [_, Abs x tyA tyB] -> do
-    tyA <- checkType tyA atom
-    tyB <- addToEnv (∀) x tyA $ checkType tyB atom
-    ty ≐ atom
+--    k <- lift $ return atom <|> return tipe
+    k <- getNewWith "@k"
+    tyA <- addToEnv (∃) k kind $ do
+      r <- checkType tyA (var k)
+      var k .@. kind
+      return r
+
+    tyB <- addToEnv (∀) x tyA $ checkType tyB ty
     return $ forall x tyA tyB
 
   -- below are the only cases where bidirectional type checking is useful 
@@ -581,7 +588,7 @@ checkType sp ty = case sp of
               addToEnv (∃) x ty' $ do
                 var x .@. ty' 
                 -- we need to make sure that the type is satisfiable such that we can reapply it!
-                ( tycon nm (var x):) <$> (chop (subst (nm |-> var x) tyv) lst)
+                (tycon nm (var x):) <$> chop (subst (nm |-> var x) tyv) lst
 
             Just (val,l) -> do
               val <- checkType val ty'
@@ -614,41 +621,6 @@ checkFullType val ty = typeCheckToEnv $ checkType val ty
 ----------------------
 --- type inference ---
 ----------------------
-initInfers :: Spine -> ([(String,Spine)],Spine)
-initInfers (Spine "#infer#" [ty, Abs nm' _ v]) = (lst++(nm',ty'):lst' , v')
-  where (lst , ty') = initInfers ty
-        (lst' , v') = initInfers v
-initInfers (Spine c l) = (concat insts, Spine c l')
-  where (insts,l') = unzip $ map initInfers l
-initInfers (Abs nm ty r) = (l1++l2, Abs nm ty' r')
-  where (l1,ty') = initInfers ty
-        (l2,r') = initInfers r
-        
--- this is entirely correct, but way slow on bigger programs!
-fullProgramInfer :: [(Maybe Name,Name,Spine,Type)] -> Choice ContextMap
-fullProgramInfer lst = (\r -> (\(a,_,_) -> a) <$> runRWST r envConsts emptyState) $ do
-  lst <- return $ topoSortAxioms lst
-  
-  forM_ lst $ \(_,nm,val,ty) -> do
-    let (exis,val') = initInfers val
-        
-    forM_ exis $ \(nm,v) -> do
-      modifyCtxt $ addToTail "-fpi-" Exists nm v
-    modifyCtxt $ addToTail "-fpip-" Forall nm val'
-  
-  cons <- forM lst $ \(_,nm,val,ty) -> do
-
-    val :@: ty <- regenAbsVars $ val :@: ty
-    (sp,cons) <- checkFullType val ty
-    return ((nm,sp), cons)
-    
-  let (lst,conses) = unzip cons
-      constraint = foldr (\(nm,ty) b -> (∀) nm ty b) (mconcat conses) lst
-    
-  sub <- unify constraint
-  
-  return $ M.fromList $ map (\(n,v) -> (n,unsafeSubst sub v)) lst
-
 typeInfer :: ContextMap -> (Name,Spine,Type) -> Choice (Term,ContextMap)
 typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
   val <- return $ alphaConvert mempty val
@@ -685,6 +657,8 @@ typeCheckAxioms lst = do
       tys = M.fromList $ map (\(_,nm,ty,_) -> (nm,ty)) $ filter notval lst
       
       inferAll (l , []) = return l
+      inferAll (_ , (_,nm,_,_):_) | nm == tipeName = throwTrace 0 $ tipeName++" can not be overloaded"
+      inferAll (_ , (_,nm,_,_):_) | nm == atomName = throwTrace 0 $ atomName++" can not be overloaded"
       inferAll (l , (fam,nm,val,ty):toplst) = do
 
         (val,l') <- appendErr ("can not infer type for: "
@@ -707,9 +681,9 @@ typeCheckAxioms lst = do
   
 typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = do
-  let toAxioms (Predicate nm ty cs) = (Just "atom",nm,ty,atom):map (\(nm',ty') -> (Just nm,nm',ty',atom)) cs
+  let toAxioms (Predicate nm ty cs) = (Just $ atomName,nm,ty,tipe):map (\(nm',ty') -> (Just nm,nm',ty',atom)) cs
       toAxioms (Query nm val) = [(Nothing, nm,val,atom)]
-      toAxioms (Define nm val ty) = [(Nothing, nm,ty,atom), (Nothing, "#v:"++nm,val,ty)]
+      toAxioms (Define nm val ty) = [(Nothing, nm,ty,tipe), (Nothing, "#v:"++nm,val,ty)]
   tyMap <- typeCheckAxioms $ concatMap toAxioms preds
   
   let newPreds (Predicate nm _ cs) = Predicate nm (tyMap M.! nm) $ map (\(nm,_) -> (nm,tyMap M.! nm)) cs

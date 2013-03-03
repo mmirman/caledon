@@ -130,7 +130,7 @@ defn =  do
       none = do optional semi
                 return $ Predicate nm ty []
       letbe = do reserved "as"
-                 val <- tipe
+                 val <- pTipe
                  return $ Define nm val ty
   letbe <|> more <|> none <?> "definition"
 
@@ -156,7 +156,7 @@ named :: (Parser a, String) -> Parser (a, Type)
 named (ident, sep) = do
   nm <- ident
   reservedOp sep
-  ty <- tipe
+  ty <- pTipe
   return (nm, ty)
 
 tmpState :: String -> Parser a -> Parser a
@@ -175,7 +175,7 @@ pChar = toNCCchar <$> charLiteral
 pString = toNCCstring <$> stringLiteral
 
 
-tipe = do
+pTipe = do
   FixityTable bin prefix postfix opLams strLams binds <- currentTable <$> getState 
   
   let getSnd [] = []
@@ -195,9 +195,7 @@ tipe = do
         let (ident,sep) = decAnon
         nml <- many ident
         ty <- optionMaybe $ reservedOp sep >> ptipe
-        nm' <- getNextVar
-        nm'' <- getNextVar
-        return (nml,fromMaybe (infer nm' atom $ infer nm'' (var nm') $ var nm'') ty)
+        return (nml,fromMaybe tyhole ty)
 
       binary fun assoc name = flip Infix assoc $ do 
         name
@@ -219,8 +217,8 @@ tipe = do
                 , regPostfix angles ["??"] ["infer"] infer
                 , regPostfix brackets ["∀"] ["forall"] forall
                 , regPostfix braces ["?∀"] ["?forall"] imp_forall
-                ]++[ altPostfix [op] [] (\nm t s -> Spine op [t,Abs nm hole s] ) | op <- opLams ]
-                ++[ altPostfix [] [op] (\nm t s -> Spine op [t,Abs nm hole s] ) | op <- strLams ]
+                ]++[ altPostfix [op] [] (\nm t s -> Spine op [t,Abs nm tyhole s] ) | op <- opLams ]
+                ++[ altPostfix [] [op] (\nm t s -> Spine op [t,Abs nm tyhole s] ) | op <- strLams ]
               , [ binary forall AssocRight $ reservedOp "->" <|> reservedOp "→" 
                 , binary imp_forall AssocRight $ reservedOp "=>" <|> reservedOp "⇒"
                 ]
@@ -277,9 +275,7 @@ tipe = do
          <?> "operator"      
          
       pAt =  do reserved "_"
-                nm <- getNextVar
-                nm' <- getNextVar
-                return $ infer nm atom $ infer nm' (var nm) $ var nm'
+                return $ hole
          <|> do r <- idVar
                 return $ var r
          <|> do r <- identifier
@@ -297,6 +293,8 @@ tipe = do
   ptipe <?> "tipe"
 
 hole = infer "#" atom $ infer "#" (var "#") $ var "#"
+tyhole = infer "#" atom $ var "#"
+
 
 reservedOperators = [ "->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", 
                      "\\", "?\\", 
@@ -308,7 +306,7 @@ reservedOperators = [ "->", "=>", "<=", "⇐", "⇒", "→", "<-", "←",
 identRegOps = "_'-/"              
                     
 reservedNames = ["defn", "as", "query"    
-                , "forall", "exists", "?forall"
+                , "forall", "exists", "?forall", "lambda", "?lambda"
                 , "_" , "infer", "fixity"]
 
 mydef :: P.GenLanguageDef String ParseState Identity

@@ -109,7 +109,13 @@ instance Show Predicate where
   show (Define nm val ty) = "defn " ++ nm ++ " : " ++ show ty ++"\n as "++show val
                                                
 var !nm = Spine nm []
-atom = var "atom"
+atomName = "atom"
+tipeName = "type"
+kindName = "#kind#"
+
+atom = var atomName
+tipe = var tipeName
+kind = var kindName  -- can be either a type or an atom
 ascribe !a !t = Spine ("#ascribe#") [t, a]
 forall !x !tyA !v = Spine ("#forall#") [tyA, Abs x tyA v]
 exists !x !tyA !v = Spine ("#exists#") [tyA, Abs x tyA v]
@@ -145,13 +151,13 @@ rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
 rebuildSpine (Spine "#imp_abs#" [_, Abs nm ty rst]) apps = case findTyconInPrefix nm apps of 
   Just (v, apps) -> rebuildSpine (Abs nm ty rst) (v:apps)
-  Nothing -> seq sp $ case ty of -- proof irrelevance hack
-                       Spine "atom" [] -> -- we know we can prove that type "atom" is inhabited
-                         if S.member nm $ freeVariables rs 
-                         then irs -- the proof doesn't matter
-                         else rs -- the proof matters
-                       _ -> irs -- here, the proof might matter, but we don't know if we can prove the thing, 
-                                -- so we need to try
+  Nothing -> seq sp $ if ty == atom && S.notMember nm (freeVariables rs) then rs else irs 
+                      -- proof irrelevance hack
+                      -- we know we can prove that type "atom" is inhabited
+                      -- irs - the proof doesn't matter
+                      -- rs - the proof matters
+                      -- irs - here, the proof might matter, but we don't know if we can prove the thing, 
+                      -- so we need to try
      where nm' = newNameFor nm $ freeVariables apps
            sp = subst (nm |-> var nm') rst
            rs = rebuildSpine sp apps
@@ -410,7 +416,9 @@ getFamily (Spine nm' _) = nm'
 getFamily v = error $ "values don't have families: "++show v
 
 
-consts = [ ("atom", atom)
+consts = [ (atomName , tipe)
+         , (tipeName , kind)
+         -- atom : kind
          , ("#ascribe#", forall "a" atom $ (var "a") ~> (var "a"))
          , ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
