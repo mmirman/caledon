@@ -7,6 +7,6 @@ defn add   : num → num → num → atom
    | add-z = [N] add zero N N
    | add-s = [N][M][R] add N M R → add (succ N) M (succ R)
 
-query sum-1 = exists v . add (succ zero) (succ (succ zero)) v
+query sum-1 = exists v . add (succ zero) (succ zero) v
 -- query sum-2 = exists v . add (succ zero) v (succ (succ (succ zero)))
 -- query sum-3 = exists v . add zero (succ zero) v

@@ -292,8 +292,8 @@ pTipe = do
       
   ptipe <?> "tipe"
 
-hole = infer "#" atom $ infer "#" (var "#") $ var "#"
-tyhole = infer "#" atom $ var "#"
+hole =  var "#hole#"
+tyhole = var "#hole#"
 
 
 reservedOperators = [ "->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", 

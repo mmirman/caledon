@@ -29,7 +29,7 @@ import Debug.Trace
 import System.IO.Unsafe
 
 {-# INLINE level #-}
-level = 2
+level = 0
 
 {-# INLINE vtrace #-}
 vtrace !i | i < level = trace
@@ -125,9 +125,6 @@ unifyOne (a :=: b) = do
 unifyOne _ = return Nothing
 
 unifyEq cons@(a :=: b) = case (a,b) of 
---  (a,k) | k == kind && (a == atom || a == tipe) -> return $ Just (mempty, [])
---  (k,a) | k == kind && (a == atom || a == tipe) -> return $ Just (mempty, [])
-  
   (Spine "#imp_forall#" [ty, l], b) -> vtrace 1 "-implicit-" $ do
     a' <- getNewWith "@aL"
     modifyCtxt $ addToTail "-implicit-" Exists a' ty
@@ -432,10 +429,11 @@ rightSearch m goal = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $
           let ls = l `apply` s
           modifyCtxt $ addToTail "-rl-" Exists y ls
           return $ Just [m :=: Spine "readLineImp" [l,s, var y], var y :@: Spine "run" [ls]]
-    _ | goal == kind -> case m of
-      Abs{} -> error $ "improperly typed search: " ++ show m ++ " ∈ " ++ show goal
-      _ | m == atom || m == tipe -> return $ Just []
-      _ -> F.asum $ return . Just . (:[]) . (m :=:) <$> [tipe, atom]
+    _ | goal == kind -> do
+      case m of
+        Abs{} -> throwError "not properly typed"
+        _ | m == tipe || m == atom -> return $ Just []
+        _ -> F.asum $ return . Just . return . (m :=:) <$> [atom , tipe]
     Spine nm _ -> do
       constants <- getConstants
       foralls <- getForalls
@@ -510,37 +508,42 @@ search ty = do
 (≐) a b = lift $ tell $ SCons [a :=: b]
 (.@.) a b = lift $ tell $ SCons [a :@: b]
 
+withKind m = do
+  k <- getNewWith "@k"
+  addToEnv (∃) k kind $ do
+    r <- m $ var k
+    var k .@. kind
+    return r
+
 checkType :: Spine -> Type -> TypeChecker Spine
+checkType sp ty | ty == kind = withKind $ checkType sp
 checkType sp ty = case sp of
+  Spine "#hole#" [] -> do
+    x' <- getNewWith "@inf"
+    addToEnv (∃) x' ty $ do
+      var x' .@. ty
+      return $ var x'
+      
   Spine "#ascribe#" (t:v:l) -> do
     v <- checkType v t
     checkType (rebuildSpine v l) ty
   
   Spine "#infer#" [_, Abs x tyA tyB ] -> do
-    k <- getNewWith "@k"
-    tyA <- addToEnv (∃) k kind $ do
-      r <- checkType tyA (var k)
-      var k .@. kind
-      return r
-      
+    tyA <- withKind $ checkType tyA
+    
     x' <- getNewWith "@inf"
     addToEnv (∃) x' tyA $ do
       var x' .@. tyA
       checkType (subst (x |-> var x') tyB) ty
 
   Spine "#imp_forall#" [_, Abs x tyA tyB] -> do
-    tyA <- checkType tyA atom
-    tyB <- addToEnv (∀) x tyA $ checkType tyB atom
-    ty ≐ atom
+    tyA <- withKind $ checkType tyA
+    tyB <- addToEnv (∀) x tyA $ checkType tyB ty
     return $ imp_forall x tyA tyB
     
   Spine "#forall#" [_, Abs x tyA tyB] -> do
---    k <- lift $ return atom <|> return tipe
-    k <- getNewWith "@k"
-    tyA <- addToEnv (∃) k kind $ do
-      r <- checkType tyA (var k)
-      var k .@. kind
-      return r
+
+    tyA <- withKind $ checkType tyA
 
     tyB <- addToEnv (∀) x tyA $ checkType tyB ty
     return $ forall x tyA tyB
@@ -548,28 +551,28 @@ checkType sp ty = case sp of
   -- below are the only cases where bidirectional type checking is useful 
   Spine "#imp_abs#" [_, Abs x tyA sp] -> case ty of
     Spine "#imp_forall#" [_, Abs x' tyA' tyF'] -> do
-      tyA <- checkType tyA atom
+      tyA <- withKind $ checkType tyA
       tyA ≐ tyA'
       addToEnv (∀) x tyA $ do
         imp_abs x tyA <$> checkType sp (subst (x' |-> var x) tyF')
     _ -> do
       e <- getNewWith "@e"
-      tyA <- checkType tyA atom
-      addToEnv (∃) e (forall x tyA atom) $ do
+      tyA <- withKind $ checkType tyA
+      withKind $ \k -> addToEnv (∃) e (forall x tyA k) $ do
         imp_forall x tyA (Spine e [var x]) ≐ ty
         sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
         return $ imp_abs x tyA sp
 
   Abs x tyA sp -> case ty of
     Spine "#forall#" [_, Abs x' tyA' tyF'] -> do
-      tyA <- checkType tyA atom
+      tyA <- withKind $ checkType tyA
       tyA ≐ tyA'
       addToEnv (∀) x tyA $ do
         Abs x tyA <$> checkType sp (subst (x' |-> var x) tyF')
     _ -> do
       e <- getNewWith "@e"
-      tyA <- checkType tyA atom
-      addToEnv (∃) e (forall x tyA atom) $ do
+      tyA <- withKind $ checkType tyA
+      withKind $ \k -> addToEnv (∃) e (forall x tyA k) $ do
         forall x tyA (Spine e [var x]) ≐ ty
         Abs x tyA <$> (addToEnv (∀) x tyA $ checkType sp (Spine e [var x]))
   Spine nm [] | isChar nm -> do
@@ -596,12 +599,12 @@ checkType sp ty = case sp of
           Spine "#forall#" [ty', c] -> do
             a <- checkType a ty'
             (a:) <$> chop (c `apply` a) l
-          _ -> do  
+          _ -> withKind $ \k -> do  
             x <- getNewWith "@xin"
             z <- getNewWith "@zin"
             tybody <- getNewWith "@v"
-            let tybodyty = forall z (var x) atom
-            addToEnv (∃) x atom $ addToEnv (∃) tybody tybodyty $ do 
+            let tybodyty = forall z (var x) k
+            withKind $ \k' -> addToEnv (∃) x k' $ addToEnv (∃) tybody tybodyty $ do 
               a <- checkType a (var x)
               v <- getNewWith "@v"
               forall v (var x) (Spine tybody [var v]) ≐ mty
@@ -622,14 +625,14 @@ checkFullType val ty = typeCheckToEnv $ checkType val ty
 --- type inference ---
 ----------------------
 typeInfer :: ContextMap -> (Name,Spine,Type) -> Choice (Term,ContextMap)
-typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
+typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ appendErr ("in name: "++nm++" : "++show val) $ 
+                      trace ("Checking: " ++nm) $ 
+                      vtrace 0 ("\tVAL: " ++show val  
+                                ++"\n\t:: " ++show ty) $ do
   val <- return $ alphaConvert mempty val
   (val,mem) <- regenWithMem val
   
-  (val,constraint) <- appendErr ("in name: "++nm++" : "++show val) $ 
-                      trace ("Checking: " ++nm) $ 
-                      vtrace 0 ("\tVAL: " ++show val  
-                                ++"\n\t:: " ++show ty) $ checkFullType val ty
+  (val,constraint) <- checkFullType val ty
   sub <- unify constraint
   
   let res = rebuildFromMem mem $ unsafeSubst sub val
@@ -662,8 +665,7 @@ typeCheckAxioms lst = do
       inferAll (l , (fam,nm,val,ty):toplst) = do
 
         (val,l') <- appendErr ("can not infer type for: "
-                               ++"\nWITH: "++nm++ " : "++show ty
-                               ++"\nAS:   "++nm++ " = "++show val
+                               ++"\nAS:   "++nm++ " : "++show val ++" : "++show ty
                               ) $ 
                     typeInfer (tys *** l) (nm, val,ty) -- constrain the breadth first search to be local!
                     
@@ -683,7 +685,7 @@ typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = do
   let toAxioms (Predicate nm ty cs) = (Just $ atomName,nm,ty,tipe):map (\(nm',ty') -> (Just nm,nm',ty',atom)) cs
       toAxioms (Query nm val) = [(Nothing, nm,val,atom)]
-      toAxioms (Define nm val ty) = [(Nothing, nm,ty,tipe), (Nothing, "#v:"++nm,val,ty)]
+      toAxioms (Define nm val ty) = [(Nothing, nm,ty,kind), (Nothing, "#v:"++nm,val,ty)]
   tyMap <- typeCheckAxioms $ concatMap toAxioms preds
   
   let newPreds (Predicate nm _ cs) = Predicate nm (tyMap M.! nm) $ map (\(nm,_) -> (nm,tyMap M.! nm)) cs

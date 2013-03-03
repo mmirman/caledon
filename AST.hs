@@ -401,8 +401,6 @@ instance RegenAbsVars Constraint where
       return (Bind q nm' ty' cons', M.insert nm' nm $ M.union s1 s2)
     SCons l -> SCons <<$> regenWithMem l
     a :&: b -> regenM (:&:) a b    
-
-  
   
 getFamily (Spine "#infer#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#ascribe#"  (_:v:_)) = getFamily v
@@ -418,11 +416,17 @@ getFamily v = error $ "values don't have families: "++show v
 
 consts = [ (atomName , tipe)
          , (tipeName , kind)
+         , (kindName , kind)
          -- atom : kind
+           
          , ("#ascribe#", forall "a" atom $ (var "a") ~> (var "a"))
+         
          , ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
+           
          , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
+           
          , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))
+           
          , ("#exists#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("pack", forall "tp" atom 
                   $ forall "iface" (var "tp" ~> atom) 

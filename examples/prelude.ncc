@@ -29,8 +29,10 @@ defn string : atom
 defn any : {A : atom} (A -> atom) -> atom
    | is = [A : atom][V : A][F : A -> atom] F V -> any { A = A } F
 
+
 defn openAny : [A][F : A -> atom] any F -> [V : A] F V -> atom
    | openAnyDef = [A][F : A -> atom][V : A][FV : F V] openAny A F (is A V F FV) V FV
+
 
 defn sopen : {A : atom }{F : A -> atom} [V : A] F V => (exists v : A . F v) -> atom 
   as ?\a : atom . ?\ f : a -> atom . \vt : a . ?\ fv : f vt . \an : (exists v : a . f v) . open a f an vt fv
@@ -203,4 +205,3 @@ query main = run $ do
 	  	 , readLine (\A . do 
    		 , putStr A
                  , putStr "\nbye!\n")
-
