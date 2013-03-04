@@ -1,96 +1,96 @@
 ---------------
 -- builtins ---
 ---------------
-defn char : atom  -- builtin
+defn char : prop  -- builtin
 
-defn putChar    :  char -> atom -- builtin
+defn putChar    :  char -> prop -- builtin
    | putCharImp = [A] putChar A
 
 -- for sequencing io actions
 fixity left 1 ,
-defn io : atom
+defn io : prop
    | do = io
-   | ,  = io -> atom -> io 
+   | ,  = io -> prop -> io 
 
-defn run : io -> atom
+defn run : io -> prop
    | runDo = run do
    | runSeq = [A][B] run (A , B) <- run A 
                          	 <- B
 
-defn readLine    : (string -> io) -> atom -- builtin 
+defn readLine    : (string -> io) -> prop -- builtin 
    | readLineImp = [Foo : string -> io] [A : string] readLine Foo <- run (Foo A)
 
-defn string : atom
+defn string : prop
   as list char
 
 ---------------
 -- searches ---
 ---------------
-defn any : {A : atom} (A -> atom) -> atom
-   | is = [A : atom][V : A][F : A -> atom] F V -> any { A = A } F
+defn any : {A : prop} (A -> prop) -> prop
+   | is = [A : prop][V : A][F : A -> prop] F V -> any { A = A } F
 
 
-defn openAny : [A][F : A -> atom] any F -> [V : A] F V -> atom
-   | openAnyDef = [A][F : A -> atom][V : A][FV : F V] openAny A F (is A V F FV) V FV
+defn openAny : [A][F : A -> prop] any F -> [V : A] F V -> prop
+   | openAnyDef = [A][F : A -> prop][V : A][FV : F V] openAny A F (is A V F FV) V FV
 
 
-defn sopen : {A : atom }{F : A -> atom} [V : A] F V => (exists v : A . F v) -> atom 
-  as ?\a : atom . ?\ f : a -> atom . \vt : a . ?\ fv : f vt . \an : (exists v : a . f v) . open a f an vt fv
+defn sopen : {A : prop }{F : A -> prop} [V : A] F V => (exists v : A . F v) -> prop 
+  as ?\a : prop . ?\ f : a -> prop . \vt : a . ?\ fv : f vt . \an : (exists v : a . f v) . open a f an vt fv
 
 fixity lambda findOne
-defn findOne : [A : atom] (A -> atom) -> atom
-  as \a: atom . any { A = a }
+defn findOne : [A : prop] (A -> prop) -> prop
+  as \a: prop . any { A = a }
 
 --------------------------
 --- useful combinators ---
 --------------------------
 fixity right 0 $
-defn $ : {a b:atom} (a -> b) -> a -> b
+defn $ : {a b:prop} (a -> b) -> a -> b
   as ?\ at bt . \ f . \a . f a
 
 
 fixity right 0 @
-defn @ : {a b c:atom} (b -> c) -> (a -> b) -> a -> c
-  as ?\at bt ct : atom . \f : bt -> ct . \ g : at -> bt . \ a : at . f (g a)
+defn @ : {a b c:prop} (b -> c) -> (a -> b) -> a -> c
+  as ?\at bt ct : prop . \f : bt -> ct . \ g : at -> bt . \ a : at . f (g a)
 
-defn flip : {a b c : atom} (a -> b -> c) -> b -> a -> c
-  as ?\ at bt ct : atom . \ foo . \ b . \ a . foo a b
+defn flip : {a b c : prop} (a -> b -> c) -> b -> a -> c
+  as ?\ at bt ct : prop . \ foo . \ b . \ a . foo a b
 
 -------------------
 --- Constraints ---
 -------------------
 fixity none 1 =:=
-defn =:= : {q} q -> q -> atom
-   | eq = [a : atom][b:a] (=:=) {q = a} b b
+defn =:= : {q} q -> q -> prop
+   | eq = [a : prop][b:a] (=:=) {q = a} b b
 
 -- searching for these is SLOW
 fixity none 0 /\
-defn /\ : atom -> atom -> atom
-   | and = [a b : atom] a -> b -> a /\ b
+defn /\ : prop -> prop -> prop
+   | and = [a b : prop] a -> b -> a /\ b
 
 fixity none 0 \/
-defn \/ : atom -> atom -> atom
-   | or1 = [a b:atom] a -> a \/ b
-   | or2 = [a b:atom] b -> a \/ b
+defn \/ : prop -> prop -> prop
+   | or1 = [a b:prop] a -> a \/ b
+   | or2 = [a b:prop] b -> a \/ b
 
 fixity left 0 ==
 -- currently we can't do any inference inside of definitional signatures
-defn == : {q : atom} (q -> atom) -> q -> atom 
-  as ?\q . \foo : q -> atom . \v : q . foo v
+defn == : {q : prop} (q -> prop) -> q -> prop 
+  as ?\q . \foo : q -> prop . \v : q . foo v
 
 
 --------------
 --- concat ---
 --------------
-defn concatable : [M : atom] (M -> M -> M -> atom) -> atom
+defn concatable : [M : prop] (M -> M -> M -> prop) -> prop
    | concatableNat = concatable natural add
    | concatableList = [A] concatable (list A) concatList
 
 
 -- it correctly infers 169, and M (but it eta expands Foo when it infers it) !!
 fixity right 3 ++
-defn ++ : {M}{Foo}{cm : concatable M Foo} M -> M -> M -> atom
-   | ppimp = [M][Foo : M -> M -> M -> atom][M1 M2 M3 : M] 
+defn ++ : {M}{Foo}{cm : concatable M Foo} M -> M -> M -> prop
+   | ppimp = [M][Foo : M -> M -> M -> prop][M1 M2 M3 : M] 
               (++) {Foo = Foo} M1 M2 M3 
             <- concatable M Foo 
             <- Foo M1 M2 M3 
@@ -98,12 +98,12 @@ defn ++ : {M}{Foo}{cm : concatable M Foo} M -> M -> M -> atom
 -------------
 --- Order ---
 -------------
-defn orderable : [M : atom] (M -> M -> atom) -> atom
+defn orderable : [M : prop] (M -> M -> prop) -> prop
    | orderableNatural = orderable natural lte-nat
 
 fixity right 3 =< 
-defn =< : {M : atom}{Foo: M -> M -> atom}{co : orderable M Foo} M -> M -> atom
-   | ooimp = [M][Foo : M -> M -> atom] [M1 M2 : M] 
+defn =< : {M : prop}{Foo: M -> M -> prop}{co : orderable M Foo} M -> M -> prop
+   | ooimp = [M][Foo : M -> M -> prop] [M1 M2 : M] 
            (=<) {M = M} M1 M2 
           <- orderable M Foo
           <- Foo M1 M2
@@ -111,13 +111,13 @@ defn =< : {M : atom}{Foo: M -> M -> atom}{co : orderable M Foo} M -> M -> atom
 ---------------------
 --- Unary Numbers ---
 ---------------------
-defn natural  : atom
+defn natural  : prop
    | zero = natural
    | succ = natural -> natural
 
 query findSat0 = exists A . A =:= zero
 
-defn add   : natural -> natural -> natural -> atom
+defn add   : natural -> natural -> natural -> prop
    | add_z = [N] add zero N N
    | add_s = [N M R] add N M R -> add (succ N) M (succ R)
 
@@ -126,16 +126,16 @@ query add0 = add (succ zero) zero (succ zero)
 query add1 = succ zero ++ zero == succ zero
 
 -- sub N M R is N - M = R
-defn sub   : natural -> natural -> natural -> atom
+defn sub   : natural -> natural -> natural -> prop
    | sub_by_add = [N M R] sub N M R <- add M R N
 
 
-defn lte-nat : natural -> natural -> atom
+defn lte-nat : natural -> natural -> prop
    | leqZero = [B] lte-nat zero B
    | leqSucc = [A B] lte-nat (succ A) (succ B) <- lte-nat A B
 
 fixity none 3 <
-defn < : natural -> natural -> atom
+defn < : natural -> natural -> prop
    | ltZero = [B] zero < succ B
    | ltSucc = [A B] succ A < succ B <- A < B
 
@@ -151,18 +151,18 @@ query findSat2 = succ zero =< succ (succ zero) /\ zero =< succ (succ zero)
 --- Maybe ---
 -------------
 
-defn maybe : atom -> atom
+defn maybe : prop -> prop
    | nothing = {a} maybe a
    | just = {a} a -> maybe a
 
 -------------
 --- Lists ---
 -------------
-defn list : atom -> atom
+defn list : prop -> prop
    | nil  = {a} list a
    | cons = {a} a -> list a -> list a
 
-defn concatList : {A} list A -> list A -> list A -> atom
+defn concatList : {A} list A -> list A -> list A -> prop
    | concatListNil  = [T][L:list T] concatList {A = T} nil L L
    | concatListCons = [T][A B C : list T][V:T] concatList (cons V A) B (cons V C) <- concatList A B C
 
@@ -170,7 +170,7 @@ defn concatList : {A} list A -> list A -> list A -> atom
 --- printing ---
 ----------------
 
-defn putStr : string -> atom
+defn putStr : string -> prop
    | putStr_Nil = putStr $ nil {a = char}
    | putStr_Cons = [v:char][l: string] 
                    putStr $ cons {a = char} v l 
@@ -180,7 +180,7 @@ defn putStr : string -> atom
 ----------------
 --- Booleans ---
 ----------------
-defn bool : atom
+defn bool : prop
    | true = bool
    | false = bool
 
@@ -188,16 +188,16 @@ defn if : bool -> bool
   as \b . b
 
 fixity none 1 |:|
-defn |:| : {a:atom} a -> a -> (a -> a -> a) -> a
-  as ?\t : atom . \a b : t. \f : t -> t -> t. f a b
+defn |:| : {a:prop} a -> a -> (a -> a -> a) -> a
+  as ?\t : prop . \a b : t. \f : t -> t -> t. f a b
 
 
 fixity none 0 ==>
-defn ==> : {a : atom} bool -> ((a -> a -> a) -> a) -> a -> atom
-   | thentrue  = [a : atom][f: _ -> a] (true ==> f)  (f (\A B : a. A))
-   | thenfalse = [b : atom][f: _ -> b] (false ==> f) (f (\A B : b . B))
+defn ==> : {a : prop} bool -> ((a -> a -> a) -> a) -> a -> prop
+   | thentrue  = [a : prop][f: _ -> a] (true ==> f)  (f (\A B : a. A))
+   | thenfalse = [b : prop][f: _ -> b] (false ==> f) (f (\A B : b . B))
 
-defn not : bool -> bool -> atom
+defn not : bool -> bool -> prop
   as \a . if a ==> false |:| true
 
 query main = run $ do 

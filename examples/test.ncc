@@ -1,9 +1,9 @@
 
-defn num  : atom
+defn num  : prop
    | zero = num
    | succ = num → num
 
-defn add   : num → num → num → atom
+defn add   : num → num → num → prop
    | add-z = [N] add zero N N
    | add-s = [N][M][R] add N M R → add (succ N) M (succ R)
 

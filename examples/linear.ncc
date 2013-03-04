@@ -1,6 +1,6 @@
-defn trm : atom
+defn trm : prop
    | lam = (trm -> trm) -> trm
    | app = trm -> trm -> trm
 
-defn linear : (trm -> trm) -> atom
+defn linear : (trm -> trm) -> prop
    | linear_var = linear (λ V : trm . V )

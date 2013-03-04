@@ -1,2 +1,2 @@
-defn example : [ax : atom] ax -> atom
-  as eximp = [atx : atom] example atom atx
+defn example : [ax : prop] ax -> prop
+  as eximp = [atx : prop] example prop atx

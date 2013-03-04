@@ -1,12 +1,12 @@
-defn nat : atom
+defn nat : prop
    | z = nat
    | s = nat -> nat
 
-defn odd : nat -> atom
+defn odd : nat -> prop
    | odd/one = odd (s z)
    | odd/n = [A] even A -> odd (s A)
 
-defn even : nat -> atom
+defn even : nat -> prop
    | even/zero = even z
    | even/succ = [B] odd B -> even (s B)
 

@@ -44,26 +44,37 @@ Features
 * Logic programming:  Currently it uses a breadth first proof search. This is done for completeness, since the proof search is also used in type inference.  This could (and should) possibly change in the future for the running semantics of the language.
 
 ```
-defn num  : atom
+defn num  : prop
    | zero = num
    | succ = num -> num
 
-defn add  : num -> num -> num -> atom
+defn add  : num -> num -> num -> prop
    | add_zero = {N} add zero N N
    | add_succ = {N}{M}{R} add (succ N) M (succ R) <- add N M R
 
 -- we can define subtraction from addition!
 query subtract = add (succ (succ zero)) 'v (succ (succ (succ zero)))
 ```
+
+* Some basic IO: 
+
+```
+query main = run $ do 
+                 , putStr "hey!\n"
+	  	 , readLine (\A . do 
+   		 , putStr A
+                 , putStr "\nbye!\n")
+```
+
 * Higher order logic programming: like in twelf and lambda-prolog.  This makes HOAS much easier to do.
 
 ```
-defn trm : atom
+defn trm : prop
    | lam = (trm -> trm) -> trm
    | app = trm -> trm -> trm
 
 -- we can check that a term is linear!
-defn linear : (trm → trm) → atom
+defn linear : (trm → trm) → prop
    | linear_var = linear ( λ v . v )
    | linear_lam = {N} linear (λ v . lam (λ x . N x v))
                 ← [x] linear (λ v . N x v)
@@ -73,28 +84,24 @@ defn linear : (trm → trm) → atom
                                ← linear V
 ```
 
-* Polymorphism:  This isn't sound. ie, atom : atom.  The unsoundness shouldn't be too problematic, since types are used for proof search and to ensure progress and not for theorem proving.  This language doesn't support totality, worlds, or universe checking yet, since it's goal is to be a query programming language.
+* Calculus of Constructions:  This is now consistent, and still has similar expressive power!
 
 ```
-defn maybe   : atom → atom
+defn maybe   : prop → prop
    | nothing = {a} maybe a
    | just    = {a} a → maybe a
-```
 
-* Pure Type System:  This allows some crazy language level definitions!  
-
-```
 infix 1 =:=
-defn =:= : {a : atom} a -> a -> atom
-   | eq = {a : atom} a =:= a
+defn =:= : {a : prop} a -> a -> prop
+   | eq = {a : prop} a =:= a
 
 infix 0 /\
-defn /\ : atom -> atom -> atom
-   | and = {a : atom}{b : atom} a -> b -> a /\ b
+defn /\ : prop -> prop -> prop
+   | and = {a : prop}{b : prop} a -> b -> a /\ b
 
 infixr 0 |->
-defn |-> : [a : atom] [b : atom] atom
-  as \a : atom . \b : atom . [ha : a] b
+defn |-> : [a : prop] [b : prop] prop
+  as \a : prop . \b : prop . [ha : a] b
 ```
 
 * Indulgent type inferring nondeterminism:  The entire type checking process is a nondeterministic search for a type check proof.  This could be massively slow, but at least it is complete.  The size of this search is bounded by the size of the types and not the whole program, so this shouldn't be too slow in practice.  (function cases should be small).  I'm working on adding search control primitives to make this more efficient.
@@ -102,9 +109,9 @@ defn |-> : [a : atom] [b : atom] atom
 * Holes:  types can have holes, terms can have holes.  The same proof search that is used in semantics is used in type inference, so you can use the same computational reasoning you use to program to reason about whether the type checker can infer types!  Holes get filled by a proof search on their type and the current context.  Since the entire type checking process is nondeterministic, if they get filled by a wrong term, they can always be filled again.
 
 ```
-defn fsum_maybe  : {a}{b} (a -> b -> atom) -> maybe a -> maybe b → atom
-   | fsum_nothing = {a}{b}[F : a -> b -> atom] maybe_fsum F nothing nothing
-   | fsum_just    = {a}{b}[F : _ -> _ -> atom][av : a][bv : b]
+defn fsum_maybe  : {a}{b} (a -> b -> prop) -> maybe a -> maybe b → prop
+   | fsum_nothing = {a}{b}[F : a -> b -> prop] maybe_fsum F nothing nothing
+   | fsum_just    = {a}{b}[F : _ -> _ -> prop][av : a][bv : b]
                    maybe_fsum F (just av) (just bv)
                    <- F av bv
 ```
@@ -112,22 +119,22 @@ defn fsum_maybe  : {a}{b} (a -> b -> atom) -> maybe a -> maybe b → atom
 * Implicit arguments:  These are arguments that automagically get filled with holes when they need to be.  They form the basis for typeclasses (records to be added), although they are far more general. This is also where the language is most modern and interesting.  I'm curious to see what uses beyond typeclasses there are for these.
 
 ```
-defn functor : (atom → atom) → atom
-   | isFunctor = ∀ F . ({a}{b : _ } (a → b → atom) → F a → F b → atom) → functor F.
+defn functor : (prop → prop) → prop
+   | isFunctor = ∀ F . ({a}{b : _ } (a → b → prop) → F a → F b → prop) → functor F.
 
-defn fsum : {F} functor F => {a}{b} (a → b → atom) → F a → F b → atom
+defn fsum : {F} functor F => {a}{b} (a → b → prop) → F a → F b → prop
    | get_fsum = [F] functor F -> [FSUM][Foo][Fa][Fb] FSUM Foo Fa Fb -> fsum Foo Fa Fb
 
-defn functor_maybe : functor maybe -> atom.
+defn functor_maybe : functor maybe -> prop.
    | is_functor_maybe = functor_maybe (isFunctor fsum_maybe).
 
 -- this syntax is rather verbose for the moment.  I have yet to add typeclass syntax sugar.
 ```
 
-* Arbitrary operator fixities:  combined with the pure type system, you can do agda style syntax (with a bit of creativity)!
+* Arbitrary operator fixities:  combined with the calculus of constructions, you can nearly do agda style syntax (with a bit of creativity)!
 
 ```
-defn bool : atom
+defn bool : prop
    | true = bool
    | false = bool
 
@@ -135,16 +142,17 @@ defn if : bool -> bool
   as \b . b
 
 infix 1 |:|
-defn |:| : {a : atom} a -> a -> (a -> a -> a) -> a
-  as ?\t : atom . \a b. \f : t -> t -> t. f a b
+defn |:| : {a : prop} a -> a -> (a -> a -> a) -> a
+  as ?\t : prop . \a b. \f : t -> t -> t. f a b
 
 infix 0 ==>
-defn ==> : {a : atom} bool -> ((a -> a -> a) -> a) -> a -> atom
-   | thentrue =  [a:atom][f : (a -> a -> a) -> a] (true ==> f)  (f (\A B. A))
-   | thenfalse = [a:atom][f : (a -> a -> a) -> a] (false ==> f) (f (\A B. B))
+defn ==> : {a : prop} bool -> ((a -> a -> a) -> a) -> a -> prop
+   | thentrue =  [a:prop][f : (a -> a -> a) -> a] (true ==> f)  (f (\A B. A))
+   | thenfalse = [a:prop][f : (a -> a -> a) -> a] (false ==> f) (f (\A B. B))
 
-defn not : bool -> bool -> atom
+defn not : bool -> bool -> prop
   as \v . if v ==> false |:| true
+
 ```
 
 * Optional unicode syntax: Monad m ⇒ ∀ t : goats . m (λ x : t . t → t).
@@ -153,7 +161,6 @@ defn not : bool -> bool -> atom
     * Quantification: "[x:A] t"  or  "∀ x:A . t" or "forall x:A . t"
     * abstraction: "λ x . t" or "\x.t"
     * Quantified implicits: "{x:A} t"  or  "?∀ x:A . t" or "?forall x:A . t"
-
 
 
 Usage

@@ -109,7 +109,7 @@ instance Show Predicate where
   show (Define nm val ty) = "defn " ++ nm ++ " : " ++ show ty ++"\n as "++show val
                                                
 var !nm = Spine nm []
-atomName = "atom"
+atomName = "prop"
 tipeName = "type"
 kindName = "#kind#"
 
@@ -153,7 +153,7 @@ rebuildSpine (Spine "#imp_abs#" [_, Abs nm ty rst]) apps = case findTyconInPrefi
   Just (v, apps) -> rebuildSpine (Abs nm ty rst) (v:apps)
   Nothing -> seq sp $ if ty == atom && S.notMember nm (freeVariables rs) then rs else irs 
                       -- proof irrelevance hack
-                      -- we know we can prove that type "atom" is inhabited
+                      -- we know we can prove that type "prop" is inhabited
                       -- irs - the proof doesn't matter
                       -- rs - the proof matters
                       -- irs - here, the proof might matter, but we don't know if we can prove the thing, 

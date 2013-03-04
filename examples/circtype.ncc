@@ -1,5 +1,5 @@
-defn mu : [x : atom] (x -> x) -> atom
+defn mu : [x : prop] (x -> x) -> prop
 
-defn nat : atom -> atom
+defn nat : prop -> prop
 
-defn ismu : mu atom nat -> atom
+defn ismu : mu prop nat -> prop

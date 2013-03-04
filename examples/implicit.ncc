@@ -1,16 +1,16 @@
-defn identity : atom -> atom
-   | cons = {f : atom} f -> identity f
+defn identity : prop -> prop
+   | cons = {f : prop} f -> identity f
 
 infix 1 =:=
-defn =:= : {a : atom} a -> a -> atom
-   | eq = {a : atom} a =:= a
+defn =:= : {a : prop} a -> a -> prop
+   | eq = {a : prop} a =:= a
 
-defn getIdent : {f : atom} identity f -> f -> atom
-  as ?\f : atom . \id : identity f . \v : f . (cons v) =:= id
+defn getIdent : {f : prop} identity f -> f -> prop
+  as ?\f : prop . \id : identity f . \v : f . (cons v) =:= id
 
 
 -- this demonstrates three ways of doing this
-defn getIdent' : {foo : atom} identity foo -> foo -> atom
+defn getIdent' : {foo : prop} identity foo -> foo -> prop
    | getIdentity1 = {f}{V:f} getIdent' {foo = f} (cons V) V
    | getIdentity2 = {f}{V:f} getIdent' (cons V : identity f) V
-   | getIdentity3 = {f}{V:f} (getIdent' : identity f -> f -> atom) (cons V) V
+   | getIdentity3 = {f}{V:f} (getIdent' : identity f -> f -> prop) (cons V) V

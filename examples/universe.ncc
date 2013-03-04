@@ -1,6 +1,6 @@
 fixity right 0 $
-defn $ : {a b:atom} (a -> b) -> a -> b
-  as ?\At Bt :atom . \ F . \A . F A  
+defn $ : {a b:prop} (a -> b) -> a -> b
+  as ?\At Bt :prop . \ F . \A . F A  
 
 fixity pre 1 ♢
 fixity lambda Π 
@@ -11,14 +11,14 @@ the implicit argument is pretty much always intialized to ty
 tm basically says
 t in tm S T has type T where T has sort S.
 -}
-defn tm : {S : tm ty} tm S → atom
+defn tm : {S : tm ty} tm S → prop
    | ty  = tm ty
    | ♢   = tm ty -> tm ty
    | Π   = [T : tm ty] (tm T → tm T) → tm $ ♢ T
    | lam = [T : tm ty][F : tm T → tm T] tm {S = ♢ T} (Π A : T . F A)
    | raise = {T : tm ty} tm T → tm $ ♢ T
 
-defn isTm : {S : tm ty} {A : tm S} tm A -> atom
+defn isTm : {S : tm ty} {A : tm S} tm A -> prop
    | hasValue = [S : tm ty][T : tm S][V : tm T] isTm V
 
 query whattype0 = isTm (Π A : ty . A)
