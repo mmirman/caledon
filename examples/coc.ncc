@@ -1,15 +1,78 @@
 fixity lambda .λ
 fixity lambda Π
+fixity none 1 @
 
 defn tm : atom
    | p = tm
    | t = tm
    | .λ = tm → (tm → tm) → tm
    | Π = tm → (tm → tm) → tm
+   | @ = tm → tm → tm
+
+fixity none 0 ==
+defn == : tm -> tm -> atom
+  | equiv_commute  = [A B] 
+                     A == B 
+                  <- B == A
+  | equiv_trans  =  [A B C] 
+                    A == C 
+                 <- A == B 
+                 <- B == C
+  | equiv_p  =  p == p
+  | equiv_t  =  t == t
+  | equiv_at  = [A A' B B'] 
+                A @ B == A' @ B'
+             <- A == A'
+             <- B == B'
+  | equiv_eta  =  [F G A] 
+                  ( .λ x : A . F x) == G
+               <- ([x] F x == G @ x)
+  | equiv_beta =  [A F B] 
+                  (.λ x : A . F x) @ B == F B
+  | equiv_lam  =  [A A' F F']
+                  (.λ x : A . F x) == (.λ x : A' . F' x)
+               <- A == A'
+               <- ([x] F x == F' x)
+  | equiv_pi   =  [A A' F F'] 
+                 (Π x : A . F x) == (Π x : A' . F' x)
+              <- A == A'
+              <- ([x] F x == F' x)
 
 fixity none 0 ::
 defn :: : tm -> tm -> atom
    | p_t = p :: t
-   | lam_pi =  [A : tm][T : tm -> tm][B : tm -> tm]
-      ([x] x :: A -> T x :: B x )
+
+   | pi_t = [A T]
+            ([x] x :: A -> T x :: t )
+         -> (Π x : A . T x) :: t
+
+   | pi_p = [A T]
+            ([x] x :: A -> T x :: p )
+         -> (Π x : A . T x) :: p
+
+   | lam_pi_p =  [A T B] 
+     	 ([x] x :: A -> T x :: B x )
+      -> ([x] x :: A -> B x :: p)
       -> (.λ x : A . T x) :: (Π x : A . B x) 
+
+   | lam_pi_t =  [A T B] 
+         ([x] x :: A -> T x :: B x )
+      -> ([x] x :: A -> B x :: t)
+      -> (.λ x : A . T x) :: (Π x : A . B x) 
+
+   | app =  [A M N B] 
+         M :: (Π x : A . B x)
+      -> N :: A
+      -> (M @ N) :: B N
+
+   | equiv_p = [M A B] 
+             M :: A
+          -> A == B
+          -> B :: p
+          -> M :: B
+
+   | equiv_t = [M A B] 
+             M :: A
+          -> A == B
+          -> B :: t
+          -> M :: A

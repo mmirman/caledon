@@ -29,30 +29,31 @@ defn string : atom
 defn any : {A : atom} (A -> atom) -> atom
    | is = [A : atom][V : A][F : A -> atom] F V -> any { A = A } F
 
-defn openAny : [A][F : A -> atom] any F -> [V : A] F V -> atom
+defn openAny : [A][F : A -> atom] any F -> [ V : A ] F V -> atom
    | openAnyDef = [A][F : A -> atom][V : A][FV : F V] openAny A F (is A V F FV) V FV
 
-defn sopen : {A : atom }{F : A -> atom} [V : A] F V => (exists v : A . F v) -> atom 
-  as ?\a : atom . ?\ f : a -> atom . \vt : a . ?\ fv : f vt . \an : (exists v : a . f v) . open a f an vt fv
+defn sopen : {A : atom } {F : A -> atom} [V : A] F V => (exists v : A . F v) -> atom 
+  as ?\ a : atom . ?\ f : a -> atom . \vt : a . ?\ fv : f vt . \ an : (∃ v : a . f v) . open a f an vt fv
+
 
 fixity lambda findOne
 defn findOne : [A : atom] (A -> atom) -> atom
-  as \a: atom . any { A = a }
+  as \ a : atom . any { A = a }
 
 --------------------------
 --- useful combinators ---
 --------------------------
 fixity right 0 $
-defn $ : {a b:atom} (a -> b) -> a -> b
-  as ?\ at bt . \ f . \a . f a
+defn $ : { a b:atom} (a -> b) -> a -> b
+  as ?\ at bt . \ f . \ a . f a
 
 
 fixity right 0 @
 defn @ : {a b c:atom} (b -> c) -> (a -> b) -> a -> c
-  as ?\at bt ct : atom . \f : bt -> ct . \ g : at -> bt . \ a : at . f (g a)
+  as ?\ at bt ct : atom . \ f : bt -> ct . \ g : at -> bt . \ a : at . f (g a)
 
 defn flip : {a b c : atom} (a -> b -> c) -> b -> a -> c
-  as ?\ at bt ct : atom . \ foo . \ b . \ a . foo a b
+  as ?\ at bt ct : atom . \ foo. \ b . \ a . foo a b
 
 -------------------
 --- Constraints ---
