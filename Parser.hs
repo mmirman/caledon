@@ -220,11 +220,11 @@ pTipe = do
                 , regPostfix braces ["?∀"] ["?forall"] imp_forall
                 ]++[ altPostfix [op] [] (\nm t s -> Spine op [t,Abs nm tyhole s] ) | op <- opLams ]
                 ++[ altPostfix [] [op] (\nm t s -> Spine op [t,Abs nm tyhole s] ) | op <- strLams ]
-              , [ binary forall AssocRight $ reservedOp "->" <|> reservedOp "→" 
-                , binary imp_forall AssocRight $ reservedOp "=>" <|> reservedOp "⇒"
+              , [ binary (forall) AssocRight $ reservedOp "->" <|> reservedOp "→" 
+                , binary (const (~~>)) AssocRight $ reservedOp "=>" <|> reservedOp "⇒"
                 ]
               , [ binary (flip . forall) AssocLeft $ reservedOp "<-" <|> reservedOp "←"
-                , binary (flip . imp_forall) AssocLeft $ reservedOp "<=" <|> reservedOp "⇐" 
+                , binary (flip . const (~~>)) AssocLeft $ reservedOp "<=" <|> reservedOp "⇐" 
                 ]
               , [ binary (const ascribe) AssocNone $ reservedOp ":"
                 ] 

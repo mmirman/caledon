@@ -120,15 +120,15 @@ getBefore' s bind ctx@(Context{ ctxtMap = ctxt }) = gb bind
             Nothing -> error $ "element "++show p++" not in map \n\twith ctxt: "++show ctx++" \n\t for bind: "++show bind++"\n\t"++s
             Just c -> c
 
-checkContext _ c = c
-{-
+--checkContext _ c = c
+
 checkContext _ c@(Context Nothing _ Nothing) = c
 checkContext s ctx = foldr (\v c -> seq (checkEquals v) c) ctx $ zip st (reverse $ ta)
   where st = getBefore' s (getTail ctx) ctx
         ta = getAfter' s (getHead ctx) ctx
         checkEquals (a,b) | (a == b) = ()
         checkEquals (a,b) = error $ s++" \n\tNOT THE SAME" ++show (a,b) ++ " \n\t IN "++show ctx
--}
+
 
 -------------------------
 ---  Traversal Monad  ---
@@ -138,6 +138,8 @@ data ContextState = ContextState { stateNum :: !Integer
                                  }
                     
 emptyState = ContextState 0 emptyContext
+
+
 
 instance ValueTracker ContextState where
   putValue i c = c { stateNum = i }
@@ -202,7 +204,10 @@ getExists = do
 getConstants :: Env ContextMap
 getConstants = ask  
 
-
+clearContext :: Env ()
+clearContext = do
+  ContextState i _ <- get
+  put $ ContextState i emptyContext
 
 
 getFullCtxt :: Env ContextMap

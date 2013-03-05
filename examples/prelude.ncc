@@ -27,41 +27,41 @@ defn string : prop
 -- searches ---
 ---------------
 defn any : {A : prop} (A -> prop) -> prop
-   | is = [A : prop][V : A][F : A -> prop] F V -> any { A = A } F
+   | is = [a : prop][V : a][F : a -> prop] F V -> any { A = a } F
 
 
 defn openAny : [A][F : A -> prop] any F -> [V : A] F V -> prop
    | openAnyDef = [A][F : A -> prop][V : A][FV : F V] openAny A F (is A V F FV) V FV
 
-defn sopen : {A : prop }{F : A -> prop} [V : A] F V => (exists v : A . F v) -> prop 
+defn sopen : {a : prop }{f : a -> prop} [V : a] {fv : f V} (exists v : a . f v) -> prop 
   as ?\a : prop . ?\ f : a -> prop . \vt : a . ?\ fv : f vt . \an : (exists v : a . f v) . open a f an vt fv
 
 
 fixity lambda free
 defn free : [A : prop] (A -> prop) -> prop
-  as \a: prop . any { A = a }
+  as \a : prop . any { A = a }
 
 --------------------------
 --- useful combinators ---
 --------------------------
 fixity right 0 $
-defn $ : {a b:prop} (a -> b) -> a -> b
+defn $ : {at bt:prop} (at -> bt) -> at -> bt
   as ?\ at bt . \ f . \a . f a
 
 
 fixity right 0 @
-defn @ : {a b c:prop} (b -> c) -> (a -> b) -> a -> c
+defn @ : {at bt ct:prop} (bt -> ct) -> (at -> bt) -> at -> ct
   as ?\at bt ct : prop . \f : bt -> ct . \ g : at -> bt . \ a : at . f (g a)
 
-defn flip : {a b c : prop} (a -> b -> c) -> b -> a -> c
+defn flip : {at bt ct : prop} (at -> bt -> ct) -> bt -> at -> ct
   as ?\ at bt ct : prop . \ foo . \ b . \ a . foo a b
 
 -------------------
 --- Constraints ---
 -------------------
 fixity none 1 =:=
-defn =:= : {q} q -> q -> prop
-   | eq = [a : prop][b:a] (=:=) {q = a} b b
+defn =:= : {Q} Q -> Q -> prop
+   | eq = [a : prop][b:a] (=:=) {Q = a} b b
 
 -- searching for these is SLOW
 fixity none 0 /\
@@ -115,7 +115,7 @@ defn natural  : prop
    | zero = natural
    | succ = natural -> natural
 
-query findSat0 = free A . A =:= zero
+query findSat0 = free A : natural . A =:= zero
 
 defn add   : natural -> natural -> natural -> prop
    | add_z = [N] add zero N N
@@ -188,20 +188,23 @@ defn if : bool -> bool
   as \b . b
 
 fixity none 1 |:|
-defn |:| : {a:prop} a -> a -> (a -> a -> a) -> a
+defn |:| : {t:prop} t -> t -> (t -> t -> t) -> t
   as ?\t : prop . \a b : t. \f : t -> t -> t. f a b
 
 
 fixity none 0 ==>
-defn ==> : {a : prop} bool -> ((a -> a -> a) -> a) -> a -> prop
-   | thentrue  = [a : prop][f: _ -> a] (true ==> f)  (f (\A B : a. A))
-   | thenfalse = [b : prop][f: _ -> b] (false ==> f) (f (\A B : b . B))
+defn ==> : {A : prop} bool -> ((A -> A -> A) -> A) -> A -> prop
+   | thentrue  = [a : prop][f: _ -> a] (true ==> f)  (f (\a1 a2 : a . a1))
+   | thenfalse = [b : prop][f: _ -> b] (false ==> f) (f (\a1 a2 : b . a2))
 
 defn not : bool -> bool -> prop
-  as \a . if a ==> false |:| true
+  as \zq . if zq ==> false |:| true
 
-query main = run $ do 
-                 , putStr "hey!\n"
-	  	 , readLine (\A . do 
-   		 , putStr A
-                 , putStr "\nbye!\n")
+defn ismain : prop 
+  as run $ do 
+         , putStr "hey!\n"
+         , readLine (\A . do 
+   	 , putStr A
+         , putStr "\nbye!\n")
+
+-- query main = ismain

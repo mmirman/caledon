@@ -59,9 +59,9 @@ flatten (c1 :&: c2) = do
 flatten (SCons l) = return l
 
 unify :: Constraint -> Env Substitution
-unify cons = do
-  cons <- regenAbsVars cons
-  cons <- flatten cons
+unify cons =  do
+  cons <- vtrace 5 ("CONSTRAINTS1: "++show cons) $ regenAbsVars cons
+  cons <- vtrace 5 ("CONSTRAINTS2: "++show cons) $ flatten cons
   let uniWhile :: Substitution -> [SCons] -> Env (Substitution, [SCons])
       uniWhile !sub !c' = do
         exists <- getExists       
@@ -515,19 +515,29 @@ withKind m = do
     var k .@. kind
     return r
 
+check v x = if x == "13@regm+f" then trace ("FOUND AT: "++ v) x else x
+
 checkType :: Spine -> Type -> TypeChecker Spine
 checkType sp ty | ty == kind = withKind $ checkType sp
 checkType sp ty = case sp of
   Spine "#hole#" [] -> do
-    x' <- getNewWith "@inf"
+    x' <- getNewWith "@hole"
     addToEnv (∃) x' ty $ do
       var x' .@. ty
       return $ var x'
       
   Spine "#ascribe#" (t:v:l) -> do
-    v <- checkType v t
-    checkType (rebuildSpine v l) ty
-  
+    (v'',mem) <- regenWithMem v
+    
+    t'' <- regenAbsVars t
+    v' <- checkType v'' t''
+    
+    r <- getNewWith "@r"
+    Spine _ l' <- addToEnv (∀) r t $ checkType (Spine r l) ty
+    return $ rebuildSpine (rebuildFromMem mem v') l'
+
+--    checkType (rebuildSpine (rebuildFromMem mem v') l) ty
+    
   Spine "#infer#" [_, Abs x tyA tyB ] -> do
     tyA <- withKind $ checkType tyA
     
@@ -538,43 +548,45 @@ checkType sp ty = case sp of
 
   Spine "#imp_forall#" [_, Abs x tyA tyB] -> do
     tyA <- withKind $ checkType tyA
-    tyB <- addToEnv (∀) x tyA $ checkType tyB ty
+    tyB <- addToEnv (∀) (check "imp_forall" x) tyA $ checkType tyB ty
     return $ imp_forall x tyA tyB
     
   Spine "#forall#" [_, Abs x tyA tyB] -> do
-
     tyA <- withKind $ checkType tyA
-
-    tyB <- addToEnv (∀) x tyA $ checkType tyB ty
-    return $ forall x tyA tyB
+    forall x tyA <$> (addToEnv (∀) (check "forall" x) tyA $ 
+      checkType tyB ty )
 
   -- below are the only cases where bidirectional type checking is useful 
   Spine "#imp_abs#" [_, Abs x tyA sp] -> case ty of
     Spine "#imp_forall#" [_, Abs x' tyA' tyF'] -> do
+      unless ("" == x' || x == x') $ 
+        lift $ throwTrace 0 $ "can not show: "++show sp ++ " : "++show ty 
+                           ++"since: "++x++ " ≠ "++x'
       tyA <- withKind $ checkType tyA
       tyA ≐ tyA'
-      addToEnv (∀) x tyA $ do
-        imp_abs x tyA <$> checkType sp (subst (x' |-> var x) tyF')
+      addToEnv (∀) (check "impabs1" x) tyA $ do
+        imp_abs x tyA <$> checkType sp tyF'
+        
     _ -> do
       e <- getNewWith "@e"
       tyA <- withKind $ checkType tyA
       withKind $ \k -> addToEnv (∃) e (forall x tyA k) $ do
         imp_forall x tyA (Spine e [var x]) ≐ ty
-        sp <- addToEnv (∀) x tyA $ checkType sp (Spine e [var x])
-        return $ imp_abs x tyA sp
+        sp <- addToEnv (∀) (check "impabs2" x) tyA $ checkType sp (Spine e [var x])
+        return $ imp_abs x tyA $ sp
 
   Abs x tyA sp -> case ty of
     Spine "#forall#" [_, Abs x' tyA' tyF'] -> do
       tyA <- withKind $ checkType tyA
       tyA ≐ tyA'
-      addToEnv (∀) x tyA $ do
+      addToEnv (∀) (check "abs1" x) tyA $ do
         Abs x tyA <$> checkType sp (subst (x' |-> var x) tyF')
     _ -> do
       e <- getNewWith "@e"
       tyA <- withKind $ checkType tyA
-      withKind $ \k -> addToEnv (∃) e (forall x tyA k) $ do
+      withKind $ \k -> addToEnv (∃) e (forall "" tyA k) $ do
         forall x tyA (Spine e [var x]) ≐ ty
-        Abs x tyA <$> (addToEnv (∀) x tyA $ checkType sp (Spine e [var x]))
+        Abs x tyA <$> (addToEnv (∀) (check "abs2" x) tyA $ checkType sp (Spine e [var x]))
   Spine nm [] | isChar nm -> do
     ty ≐ Spine "char" []
     return sp
@@ -624,21 +636,24 @@ checkFullType val ty = typeCheckToEnv $ checkType val ty
 ----------------------
 --- type inference ---
 ----------------------
-typeInfer :: ContextMap -> (Name,Spine,Type) -> Choice (Term,ContextMap)
+typeInfer :: ContextMap -> (Name,Spine,Type) -> Choice (Term,Type, ContextMap)
 typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
   ty <- return $ alphaConvert mempty ty
   val <- return $ alphaConvert mempty val
   
-  (ty,_) <- regenWithMem ty
+  (ty,mem') <- regenWithMem ty
   (val,mem) <- regenWithMem val
   
   (val,constraint) <- checkFullType val ty
-  sub <- unify constraint
   
-  let res = rebuildFromMem mem $ unsafeSubst sub val
+  sub <- appendErr ("which became: "++show val ++ "\n\t :  " ++ show ty) $ 
+         unify constraint
+  
+  let resV = rebuildFromMem mem $ unsafeSubst sub val
+      resT = rebuildFromMem mem' $ unsafeSubst sub ty
 
-  vtrace 0 ("RESULT: "++nm++" : "++show res) $
-      return $ (res, M.insert nm res env)
+  vtrace 0 ("RESULT: "++nm++" : "++show resV) $
+      return $ (resV,resT, M.insert nm resV env)
 
 unsafeSubst s (Spine nm apps) = let apps' = unsafeSubst s <$> apps in case s ! nm of 
   Just nm -> rebuildSpine nm apps'
@@ -666,11 +681,11 @@ typeCheckAxioms lst = do
       inferAll (_ , r, (_,_,nm,_,_):_) | nm == tipeName = throwTrace 0 $ tipeName++" can not be overloaded"
       inferAll (_ , r, (_,_,nm,_,_):_) | nm == atomName = throwTrace 0 $ atomName++" can not be overloaded"
       inferAll (l , r, (fam,s,nm,val,ty):toplst) = do
-        (val,l') <- appendErr ("can not infer type for: "++nm++" : "++show val) $ 
-                    trace ("Checking: " ++nm) $ 
-                    vtrace 0 ("\tVAL: " ++show val  
-                              ++"\n\t:: " ++show ty) $
-                    typeInfer l (nm, val,ty) -- constrain the breadth first search to be local!
+        (val,ty,l') <- appendErr ("can not infer type for: "++nm++" : "++show val) $ 
+                       trace ("Checking: " ++nm) $ 
+                       vtrace 0 ("\tVAL: " ++show val  
+                                 ++"\n\t:: " ++show ty) $
+                       typeInfer l (nm, val,ty) -- constrain the breadth first search to be local!
                     
         -- do the family check after ascription removal and typechecking because it can involve computation!
         unless (fam == Nothing || Just (getFamily val) == fam)
@@ -678,8 +693,8 @@ typeCheckAxioms lst = do
           
         inferAll $ case nm of
           '#':'v':':':nm' -> (sub <$> l', (fam,s,nm,val,ty):r , fsub <$> toplst) 
-            where sub = subst $ nm' |-> val  -- the ascription isn't necessary because we don't have unbound variables
-                  fsub (fam,s,nm,val,ty) = (fam,s,nm,sub val, sub ty)
+            where sub = subst $ nm' |-> ascribe val ty -- the ascription isn't necessary because we don't have unbound variables
+                  fsub (fam,s,nm,val,ty) = (fam,s,nm, sub val, sub ty)
           _ -> (l', (fam,s,nm,val,ty):r, toplst)
 
   (lst',l) <- inferAll (tys, [], topoSortAxioms lst)
