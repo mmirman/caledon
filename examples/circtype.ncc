@@ -1,5 +1,5 @@
-defn mu : [x : prop] (x -> x) -> prop
+unsound a : b av -> prop
+   | av = a bv
 
-defn nat : prop -> prop
-
-defn ismu : mu prop nat -> prop
+unsound b  : a bv -> prop
+   | bv = b av

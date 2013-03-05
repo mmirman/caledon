@@ -6,12 +6,17 @@ fixity pre 1 ♢
 fixity lambda Π 
 fixity lambda lam 
 
+{-
+for the moment, circularly defined types are allowed!  this violates consistency.  
+If a dependency analysis is done, and types are checked in order, this will become safe!
+-}
+
 {- 
 the implicit argument is pretty much always intialized to ty
 tm basically says
 t in tm S T has type T where T has sort S.
 -}
-defn tm : {S : tm ty} tm S → prop
+unsound tm : {S : tm ty} tm S → prop
    | ty  = tm ty
    | ♢   = tm ty -> tm ty
    | Π   = [T : tm ty] (tm T → tm T) → tm $ ♢ T
