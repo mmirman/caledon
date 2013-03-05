@@ -32,8 +32,8 @@ infixr 0 ~~>
 (~>) = forall ""
 (~~>) = imp_forall ""
 
-data Spine = Spine !Name ![Type]
-           | Abs !Name !Type !Spine 
+data Spine = Spine Name [Type]
+           | Abs Name Type Spine 
            deriving (Eq)
 
 type Type = Spine
@@ -119,16 +119,16 @@ kindName = "#kind#"
 atom = var atomName
 tipe = var tipeName
 kind = var kindName  -- can be either a type or an atom
-ascribe !a !t = Spine ("#ascribe#") [t, a]
-forall !x !tyA !v = Spine ("#forall#") [tyA, Abs x tyA v]
-exists !x !tyA !v = Spine ("#exists#") [tyA, Abs x tyA v]
-pack !e !tau !imp !tp !interface = Spine "pack" [tp, Abs imp tp interface, tau, e]
-open !cl (!imp,!ty) (!p,!iface) !cty !inexp = Spine "#open#" [cl, ty,Abs imp ty iface, Abs imp ty (Abs p iface cty), Abs imp ty (Abs p iface inexp)] 
-infer !x !tyA !v = Spine ("#infer#") [tyA, Abs x tyA v]
+ascribe a t = Spine ("#ascribe#") [t, a]
+forall x tyA v = Spine ("#forall#") [tyA, Abs x tyA v]
+exists x tyA v = Spine ("#exists#") [tyA, Abs x tyA v]
+pack e tau imp tp interface = Spine "pack" [tp, Abs imp tp interface, tau, e]
+open cl (imp,ty) (p,iface) cty inexp = Spine "#open#" [cl, ty,Abs imp ty iface, Abs imp ty (Abs p iface cty), Abs imp ty (Abs p iface inexp)] 
+infer x tyA v = Spine ("#infer#") [tyA, Abs x tyA v]
 
-imp_forall !x !tyA !v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
-imp_abs !x !tyA !v = Spine ("#imp_abs#") [tyA, Abs x tyA v]
-tycon !nm !val = Spine "#tycon#" [Spine nm [val]]
+imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
+imp_abs x tyA v = Spine ("#imp_abs#") [tyA, Abs x tyA v]
+tycon nm val = Spine "#tycon#" [Spine nm [val]]
 ---------------------
 ---  substitution ---
 ---------------------
@@ -205,13 +205,16 @@ instance (Subst a, Subst b) => Subst (a,b) where
   substFree s f ~(a,b) = (substFree s f a , substFree s f b)
   
 instance Subst Spine where
-  substFree s f (Spine "#imp_forall#" [_, Abs nm tp rst]) = case "" /= nm && S.member nm f of
+  substFree s f sp@(Spine "#imp_forall#" [_, Abs nm tp rst]) = case "" /= nm && S.member nm f && not (S.null $ S.intersection (M.keysSet s) $ freeVariables sp) of
     False -> imp_forall nm (substFree s f tp) $ substFree (M.delete nm s) f rst
-    True -> error "can not capture free variables because I can not alpha convert"
-  substFree s f (Spine "#imp_abs#" [_, Abs nm tp rst]) = case S.member nm f of
+    True -> error $ 
+            "can not capture free variables because implicits quantifiers can not alpha convert: "++ show sp 
+            ++ "\n\tfor: "++show s
+  substFree s f sp@(Spine "#imp_abs#" [_, Abs nm tp rst]) = case "" /= nm && S.member nm f && not (S.null $ S.intersection (M.keysSet s) $ freeVariables sp) of
     False  -> imp_abs nm (substFree s f tp) $ substFree (M.delete nm s) f rst 
-    True   -> error "can not capture free variables because I can not alpha convert"
-  
+    True   -> error $ 
+              "can not capture free variables because implicit binds can not alpha convert: "++ show sp
+              ++ "\n\tfor: "++show s
   substFree s f (Abs nm tp rst) = Abs nm' (substFree s f tp) $ substFree s' f' rst
     where (nm',s',f') = newName nm s f
   substFree s f (Spine "#tycon#" [Spine c [v]]) = Spine "#tycon#" [Spine c [substFree s f v]]
@@ -356,7 +359,7 @@ instance RegenAbsVars Spine where
   regenAbsVars (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a ty <$> regenAbsVars r
   regenAbsVars (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a ty <$> regenAbsVars r
   regenAbsVars (Abs a ty r) = do
-    a' <- getNewWith $ "@new"
+    a' <- getNewWith $ "@rega"
     ty' <- regenAbsVars ty
     r' <- regenAbsVars $ subst (a |-> var a') r
     return $ Abs a' ty' r'
@@ -370,7 +373,6 @@ instance RegenAbsVars Spine where
     (r', s2) <- regenWithMem $ subst (a |-> var a') r
     return $ (Abs a' ty' r', M.insert a' a $ M.union s1 s2)
   regenWithMem (Spine a l) = Spine a <<$> regenWithMem l
-
 
 
 
@@ -407,7 +409,7 @@ instance RegenAbsVars Constraint where
     a :&: b -> regenM (:&:) a b    
   
 getFamily (Spine "#infer#" [_, Abs _ _ lm]) = getFamily lm
-getFamily (Spine "#ascribe#"  (_:v:_)) = getFamily v
+getFamily (Spine "#ascribe#"  (_:v:l)) = getFamily (rebuildSpine v l)
 getFamily (Spine "#forall#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#imp_forall#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#exists#" [_, Abs _ _ lm]) = getFamily lm
