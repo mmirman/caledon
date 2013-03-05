@@ -68,18 +68,10 @@ decls = do
 
 topLevel = fixityDef <|> query <|> defn
 
-
 fixityDef = do 
   reserved "fixity"
-  infixDef <|> bindDef <|> lamDef
+  infixDef <|> lamDef
   topLevel
-  
-bindDef = do  
-  reserved "bind"
-  op <- operator
-  place <- identifier
-  del <- operator
-  modifyState $ \b -> b { currentTable = let ct = currentTable b in ct { binds = (op,place,del):binds ct} }
                                                                     
 lamDef = do
   reserved "lambda"
@@ -116,8 +108,17 @@ query = do
   return $ Query nm ty
 
 defn :: Parser Predicate
-defn =  do
+defn = sound <|> unsound
+  
+sound = do
   reserved "defn"
+  vsn True
+
+unsound = do
+  reserved "unsound" 
+  vsn False               
+    
+vsn s = do    
   (nm,ty) <- named decTipe
   let more =  do reservedOp "|"
 
@@ -126,12 +127,12 @@ defn =  do
                         return (nm,t)
                         
                  optional semi
-                 return $ Predicate nm ty lst
+                 return $ Predicate s nm ty lst
       none = do optional semi
-                return $ Predicate nm ty []
+                return $ Predicate s nm ty []
       letbe = do reserved "as"
                  val <- pTipe
-                 return $ Define nm val ty
+                 return $ Define s nm val ty
   letbe <|> more <|> none <?> "definition"
 
 
@@ -305,7 +306,7 @@ reservedOperators = [ "->", "=>", "<=", "⇐", "⇒", "→", "<-", "←",
                      ":", ";", "|"]
 identRegOps = "_'-/"              
                     
-reservedNames = ["defn", "as", "query"    
+reservedNames = ["defn", "as", "query", "unsound"
                 , "forall", "exists", "?forall", "lambda", "?lambda"
                 , "_" , "infer", "fixity"]
 

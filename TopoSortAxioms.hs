@@ -9,10 +9,10 @@ getVars val ty = concatMap (\nm -> [nm,"#v:"++nm])
                $ filter (not . flip elem (map fst consts)) 
                $ S.toList $ freeVariables val `S.union` freeVariables ty 
 
-topoSortAxioms :: [(Maybe Name, Name,Term,Type)] -> [(Maybe Name, Name,Term,Type)]
-topoSortAxioms axioms = map ((\((fam,val,ty),n,_) -> (fam,n,val,ty)) . v2nkel) vlst
+topoSortAxioms :: [(Maybe Name, Bool, Name,Term,Type)] -> [(Maybe Name, Bool, Name,Term,Type)]
+topoSortAxioms axioms = map ((\((fam,s,val,ty),n,_) -> (fam,s,n,val,ty)) . v2nkel) vlst
   where (graph, v2nkel, _) = 
-          graphFromEdges $ map (\(fam,nm,val,ty) -> ((fam,val,ty), nm , getVars val ty)) axioms
+          graphFromEdges $ map (\(fam,s,nm,val,ty) -> ((fam,s,val,ty), nm , getVars val ty)) axioms
         -- note!  this doesn't check that there are no cycles!
         vlst = reverse $ topSort graph
         

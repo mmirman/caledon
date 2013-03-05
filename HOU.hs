@@ -625,11 +625,11 @@ checkFullType val ty = typeCheckToEnv $ checkType val ty
 --- type inference ---
 ----------------------
 typeInfer :: ContextMap -> (Name,Spine,Type) -> Choice (Term,ContextMap)
-typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ appendErr ("in name: "++nm++" : "++show val) $ 
-                      trace ("Checking: " ++nm) $ 
-                      vtrace 0 ("\tVAL: " ++show val  
-                                ++"\n\t:: " ++show ty) $ do
+typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
+  ty <- return $ alphaConvert mempty ty
   val <- return $ alphaConvert mempty val
+  
+  (ty,_) <- regenWithMem ty
   (val,mem) <- regenWithMem val
   
   (val,constraint) <- checkFullType val ty
@@ -648,49 +648,68 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 ----------------------------
 --- the public interface ---
 ----------------------------
-typeCheckAxioms :: [(Maybe Name,Name,Spine,Type)] -> Choice ContextMap
+typeCheckAxioms :: [(Maybe Name,Bool,Name,Term,Type)] -> Choice ContextMap
 typeCheckAxioms lst = do
   
   -- check the closedness of families.  this gets done
   -- after typechecking since family checking needs to evaluate a little bit
   -- in order to allow defs in patterns
-  let notval (_,'#':'v':':':_,_,_) = False
-      notval _ = True
+  let notval (_,s,'#':'v':':':_,_,_) = False
+      notval (_,s,_,_,_) = True 
       
-      tys = M.fromList $ map (\(_,nm,ty,_) -> (nm,ty)) $ filter notval lst
+      unsound (_,s,_,_,_) = s
       
-      inferAll (l , []) = return l
-      inferAll (_ , (_,nm,_,_):_) | nm == tipeName = throwTrace 0 $ tipeName++" can not be overloaded"
-      inferAll (_ , (_,nm,_,_):_) | nm == atomName = throwTrace 0 $ atomName++" can not be overloaded"
-      inferAll (l , (fam,nm,val,ty):toplst) = do
-
-        (val,l') <- appendErr ("can not infer type for: "
-                               ++"\nAS:   "++nm++ " : "++show val ++" : "++show ty
-                              ) $ 
-                    typeInfer (tys *** l) (nm, val,ty) -- constrain the breadth first search to be local!
+      tys = M.fromList $ map (\(_,_,nm,ty,_) -> (nm,ty)) $ filter notval lst
+      uns = S.fromList $ map (\(_,_,nm,ty,_) -> nm) $ filter unsound $ filter notval lst
+      
+      inferAll (l , r, []) = return (r,l)
+      inferAll (_ , r, (_,_,nm,_,_):_) | nm == tipeName = throwTrace 0 $ tipeName++" can not be overloaded"
+      inferAll (_ , r, (_,_,nm,_,_):_) | nm == atomName = throwTrace 0 $ atomName++" can not be overloaded"
+      inferAll (l , r, (fam,s,nm,val,ty):toplst) = do
+        (val,l') <- appendErr ("can not infer type for: "++nm++" : "++show val) $ 
+                    trace ("Checking: " ++nm) $ 
+                    vtrace 0 ("\tVAL: " ++show val  
+                              ++"\n\t:: " ++show ty) $
+                    typeInfer l (nm, val,ty) -- constrain the breadth first search to be local!
                     
         -- do the family check after ascription removal and typechecking because it can involve computation!
         unless (fam == Nothing || Just (getFamily val) == fam)
-          $ throwTrace 0 $ "not the right family: need "++show fam++" for "++nm ++ " = " ++show val        
+          $ throwTrace 0 $ "not the right family: need "++show fam++" for "++nm ++ " = " ++show val                    
           
         inferAll $ case nm of
-          '#':'v':':':nm' -> (subst sub <$> l', (\(fam,nm,val,ty) -> (fam,nm,subst sub val, subst sub ty)) <$> toplst) 
-            where sub = nm' |-> val  -- the ascription isn't necessary because we don't have unbound variables
-          _ -> (l', toplst)
+          '#':'v':':':nm' -> (sub <$> l', (fam,s,nm,val,ty):r , fsub <$> toplst) 
+            where sub = subst $ nm' |-> val  -- the ascription isn't necessary because we don't have unbound variables
+                  fsub (fam,s,nm,val,ty) = (fam,s,nm,sub val, sub ty)
+          _ -> (l', (fam,s,nm,val,ty):r, toplst)
 
-  l <- inferAll (mempty, topoSortAxioms lst)
+  (lst',l) <- inferAll (tys, [], topoSortAxioms lst)
+  
+  let doubleCheckAll _ [] = return ()
+      doubleCheckAll l ((_,_,nm,val,ty):r) = do
+        let usedvars = freeVariables val `S.union` freeVariables ty
+        unless (S.isSubsetOf usedvars l)
+          $ throwTrace 0 $ "Circular type:"
+                        ++"\n\t"++nm++" : "++show val ++" : "++show ty
+                        ++"\n\tcontains the following circular type dependencies: "
+                        ++"\n\t"++show (S.toList $ S.difference usedvars l)
+                        ++ "\nPossible Solution: declare it unsound"
+                        ++ "\nunsound "++nm++" : "++show val
+        doubleCheckAll (S.insert nm l) r
+  
+  doubleCheckAll (S.union envSet uns) $ topoSortAxioms lst'
+  
   return l 
   
 typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = do
-  let toAxioms (Predicate nm ty cs) = (Just $ atomName,nm,ty,tipe):map (\(nm',ty') -> (Just nm,nm',ty',atom)) cs
-      toAxioms (Query nm val) = [(Nothing, nm,val,atom)]
-      toAxioms (Define nm val ty) = [(Nothing, nm,ty,kind), (Nothing, "#v:"++nm,val,ty)]
+  let toAxioms (Predicate s nm ty cs) = (Just $ atomName,s,nm,ty,tipe):map (\(nm',ty') -> (Just nm,False, nm',ty',atom)) cs
+      toAxioms (Query nm val) = [(Nothing, False,nm,val,atom)]
+      toAxioms (Define s nm val ty) = [(Nothing,False, nm,ty,kind), (Nothing,s, "#v:"++nm,val,ty)]
   tyMap <- typeCheckAxioms $ concatMap toAxioms preds
   
-  let newPreds (Predicate nm _ cs) = Predicate nm (tyMap M.! nm) $ map (\(nm,_) -> (nm,tyMap M.! nm)) cs
+  let newPreds (Predicate t nm _ cs) = Predicate t nm (tyMap M.! nm) $ map (\(nm,_) -> (nm,tyMap M.! nm)) cs
       newPreds (Query nm _) = Query nm (tyMap M.! nm)
-      newPreds (Define nm _ _) = Define nm (tyMap M.! ("#v:"++nm)) (tyMap M.! nm)
+      newPreds (Define t nm _ _) = Define t nm (tyMap M.! ("#v:"++nm)) (tyMap M.! nm)
   
   return $ newPreds <$> preds
   
