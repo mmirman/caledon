@@ -39,9 +39,9 @@ data Spine = Spine !Name ![Type]
 type Type = Spine
 type Term = Spine
 
-data Predicate = Predicate { predName :: !Name, predType :: !Type, predConstructors :: ![(Name,Type)] }
+data Predicate = Predicate { predIsSound :: !Bool, predName :: !Name, predType :: !Type, predConstructors :: ![(Name,Type)] }
                | Query { predName :: !Name, predType :: !Spine}
-               | Define { predName :: !Name, predValue :: !Spine, predType :: !Type}
+               | Define { predIsSound :: !Bool, predName :: !Name, predValue :: !Spine, predType :: !Type}
                deriving (Eq)
 
 class ValueTracker c where
@@ -100,13 +100,16 @@ instance Show Spine where
                       then "("++show t++")" else show t 
   show (Abs nm ty t) = "λ "++nm++" : "++showWithParens ty++" . "++show t
 
+showT True = "defn "
+showT False = "unsound "
+
 instance Show Predicate where
-  show (Predicate nm ty []) = "defn " ++ nm ++ " : " ++ show ty ++ ";"
-  show (Predicate nm ty (a:cons)) =
-    "defn " ++ nm ++ " : " ++ show ty ++ "\n" ++ "   | " ++ showSingle a ++ concatMap (\x-> "\n   | " ++ showSingle x) cons ++ ";"
+  show (Predicate s nm ty []) = showT s ++ nm ++ " : " ++ show ty ++ ";"
+  show (Predicate s nm ty (a:cons)) =
+    showT s++ nm ++ " : " ++ show ty ++ "\n" ++ "   | " ++ showSingle a ++ concatMap (\x-> "\n   | " ++ showSingle x) cons ++ ";"
       where showSingle (nm,ty) = nm ++ " = " ++ show ty
   show (Query nm val) = "query " ++ nm ++ " = " ++ show val
-  show (Define nm val ty) = "defn " ++ nm ++ " : " ++ show ty ++"\n as "++show val
+  show (Define s nm val ty) = showT s ++ nm ++ " : " ++ show ty ++"\n as "++show val
                                                
 var !nm = Spine nm []
 atomName = "prop"
@@ -224,17 +227,17 @@ instance Alpha Spine where
     where nm' = newNameFor nm s
   alphaConvert s (Spine a l) = Spine a $ alphaConvert s l
   
-  rebuildFromMem s (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a ty $ rebuildFromMem (M.delete a s) r
-  rebuildFromMem s (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a ty $ rebuildFromMem (M.delete a s) r
+  rebuildFromMem s (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a (rebuildFromMem s ty) $ rebuildFromMem (M.delete a s) r
+  rebuildFromMem s (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a (rebuildFromMem s ty) $ rebuildFromMem (M.delete a s) r
   rebuildFromMem s (Abs nm ty r) = Abs (fromMaybe nm $ M.lookup nm s) (rebuildFromMem s ty) $ rebuildFromMem s r
   rebuildFromMem s (Spine a l) = Spine a' $ rebuildFromMem s l
     where a' = fromMaybe a $ M.lookup a s
                                  
   
 instance Subst Predicate where
-  substFree sub f (Predicate nm ty cons) = Predicate nm (substFree sub f ty) ((\(nm,t) -> (nm,substFree sub f t)) <$> cons)
+  substFree sub f (Predicate s nm ty cons) = Predicate s nm (substFree sub f ty) ((\(nm,t) -> (nm,substFree sub f t)) <$> cons)
   substFree sub f (Query nm ty) = Query nm (substFree sub f ty)
-  substFree sub f (Define nm val ty) = Define nm (substFree sub f val) (substFree sub f ty)
+  substFree sub f (Define s nm val ty) = Define s nm (substFree sub f val) (substFree sub f ty)
   
 class FV a where         
   freeVariables :: a -> S.Set Name
@@ -244,6 +247,7 @@ instance FV Spine where
   freeVariables t = case t of
     Abs nm t p -> (S.delete nm $ freeVariables p) `mappend` freeVariables t
     Spine "#tycon#" [Spine nm [v]] -> freeVariables v
+    Spine ['\'',_,'\''] [] -> mempty
     Spine head others -> mappend (S.singleton head) $ mconcat $ map freeVariables others
 
 
@@ -444,6 +448,9 @@ consts = [ (atomName , tipe)
                     $ forall "fv" (Spine "f" [var "z"])
                     $ Spine "open" [var "a",  var "f", Spine "pack" [var "a", var "f", var "v", var "fv"] , var "v", var "fv"])
          ]
+
+
+envSet = S.fromList $ map fst consts
 
 toNCCchar c = Spine ['\'',c,'\''] []
 toNCCstring s = foldr cons nil $ map toNCCchar s

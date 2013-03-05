@@ -33,12 +33,12 @@ defn any : {A : prop} (A -> prop) -> prop
 defn openAny : [A][F : A -> prop] any F -> [V : A] F V -> prop
    | openAnyDef = [A][F : A -> prop][V : A][FV : F V] openAny A F (is A V F FV) V FV
 
-
 defn sopen : {A : prop }{F : A -> prop} [V : A] F V => (exists v : A . F v) -> prop 
   as ?\a : prop . ?\ f : a -> prop . \vt : a . ?\ fv : f vt . \an : (exists v : a . f v) . open a f an vt fv
 
-fixity lambda findOne
-defn findOne : [A : prop] (A -> prop) -> prop
+
+fixity lambda free
+defn free : [A : prop] (A -> prop) -> prop
   as \a: prop . any { A = a }
 
 --------------------------
@@ -115,7 +115,7 @@ defn natural  : prop
    | zero = natural
    | succ = natural -> natural
 
-query findSat0 = exists A . A =:= zero
+query findSat0 = free A . A =:= zero
 
 defn add   : natural -> natural -> natural -> prop
    | add_z = [N] add zero N N
