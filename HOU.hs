@@ -657,7 +657,7 @@ typeCheckAxioms lst = do
   let notval (_,s,'#':'v':':':_,_,_) = False
       notval (_,s,_,_,_) = True 
       
-      unsound (_,s,_,_,_) = s
+      unsound (_,s,_,_,_) = not s
       
       tys = M.fromList $ map (\(_,_,nm,ty,_) -> (nm,ty)) $ filter notval lst
       uns = S.fromList $ map (\(_,_,nm,ty,_) -> nm) $ filter unsound $ filter notval lst
