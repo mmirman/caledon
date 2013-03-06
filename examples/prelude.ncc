@@ -12,6 +12,7 @@ defn io : prop
    | do = io
    | ,  = io -> prop -> io 
 
+
 defn run : io -> prop
    | runDo = run do
    | runSeq = [A][B] run (A , B) <- run A 

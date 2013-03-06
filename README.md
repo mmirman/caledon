@@ -21,6 +21,8 @@ Goals
 
 * A language/system for conversing with the machine in a manner less one sided and instructional than regular programming.
 
+* Make automated theorem proving intuitive.  
+
 Philosophies
 ------------
 
@@ -37,6 +39,36 @@ Philosophies
 * Syntax should be elegant.
 
 * Primitives should be minimal, libraries should be extensive.  Learning a culture is easy if you speak the language.  Learning a language by cultural immersion isn't as trivial.
+
+Usage
+-----
+
+* To install from hackage:
+
+```
+> cabal install caledon
+```
+
+* To install directly from source:
+
+```
+> git clone git://github.com/mmirman/caledon.git
+> cd caledon
+> cabal configure
+> cabal install
+```
+
+* To run:
+
+```
+> caledon file.ncc
+```
+
+* Unicode syntax is possible in emacs using: 
+
+```
+M-x \ TeX <ENTER>
+```
 
 Features
 --------
@@ -56,7 +88,7 @@ defn add  : num -> num -> num -> prop
 query subtract = add (succ (succ zero)) 'v (succ (succ (succ zero)))
 ```
 
-* Some basic IO: 
+* Some basic IO: Using unix pipes, this Caledon can be used more seriously.  Somebody plz write a wrapper?
 
 ```
 query main = run $ do 
@@ -64,6 +96,14 @@ query main = run $ do
 	  	 , readLine (\A . do 
    		 , putStr A
                  , putStr "\nbye!\n")
+```
+
+* Shell commands: 
+
+```
+defn ls : string -> string -> prop
+   | ls-imp = [Args Out : string] 
+       ls Args S <- cmd "ls" Args Out
 ```
 
 * Higher order logic programming: like in twelf and lambda-prolog.  This makes HOAS much easier to do.
@@ -84,7 +124,8 @@ defn linear : (trm → trm) → prop
                                ← linear V
 ```
 
-* Calculus of Constructions:  This is now consistent, and still has similar expressive power!
+* Calculus of Constructions:  This is now consistent, and still has similar expressive power!  Now any term must be terminating. Although term/proof search might not be
+terminating, proof search can be used to search more intelligently for theorems in the term language.
 
 ```
 defn maybe   : prop → prop
@@ -102,6 +143,17 @@ defn /\ : prop -> prop -> prop
 infixr 0 |->
 defn |-> : [a : prop] [b : prop] prop
   as \a : prop . \b : prop . [ha : a] b
+```
+
+* Optional Unsound declarations:  Embedding certain terms has never been easier!  This way you can create recursive type definitions such as the well known "prop : prop".  
+
+```
+unsound tm : {S : tm ty} tm S → prop
+   | ty  = tm ty
+   | ♢   = tm ty -> tm ty
+   | Π   = [T : tm ty] (tm T → tm T) → tm $ ♢ T
+   | lam = [T : tm ty][F : tm T → tm T] tm {S = ♢ T} (Π A : T . F A)
+   | raise = {T : tm ty} tm T → tm $ ♢ T
 ```
 
 * Indulgent type inferring nondeterminism:  The entire type checking process is a nondeterministic search for a type check proof.  This could be massively slow, but at least it is complete.  The size of this search is bounded by the size of the types and not the whole program, so this shouldn't be too slow in practice.  (function cases should be small).  I'm working on adding search control primitives to make this more efficient.
@@ -157,17 +209,8 @@ defn not : bool -> bool -> prop
 
 * Optional unicode syntax: Monad m ⇒ ∀ t : goats . m (λ x : t . t → t).
     * implication :  "a -> b"  or "a → b" or "a <- b"  or "a ← b"
-    * implicits:  "a => b"  or "a ⇒ b"
+    * implicits:  "a => b"  or "a ⇒ b" or "a <= b"  or "a ⇐ b"
     * Quantification: "[x:A] t"  or  "∀ x:A . t" or "forall x:A . t"
     * abstraction: "λ x . t" or "\x.t"
     * Quantified implicits: "{x:A} t"  or  "?∀ x:A . t" or "?forall x:A . t"
-
-
-Usage
------
-
-* To install, cabal install
-
-* To run, caledon file.ncc
-
-* Unicode syntax is possible in haskell with M-x \ TeX <ENTER>
+    * implicit abstraction: "?λ x . t" or "?\x.t"
