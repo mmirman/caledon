@@ -1,9 +1,7 @@
 {-# LANGUAGE  
- DeriveFunctor,
  FlexibleInstances,
  PatternGuards,
  UnicodeSyntax,
- TupleSections,
  BangPatterns
  #-}
 module HOU where

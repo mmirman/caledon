@@ -1,10 +1,10 @@
 Name: caledon
 
-Version: 1.0.0.0
+Version: 2.0.0.0
 
-Description:         a dependently typed, polymorphic, higher order logic programming language. ie, everything you need to have a conversation with your computer.
+Description:         a dependently typed, polymorphic, higher order logic programming language based on the calculus of constructions designed for easier metaprogramming capabilities. 
 
-Synopsis:            a dependently typed, polymorphic, higher order logic programming language
+Synopsis:            a logic programming language based on the calculus of constructions
 
 Homepage:            https://github.com/mmirman/caledon
 
@@ -36,14 +36,12 @@ executable caledon
                  containers >= 0.4 && < 1.0, 
                  transformers >= 0.3 && < 1.0
 
-  Extensions: DeriveFunctor,
-              FlexibleContexts,
+  Extensions: FlexibleContexts,
               FlexibleInstances,
               MultiParamTypeClasses,
-              PatternGuards,
               RecordWildCards,
-              TupleSections,
               BangPatterns,
               TypeSynonymInstances
+              
   ghc-options:  -O2 -optc-O3 -funfolding-use-threshold=16 -fspec-constr-count=10 -fdo-lambda-eta-expansion
   

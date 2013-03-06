@@ -1,6 +1,5 @@
 {-# LANGUAGE
- RecordWildCards,
- TupleSections
+ RecordWildCards
  #-}
 
 module Parser where

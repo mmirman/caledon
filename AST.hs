@@ -1,5 +1,4 @@
 {-# LANGUAGE
- DeriveFunctor,
  FlexibleInstances,
  PatternGuards,
  BangPatterns,
