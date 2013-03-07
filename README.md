@@ -98,14 +98,6 @@ query main = run $ do
                  , putStr "\nbye!\n")
 ```
 
-* Shell commands: 
-
-```
-defn ls : string -> string -> prop
-   | ls-imp = [Args Out : string] 
-       ls Args S <- cmd "ls" Args Out
-```
-
 * Higher order logic programming: like in twelf and lambda-prolog.  This makes HOAS much easier to do.
 
 ```
