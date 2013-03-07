@@ -61,7 +61,7 @@ unify cons =  do
   cons <- vtrace 5 ("CONSTRAINTS1: "++show cons) $ regenAbsVars cons
   cons <- vtrace 5 ("CONSTRAINTS2: "++show cons) $ flatten cons
   let uniWhile :: Substitution -> [SCons] -> Env (Substitution, [SCons])
-      uniWhile !sub !c' = do
+      uniWhile !sub !c' = fail "" <|> do
         exists <- getExists       
         c <- regenAbsVars c'     
         let -- eventually we can make the entire algorithm a graph modification algorithm for speed, 
@@ -469,15 +469,13 @@ rightSearch m goal = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $
         then return $ Just []
         else case targets of
           [] -> return Nothing
-          _  -> Just <$> (F.asum $ leftSearch m goal <$> reverse targets) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
+          _  -> do Just <$> (F.asum $ leftSearch m goal <$> reverse targets) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
 
 a .-. s = foldr (\k v -> M.delete k v) a s 
 
-leftSearch m goal (x,target) = vtrace 1 ("LS: " ++ show m ++" ∈ "++ show goal
-                                        ++"\n\t@ " ++x++" : " ++show target)
+leftSearch m goal (x,target) = vtrace 1 ("LS: "++x++" ∈ " ++show target++ " >> "++show m ++" ∈ "++ show goal)
                              $ leftCont (var x) target
-  where leftCont n target = throwTrace 3 ("DEFER: LS: " ++ show m ++" ∈ "++ show goal
-                                        ++"\n\t@ " ++x++" : " ++show target) <|> case target of
+  where leftCont n target = case target of
           Spine "#forall#" [a, b] -> do
             x' <- getNewWith "@sla"
             modifyCtxt $ addToTail "-lsF-" Exists x' a
