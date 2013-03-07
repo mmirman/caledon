@@ -26,4 +26,4 @@ defn runBoth : bool -> prop
                 <- putChar 'f'
                 <- A =:= false
 
-query main = runBoth true
+query main = runBoth false

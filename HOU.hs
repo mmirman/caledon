@@ -63,7 +63,7 @@ unify cons =  do
   cons <- vtrace 5 ("CONSTRAINTS1: "++show cons) $ regenAbsVars cons
   cons <- vtrace 5 ("CONSTRAINTS2: "++show cons) $ flatten cons
   let uniWhile :: Substitution -> [SCons] -> Env (Substitution, [SCons])
-      uniWhile !sub !c' = do
+      uniWhile !sub !c' = fail "" <|> do
         exists <- getExists       
         c <- regenAbsVars c'     
         let uniWith !wth !backup = searchIn c []
@@ -93,9 +93,6 @@ checkFinished [] = return ()
 checkFinished cval = throwTrace 0 $ "ambiguous constraint: " ++show cval
 
 unifySearch :: SCons -> CONT_T b Env UnifyResult
-unifySearch (LeftSearch a b) return = do
-  cons <- leftSearch a b
-  return $ Just (mempty, cons)
 unifySearch (a :@: b) return | b /= atom = rightSearch a b $ newReturn return
 unifySearch _ return = return Nothing
 
@@ -104,9 +101,6 @@ newReturn return cons = return $ case cons of
   Just cons -> Just (mempty, cons)
 
 unifySearchAtom :: SCons -> CONT_T b Env UnifyResult
-unifySearchAtom (LeftSearch a b) return = do
-  cons <- leftSearch a b
-  return $ Just (mempty, cons)
 unifySearchAtom (a :@: b) return = rightSearch a b $ newReturn return
 unifySearchAtom _ return = return Nothing
 
@@ -395,7 +389,7 @@ gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
 
 -- need bidirectional search!
 rightSearch :: Term -> Type -> CONT_T b Env (Maybe [SCons])
-rightSearch m goal ret = fail "" <|> -- vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ 
+rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ -- fail "" <|>
   case goal of
     Spine "#forall#" [a, b] -> do
       y <- getNewWith "@sY"
@@ -433,7 +427,7 @@ rightSearch m goal ret = fail "" <|> -- vtrace 1 ("-rs- "++show m++" ∈ "++show
         _ -> breadth -- we should pretty much always use breadth first search here maybe, since this is type search
           where srch r1 r2 = r1 $ F.asum $ r2 . Just . return . (m :=:) <$> [atom , tipe] -- for breadth first
                 breadth = srch (ret =<<) return
-                depth = srch id ret
+                depth = srch id (appendErr "" . ret)
           
     Spine nm _ -> do
       constants <- getConstants
@@ -474,28 +468,30 @@ rightSearch m goal ret = fail "" <|> -- vtrace 1 ("-rs- "++show m++" ∈ "++show
           [] -> ret Nothing
           _  -> depth
             -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
-            where search r1 r2 = r1 $ F.msum $ (r2 . Just . ls) <$> reverse targets
-                  ls (nm,target) = [LeftSearch (m,goal) (var nm, target)]
+            where search r1 r2 = r1 $ F.asum $ (r2 . Just <=< ls) <$> reverse targets
+                  ls (nm,target) = leftSearch (m,goal) (var nm, target)
                   breadth = search (ret =<<) return
-                  depth   = search id ret
+                  depth   = search id (appendErr "" . ret)
 
 a .-. s = foldr (\k v -> M.delete k v) a s 
 
-leftSearch (m,goal) (n,target) = 
-  throwTrace 3 ("DEFER: " ++ show (LeftSearch (m,goal) (n,target))) <|> 
-  case target of
-    Spine "#forall#" [a, b] -> do
-      x' <- getNewWith "@sla"
-      modifyCtxt $ addToTail "-lsF-" Exists x' a
-      return $ [LeftSearch (m,goal) (n `apply` var x', b `apply` var x'), var x' :@: a]
+leftSearch (m,goal) (x,target) = vtrace 1 ("LS: " ++ show x++" ∈ " ++show target++" >> " ++show m ++" ∈ "++ show goal)
+                               $ leftCont x target
+  where leftCont n target = case target of
+          Spine "#forall#" [a, b] -> do
+            x' <- getNewWith "@sla"
+            modifyCtxt $ addToTail "-lsF-" Exists x' a
+            cons <- leftCont (n `apply` var x') (b `apply` var x')
+            return $ cons++[var x' :@: a]
 
-    Spine "#imp_forall#" [_ , Abs x a b] -> do  
-      x' <- getNewWith "@isla"
-      modifyCtxt $ addToTail "-lsI-" Exists x' a
-      return $ [LeftSearch (m,goal) (n `apply` (tycon x $ var x') , subst (x |-> var x') b), var x' :@: a]
-    Spine _ _ -> do
-      return $ [goal :=: target , m :=: n]
-    _ -> error $ "λ does not have type atom: " ++ show target
+          Spine "#imp_forall#" [_ , Abs x a b] -> do  
+            x' <- getNewWith "@isla"
+            modifyCtxt $ addToTail "-lsI-" Exists x' a
+            cons <- leftCont (n `apply` (tycon x $ var x')) (subst (x |-> var x') b)
+            return $ cons++[var x' :@: a]
+          Spine _ _ -> do
+            return $ [goal :=: target, m :=: n]
+          _ -> error $ "λ does not have type atom: " ++ show target
 
 
 search :: Type -> Env (Substitution, Term)
