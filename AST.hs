@@ -2,7 +2,8 @@
  FlexibleInstances,
  PatternGuards,
  BangPatterns,
- FlexibleContexts
+ FlexibleContexts,
+ TupleSections
  #-}
 
 module AST where
@@ -274,6 +275,7 @@ infixr 1 :&:
 -- the lhs!
 data SCons = !Term :@: !Type
            | !Spine :=: !Spine
+           | LeftSearch (Spine,Spine) (Spine,Spine)
            deriving (Eq)
 data Constraint = SCons [SCons]
                   -- we don't necessarily have to traverse the rhs of a combination
@@ -285,6 +287,7 @@ data Constraint = SCons [SCons]
 instance Show SCons where
   show (a :=: b) = show a++" ≐ "++show b
   show (a :@: b) = show a++" ∈ "++show b
+  show (LeftSearch (a,b) (a',b')) = show a'++" ∈ "++show b'++" >> "++show a++" ∈ "++show b
   
 instance Show Constraint where
   show (SCons []) = " ⊤ "
@@ -316,6 +319,7 @@ instance Subst SCons where
   substFree s f c = case c of
     s1 :@: s2 -> subq s f (:@:) s1 s2
     s1 :=: s2 -> subq s f (:=:) s1 s2
+    LeftSearch (s1,s2) (s1',s2') -> LeftSearch (subq s f (,) s1 s2) (subq s f (,) s1' s2')
     
 instance Subst Constraint where
   substFree s f c = case c of
@@ -378,12 +382,20 @@ instance RegenAbsVars Spine where
 instance RegenAbsVars SCons where
   regenAbsVars cons = case cons of
     a :=: b -> regen (:=:) a b
+    LeftSearch (a,b) (a',b')-> do
+      l <- regen (,) a b
+      l' <- regen (,) a' b'
+      return $ LeftSearch l l'
     a :@: b -> regen (:@:) a b
     
   regenWithMem cons = case cons of
     a :=: b -> regenM (:=:) a b
     a :@: b -> regenM (:@:) a b    
-    
+    LeftSearch (a,b) (a',b')-> do
+      (l,mem) <- regenM (,) a b
+      (l',mem') <- regenM (,) a' b'
+      return $ (LeftSearch l l', M.union mem mem')
+      
 instance RegenAbsVars Constraint where  
   regenAbsVars cons = case cons of
     Bind q nm ty cons -> do

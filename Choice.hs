@@ -12,7 +12,7 @@ import Control.Monad
 import Data.Functor
 import Control.Applicative
 import Control.Monad.Error.Class (catchError, throwError, MonadError)
-
+import Control.Monad.Cont
 
 data Choice a = Choice a :<|>: Choice a
               | Fail String
@@ -69,3 +69,13 @@ instance MonadError String Choice where
   catchError try1 foo_try2 = case runError try1 of
     Left s -> foo_try2 s
     Right a -> Success a
+
+type CONT_T a m c = ((c -> m a) -> m a)
+
+-- why doesn't this exist in the standard library?
+instance (Monad m, Alternative m) => Alternative (ContT a m) where
+  empty = lift $ empty
+  c1 <|> c2 = ContT $ \cont -> m1f cont <|> m2f cont
+    where m1f = runContT c1
+          m2f = runContT c2
+    

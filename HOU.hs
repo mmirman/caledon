@@ -13,7 +13,7 @@ import TopoSortAxioms
 import Control.Monad.State (StateT, forM_,runStateT, modify, get)
 import Control.Monad.RWS (RWST, runRWST, ask, tell)
 import Control.Monad.Error (throwError, MonadError)
-import Control.Monad (unless, forM, replicateM, void)
+import Control.Monad (unless, forM, replicateM, void, (<=<))
 import Control.Monad.Trans (lift)
 import Control.Applicative
 import qualified Data.Foldable as F
@@ -56,6 +56,8 @@ flatten (c1 :&: c2) = do
   return $ l1 ++ l2
 flatten (SCons l) = return l
 
+type UnifyResult = Maybe (Substitution, [SCons])
+
 unify :: Constraint -> Env Substitution
 unify cons =  do
   cons <- vtrace 5 ("CONSTRAINTS1: "++show cons) $ regenAbsVars cons
@@ -64,27 +66,19 @@ unify cons =  do
       uniWhile !sub !c' = do
         exists <- getExists       
         c <- regenAbsVars c'     
-        let -- eventually we can make the entire algorithm a graph modification algorithm for speed, 
-            -- such that we don't have to topologically sort every time.  Currently this only takes us from O(n log n) to O(n) per itteration, it is
-            -- not necessarily worth it.
-            uniWith !wth !backup = do
-              let searchIn [] r = return Nothing
-                  searchIn (next:l) r = do
-                    c1' <- wth next 
-                    case c1' of
-                      Just (sub',next') -> return $ Just (sub', (subst sub' $ reverse r)++
-                                                                next'
-                                                                ++subst sub' l)
-                      Nothing -> searchIn l (next:r)
-              res <- searchIn c []
-              case res of
-                Nothing -> do
-                  backup
-                Just (!sub', c') -> do
-                  let !sub'' = sub *** sub'
-                  modifyCtxt $ subst sub'
-                  uniWhile sub'' $! c'
-
+        let uniWith !wth !backup = searchIn c []
+              where searchIn [] r = finish Nothing
+                    searchIn (next:l) r = 
+                      wth next $ \c1' -> case c1' of
+                            Just (sub',next') -> finish $ Just (sub', subst sub' (reverse r)++next'++subst sub' l)
+                            Nothing -> searchIn l $ next:r
+                    finish Nothing = backup
+                    finish (Just (!sub', c')) = do
+                      let !sub'' = sub *** sub'
+                      modifyCtxt $ subst sub'
+                      uniWhile sub'' $! c'
+              
+              
         vtrace 3 ("CONST: "++show c)
           ( uniWith unifyOne 
           $ uniWith unifySearch
@@ -95,32 +89,36 @@ unify cons =  do
   fst <$> uniWhile mempty cons
 
 
-
 checkFinished [] = return ()
 checkFinished cval = throwTrace 0 $ "ambiguous constraint: " ++show cval
 
-unifySearch :: SCons -> Env (Maybe (Substitution, [SCons]))
-unifySearch (a :@: b) | b /= atom = do
-  cons <- rightSearch a b
-  return $ case cons of
-    Nothing -> Nothing
-    Just cons -> Just (mempty, cons)
-unifySearch _ = return Nothing
+unifySearch :: SCons -> CONT_T b Env UnifyResult
+unifySearch (LeftSearch a b) return = do
+  cons <- leftSearch a b
+  return $ Just (mempty, cons)
+unifySearch (a :@: b) return | b /= atom = rightSearch a b $ newReturn return
+unifySearch _ return = return Nothing
 
-unifySearchAtom (a :@: b) = do
-  cons <- rightSearch a b
-  return $ case cons of
-    Nothing -> Nothing
-    Just cons -> Just (mempty, cons)
-unifySearchAtom _ = return Nothing
+newReturn return cons = return $ case cons of
+  Nothing -> Nothing
+  Just cons -> Just (mempty, cons)
 
-unifyOne :: SCons -> Env (Maybe (Substitution , [SCons]))
-unifyOne (a :=: b) = do
+unifySearchAtom :: SCons -> CONT_T b Env UnifyResult
+unifySearchAtom (LeftSearch a b) return = do
+  cons <- leftSearch a b
+  return $ Just (mempty, cons)
+unifySearchAtom (a :@: b) return = rightSearch a b $ newReturn return
+unifySearchAtom _ return = return Nothing
+
+
+
+unifyOne :: SCons -> CONT_T b Env UnifyResult
+unifyOne (a :=: b) return = do
   c' <- isolateForFail $ unifyEq $ a :=: b 
   case c' of 
-    Nothing -> isolateForFail $ unifyEq $ b :=: a
+    Nothing -> return =<< (isolateForFail $ unifyEq $ b :=: a)
     r -> return r
-unifyOne _ = return Nothing
+unifyOne _ return = return Nothing
 
 unifyEq cons@(a :=: b) = case (a,b) of 
   (Spine "#imp_forall#" [ty, l], b) -> vtrace 1 "-implicit-" $ do
@@ -396,7 +394,8 @@ gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
 
 
 -- need bidirectional search!
-rightSearch m goal = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ 
+rightSearch :: Term -> Type -> CONT_T b Env (Maybe [SCons])
+rightSearch m goal ret = fail "" <|> -- vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ 
   case goal of
     Spine "#forall#" [a, b] -> do
       y <- getNewWith "@sY"
@@ -404,7 +403,7 @@ rightSearch m goal = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $
       let b' = b `apply` var x'
       modifyCtxt $ addToTail "-rsFf-" Forall x' a
       modifyCtxt $ addToTail "-rsFe-" Exists y b'
-      return $ Just [ var y :=: m `apply` var x' , var y :@: b']
+      ret $ Just [ var y :=: m `apply` var x' , var y :@: b']
 
     Spine "#imp_forall#" [_, Abs x a b] -> do
       y <- getNewWith "@isY"
@@ -412,26 +411,30 @@ rightSearch m goal = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $
       let b' = subst (x |-> var x') b
       modifyCtxt $ addToTail "-rsIf-" Forall x' a        
       modifyCtxt $ addToTail "-rsIe-" Exists y b'
-      return $ Just [ var y :=: m `apply` (tycon x $ var x')
-                    , var y :@: b'
-                    ]
-    Spine "putChar" [c@(Spine ['\'',l,'\''] [])] ->
-      case unsafePerformIO $ putStr $ l:[] of
-        () -> return $ Just [ m :=: Spine "putCharImp" [c]]
-    Spine "putChar" [_] -> vtrace 0 "FAILING PUTCHAR" $ return Nothing
+      ret $ Just [ var y :=: m `apply` (tycon x $ var x')
+                 , var y :@: b'
+                 ]
+    Spine "putChar" [c@(Spine ['\'',l,'\''] [])] -> ret $ Just $ (m :=: Spine "putCharImp" [c]):seq action []
+      where action = unsafePerformIO $ putStr $ l:[]
+
+    Spine "putChar" [_] -> vtrace 0 "FAILING PUTCHAR" $ ret Nothing
   
     Spine "readLine" [l] -> 
       case toNCCstring $ unsafePerformIO $ getLine of
-        !s -> do
+        s -> do -- ensure this is lazy so we don't check for equality unless we have to.
           y <- getNewWith "@isY"
           let ls = l `apply` s
           modifyCtxt $ addToTail "-rl-" Exists y ls
-          return $ Just [m :=: Spine "readLineImp" [l,s, var y], var y :@: Spine "run" [ls]]
+          ret $ Just [m :=: Spine "readLineImp" [l,s {- this is only safe because lists are lazy -}, var y], var y :@: Spine "run" [ls]]
     _ | goal == kind -> do
       case m of
         Abs{} -> throwError "not properly typed"
-        _ | m == tipe || m == atom -> return $ Just []
-        _ -> F.asum $ return . Just . return . (m :=:) <$> [atom , tipe]
+        _ | m == tipe || m == atom -> ret $ Just []
+        _ -> breadth -- we should pretty much always use breadth first search here maybe, since this is type search
+          where srch r1 r2 = r1 $ F.asum $ r2 . Just . return . (m :=:) <$> [atom , tipe] -- for breadth first
+                breadth = srch (ret =<<) return
+                depth = srch id ret
+          
     Spine nm _ -> do
       constants <- getConstants
       foralls <- getForalls
@@ -466,32 +469,34 @@ rightSearch m goal = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $
           return $ filter sameFamily $ M.toList searchMap
       
       if all isFixed $ S.toList $ S.union (freeVariables m) (freeVariables goal)
-        then return $ Just []
+        then ret $ Just []
         else case targets of
-          [] -> return Nothing
-          _  -> Just <$> (F.asum $ leftSearch m goal <$> reverse targets) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
+          [] -> ret Nothing
+          _  -> depth
+            -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
+            where search r1 r2 = r1 $ F.msum $ (r2 . Just . ls) <$> reverse targets
+                  ls (nm,target) = [LeftSearch (m,goal) (var nm, target)]
+                  breadth = search (ret =<<) return
+                  depth   = search id ret
 
 a .-. s = foldr (\k v -> M.delete k v) a s 
 
-leftSearch m goal (x,target) = vtrace 1 ("LS: " ++ show m ++" ∈ "++ show goal
-                                        ++"\n\t@ " ++x++" : " ++show target)
-                             $ leftCont (var x) target
-  where leftCont n target = throwTrace 3 ("DEFER: LS: " ++ show m ++" ∈ "++ show goal
-                                        ++"\n\t@ " ++x++" : " ++show target) <|> case target of
-          Spine "#forall#" [a, b] -> do
-            x' <- getNewWith "@sla"
-            modifyCtxt $ addToTail "-lsF-" Exists x' a
-            cons <- leftCont (n `apply` var x') (b `apply` var x')
-            return $ cons++[var x' :@: a]
+leftSearch (m,goal) (n,target) = 
+  throwTrace 3 ("DEFER: " ++ show (LeftSearch (m,goal) (n,target))) <|> 
+  case target of
+    Spine "#forall#" [a, b] -> do
+      x' <- getNewWith "@sla"
+      modifyCtxt $ addToTail "-lsF-" Exists x' a
+      return $ [LeftSearch (m,goal) (n `apply` var x', b `apply` var x'), var x' :@: a]
 
-          Spine "#imp_forall#" [_ , Abs x a b] -> do  
-            x' <- getNewWith "@isla"
-            modifyCtxt $ addToTail "-lsI-" Exists x' a
-            cons <- leftCont (n `apply` (tycon x $ var x')) (subst (x |-> var x') b)
-            return $ cons++[var x' :@: a]
-          Spine _ _ -> do
-            return $ [goal :=: target , m :=: n]
-          _ -> error $ "λ does not have type atom: " ++ show target
+    Spine "#imp_forall#" [_ , Abs x a b] -> do  
+      x' <- getNewWith "@isla"
+      modifyCtxt $ addToTail "-lsI-" Exists x' a
+      return $ [LeftSearch (m,goal) (n `apply` (tycon x $ var x') , subst (x |-> var x') b), var x' :@: a]
+    Spine _ _ -> do
+      return $ [goal :=: target , m :=: n]
+    _ -> error $ "λ does not have type atom: " ++ show target
+
 
 search :: Type -> Env (Substitution, Term)
 search ty = do
