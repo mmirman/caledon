@@ -164,7 +164,7 @@ unifyEq cons@(a :=: b) = case (a,b) of
         raiseToTop bind (Spine x yl) $ \(a@(Spine x yl),ty) sub ->
           case subst sub s' of
             b@(Spine x' y'l) -> vtrace 4 "-gs-" $ do
-              bind' <- getElm ("gvar-blah: "++show cons) x'
+              bind' <- getElm ("gvar-blah: "++show cons) x' 
               case bind' of
                 Right ty' -> vtraceShow 1 2 "-gc-" cons $ -- gvar-const
                   --if allElementsAreVariables yl
@@ -415,9 +415,9 @@ rightSearch m goal = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $
       return $ Just [ var y :=: m `apply` (tycon x $ var x')
                     , var y :@: b'
                     ]
-    Spine "putChar" [c@(Spine ['\'',l,'\''] [])] ->
-      case unsafePerformIO $ putStr $ l:[] of
-        () -> return $ Just [ m :=: Spine "putCharImp" [c]]
+    Spine "putChar" [c@(Spine ['\'',l,'\''] [])] -> return $ Just $ (m :=: Spine "putCharImp" [c]): seq s []
+      where s = unsafePerformIO $ putStr $ l:[] -- make the action lazy
+
     Spine "putChar" [_] -> vtrace 0 "FAILING PUTCHAR" $ return Nothing
   
     Spine "readLine" [l] -> 
