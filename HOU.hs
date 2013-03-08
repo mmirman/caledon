@@ -41,6 +41,9 @@ vtraceShow !i1 !i2 s v = id
 {-# INLINE throwTrace #-}
 throwTrace !i s = vtrace i s $ throwError s
 
+mtrace True = trace
+mtrace False = const id
+
 
 -----------------------------------------------
 ---  the higher order unification algorithm ---
@@ -672,8 +675,8 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 ----------------------------
 
 type FlatPred = [(Maybe Name,(Bool,Integer,Bool),Name,Term,Type)]
-typeCheckAxioms :: FlatPred -> Choice Substitution
-typeCheckAxioms lst = do
+typeCheckAxioms :: Bool -> FlatPred -> Choice Substitution
+typeCheckAxioms verbose lst = do
   
   -- check the closedness of families.  this gets done
   -- after typechecking since family checking needs to evaluate a little bit
@@ -692,7 +695,7 @@ typeCheckAxioms lst = do
       inferAll (_ , r, (_,_,nm,_,_):_) | nm == atomName = throwTrace 0 $ atomName++" can not be overloaded"
       inferAll (l , r, (fam,(b,i,s),nm,val,ty):toplst) = do
         (val,ty,l') <- appendErr ("can not infer type for: "++nm++" : "++show val) $ 
-                       trace ("Checking: " ++nm) $ 
+                       mtrace verbose ("Checking: " ++nm) $ 
                        vtrace 0 ("\tVAL: " ++show val  
                                  ++"\n\t:: " ++show ty) $
                        typeInfer l ((b,i),nm, val,ty) -- constrain the breadth first search to be local!
@@ -726,10 +729,10 @@ typeCheckAxioms lst = do
   
   return $ snd <$> l 
   
-typeCheckAll :: [Predicate] -> Choice [Predicate]
-typeCheckAll preds = do
+typeCheckAll :: Bool -> [Predicate] -> Choice [Predicate]
+typeCheckAll verbose preds = do
 
-  tyMap <- typeCheckAxioms $ toAxioms True preds
+  tyMap <- typeCheckAxioms verbose $ toAxioms True preds
   
   let newPreds (Predicate t nm _ cs) = Predicate t nm (tyMap M.! nm) $ map (\(b,(nm,_)) -> (b,(nm, tyMap M.! nm))) cs
       newPreds (Query nm _) = Query nm (tyMap M.! nm)

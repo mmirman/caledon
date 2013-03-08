@@ -1,0 +1,64 @@
+---------------
+-- builtins ---
+---------------
+defn char : prop  -- builtin
+
+defn putChar    :  char -> prop -- builtin
+   | putCharImp = [A] putChar A
+
+-- for sequencing io actions
+fixity left 1 ,
+defn io : prop
+   | do = io
+   | ,  = io -> prop -> io 
+
+defn run : io -> prop
+  >| runDo = run do
+  >| runSeq = [A][B] run (A , B) <- run A 
+                         	 <- B
+
+defn readLine    : (string -> io) -> prop -- builtin 
+   | readLineImp = [Foo : string -> io] [A : string] readLine Foo <- run (Foo A)
+
+defn string : prop
+  as list char
+
+--------------------------
+--- useful combinators ---
+--------------------------
+fixity right 0 $
+defn $ : {at bt:prop} (at -> bt) -> at -> bt
+  as ?\ at bt . \ f . \a . f a
+
+
+-------------
+--- Lists ---
+-------------
+defn list : prop -> prop
+   | nil  = {a} list a
+   | cons = {a} a -> list a -> list a
+
+----------------
+--- printing ---
+----------------
+
+defn putStr : string -> prop
+  >| putStr_Nil = putStr $ nil {a = char}
+  >| putStr_Cons = [v:char][l: string] 
+                   putStr $ cons {a = char} v l 
+                <- putChar v
+                <- putStr l
+
+------------
+--- main ---
+------------
+
+defn ismain : prop 
+  as run $ do 
+         , putStr "name?\n"
+         , readLine (\A . do 
+         , putStr "hi "
+   	 , putStr A
+         , putStr "!\n")
+
+query main = ismain
