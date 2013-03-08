@@ -13,8 +13,8 @@ defn io : prop
    | ,  = io -> prop -> io 
 
 defn run : io -> prop
-   | runDo = run do
-   | runSeq = [A][B] run (A , B) <- run A 
+  >| runDo = run do
+  >| runSeq = [A][B] run (A , B) <- run A 
                          	 <- B
 
 defn readLine    : (string -> io) -> prop -- builtin 
@@ -61,12 +61,12 @@ defn flip : {at bt ct : prop} (at -> bt -> ct) -> bt -> at -> ct
 -------------------
 fixity none 1 =:=
 defn =:= : {Q} Q -> Q -> prop
-   | eq = [a : prop][b:a] (=:=) {Q = a} b b
+  >| eq = [a : prop][b:a] (=:=) {Q = a} b b
 
 -- searching for these is SLOW
 fixity none 0 /\
 defn /\ : prop -> prop -> prop
-   | and = [a b : prop] a -> b -> a /\ b
+  >| and = [a b : prop] a -> b -> a /\ b
 
 fixity none 0 \/
 defn \/ : prop -> prop -> prop
@@ -90,7 +90,7 @@ defn concatable : [M : prop] (M -> M -> M -> prop) -> prop
 -- it correctly infers 169, and M (but it eta expands Foo when it infers it) !!
 fixity right 3 ++
 defn ++ : {M}{Foo}{cm : concatable M Foo} M -> M -> M -> prop
-   | ppimp = [M][Foo : M -> M -> M -> prop][M1 M2 M3 : M] 
+  >| ppimp = [M][Foo : M -> M -> M -> prop][M1 M2 M3 : M] 
               (++) {Foo = Foo} M1 M2 M3 
             <- concatable M Foo 
             <- Foo M1 M2 M3 
@@ -99,11 +99,11 @@ defn ++ : {M}{Foo}{cm : concatable M Foo} M -> M -> M -> prop
 --- Order ---
 -------------
 defn orderable : [M : prop] (M -> M -> prop) -> prop
-   | orderableNatural = orderable natural lte-nat
+  >| orderableNatural = orderable natural lte-nat
 
 fixity right 3 =< 
 defn =< : {M : prop}{Foo: M -> M -> prop}{co : orderable M Foo} M -> M -> prop
-   | ooimp = [M][Foo : M -> M -> prop] [M1 M2 : M] 
+  >| ooimp = [M][Foo : M -> M -> prop] [M1 M2 : M] 
            (=<) {M = M} M1 M2 
           <- orderable M Foo
           <- Foo M1 M2
@@ -118,8 +118,8 @@ defn natural  : prop
 query findSat0 = free A : natural . A =:= zero
 
 defn add   : natural -> natural -> natural -> prop
-   | add_z = [N] add zero N N
-   | add_s = [N M R] add N M R -> add (succ N) M (succ R)
+  >| add_z = [N] add zero N N
+  >| add_s = [N M R] add N M R -> add (succ N) M (succ R)
 
 query add0 = add (succ zero) zero (succ zero)
 
@@ -131,13 +131,13 @@ defn sub   : natural -> natural -> natural -> prop
 
 
 defn lte-nat : natural -> natural -> prop
-   | leqZero = [B] lte-nat zero B
-   | leqSucc = [A B] lte-nat (succ A) (succ B) <- lte-nat A B
+  >| leqZero = [B] lte-nat zero B
+  >| leqSucc = [A B] lte-nat (succ A) (succ B) <- lte-nat A B
 
 fixity none 3 <
 defn < : natural -> natural -> prop
-   | ltZero = [B] zero < succ B
-   | ltSucc = [A B] succ A < succ B <- A < B
+  >| ltZero = [B] zero < succ B
+  >| ltSucc = [A B] succ A < succ B <- A < B
 
 query add2 = exists A : natural . add (succ zero) zero A
 
@@ -163,16 +163,16 @@ defn list : prop -> prop
    | cons = {a} a -> list a -> list a
 
 defn concatList : {A} list A -> list A -> list A -> prop
-   | concatListNil  = [T][L:list T] concatList {A = T} nil L L
-   | concatListCons = [T][A B C : list T][V:T] concatList (cons V A) B (cons V C) <- concatList A B C
+  >| concatListNil  = [T][L:list T] concatList {A = T} nil L L
+  >| concatListCons = [T][A B C : list T][V:T] concatList (cons V A) B (cons V C) <- concatList A B C
 
 ----------------
 --- printing ---
 ----------------
 
 defn putStr : string -> prop
-   | putStr_Nil = putStr $ nil {a = char}
-   | putStr_Cons = [v:char][l: string] 
+  >| putStr_Nil = putStr $ nil {a = char}
+  >| putStr_Cons = [v:char][l: string] 
                    putStr $ cons {a = char} v l 
                 <- putChar v
                 <- putStr l
@@ -194,8 +194,8 @@ defn |:| : {t:prop} t -> t -> (t -> t -> t) -> t
 
 fixity none 0 ==>
 defn ==> : {A : prop} bool -> ((A -> A -> A) -> A) -> A -> prop
-   | thentrue  = [a : prop][f: _ -> a] (true ==> f)  (f (\a1 a2 : a . a1))
-   | thenfalse = [b : prop][f: _ -> b] (false ==> f) (f (\a1 a2 : b . a2))
+  >| thentrue  = [a : prop][f: _ -> a] (true ==> f)  (f (\a1 a2 : a . a1))
+  >| thenfalse = [b : prop][f: _ -> b] (false ==> f) (f (\a1 a2 : b . a2))
 
 defn not : bool -> bool -> prop
   as \zq . if zq ==> false |:| true

@@ -44,12 +44,11 @@ checkAndRun decs = do
       
       axioms = toSimpleAxioms predicates'
   
-  forM_ targets' $ \target ->
+  forM_ targets' $ \target -> do
+    putStrLn $ "\nTARGET: \n"++show target
     case solver axioms $ predType target of
       Left e -> putStrLn $ "ERROR: "++e
-      Right sub -> putStrLn $
-                   "\nTARGET: \n"++show target
-                   ++"\n\nSOLVED WITH:\n"
+      Right sub -> putStrLn $ "SOLVED WITH:\n"
                    ++concatMap (\(a,b) -> a++" => "++show b++"\n") sub
 
 main = do

@@ -466,15 +466,6 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
       if all isFixed $ S.toList $ S.union (freeVariables m) (freeVariables goal)
         then ret $ Just []
         else case targets of
-<<<<<<< HEAD
-          [] -> return Nothing
-          _  -> do Just <$> (F.asum $ leftSearch m goal <$> reverse targets) -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
-
-a .-. s = foldr (\k v -> M.delete k v) a s 
-
-leftSearch m goal (x,target) = vtrace 1 ("LS: "++x++" ∈ " ++show target++ " >> "++show m ++" ∈ "++ show goal)
-                             $ leftCont (var x) target
-=======
           [] -> ret Nothing
           _  -> inter [] $ sortBy (\a b -> compare (getVal a) (getVal b)) targets
             where ls (nm,target) = leftSearch (m,goal) (var nm, target)
@@ -494,7 +485,6 @@ a .-. s = foldr (\k v -> M.delete k v) a s
 
 leftSearch (m,goal) (x,target) = vtrace 1 ("LS: " ++ show x++" ∈ " ++show target++" >> " ++show m ++" ∈ "++ show goal)
                                $ leftCont x target
->>>>>>> depth
   where leftCont n target = case target of
           Spine "#forall#" [a, b] -> do
             x' <- getNewWith "@sla"
