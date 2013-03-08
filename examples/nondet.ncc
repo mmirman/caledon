@@ -40,3 +40,4 @@ defn runBoth : bool -> prop
                 <- A =:= false
   
 query main = runBoth false
+

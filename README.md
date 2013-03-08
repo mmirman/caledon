@@ -177,6 +177,32 @@ defn functor_maybe : functor maybe -> prop.
 -- this syntax is rather verbose for the moment.  I have yet to add typeclass syntax sugar.
 ```
 
+* Nondeterminism control:  You can now control what patterns to match against sequentially versus in concurrently.  This gives you massive control over program execution, and in the future might be implemented with REAL threads!
+
+```
+defn runBoth : bool -> prop
+  >| run0 = [A] runBoth A 
+                <- putStr "tttt "
+                <- A =:= true
+
+   | run1 = [A] runBoth A
+                <- putStr "vvvv"
+                <- A =:= true
+
+   | run2 = [A] runBoth A
+                <- putStr "qqqq"
+                <- A =:= true
+
+  >| run3 = [A] runBoth A
+                <- putStr " jjjj"
+                <- A =:= false
+
+query main = runBoth false
+
+-- main should print out something along the lines of "tttt vvqvqvqq jjjj"
+```
+
+
 * Arbitrary operator fixities:  combined with the calculus of constructions, you can nearly do agda style syntax (with a bit of creativity)!
 
 ```
