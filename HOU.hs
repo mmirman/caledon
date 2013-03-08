@@ -63,7 +63,7 @@ unify cons =  do
   cons <- vtrace 5 ("CONSTRAINTS1: "++show cons) $ regenAbsVars cons
   cons <- vtrace 5 ("CONSTRAINTS2: "++show cons) $ flatten cons
   let uniWhile :: Substitution -> [SCons] -> Env (Substitution, [SCons])
-      uniWhile !sub !c' = fail "" <|> do
+      uniWhile !sub !c' = do
         exists <- getExists       
         c <- regenAbsVars c'     
         let uniWith !wth !backup = searchIn c []
@@ -389,7 +389,7 @@ gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
 
 -- need bidirectional search!
 rightSearch :: Term -> Type -> CONT_T b Env (Maybe [SCons])
-rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ -- fail "" <|>
+rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (show m++" ∈ "++show goal) <|>
   case goal of
     Spine "#forall#" [a, b] -> do
       y <- getNewWith "@sY"
@@ -437,7 +437,7 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ -- fai
       
           isFixed a = isChar a || M.member a env
       
-          getFixedType a | isChar a = Just $ var "char"
+          getFixedType a | isChar a = Just $ anonymous $ var "char"
           getFixedType a = M.lookup a env
       
       let mfam = case m of 
@@ -445,10 +445,10 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ -- fai
             Spine nm _ -> case getFixedType nm of
               Just t -> Just (nm,t)
               Nothing -> Nothing
-  
-          sameFamily (_, Abs _ _ _) = False
-          sameFamily ("pack",s) = "#exists#" == nm
-          sameFamily (_,s) = getFamily s == nm
+
+          sameFamily (_, (_,Abs{})) = False
+          sameFamily ("pack",_) = "#exists#" == nm
+          sameFamily (_,(_,s)) = getFamily s == nm
           
       targets <- case mfam of
         Just (nm,t) -> return $ [(nm,t)]
@@ -456,7 +456,8 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ -- fai
           let excludes = S.toList $ S.intersection (M.keysSet exists) $ freeVariables m
           searchMaps <- mapM getVariablesBeforeExists excludes
           
-          let searchMap = M.union env $ case searchMaps of
+          let searchMap :: ContextMap
+              searchMap = M.union env $ case searchMaps of
                 [] -> mempty
                 a:l -> foldr (M.intersection) a l
                 
@@ -466,13 +467,20 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ -- fai
         then ret $ Just []
         else case targets of
           [] -> ret Nothing
-          _  -> depth
-            -- reversing works for now, but not forever!  need a heuristics + bidirectional search + control structures
-            where search r1 r2 = r1 $ F.asum $ (r2 . Just <=< ls) <$> reverse targets
-                  ls (nm,target) = leftSearch (m,goal) (var nm, target)
-                  breadth = search (ret =<<) return
-                  depth   = search id (appendErr "" . ret)
-
+          _  -> inter [] $ sortBy (\a b -> compare (getVal a) (getVal b)) targets
+            where ls (nm,target) = leftSearch (m,goal) (var nm, target)
+                  getVal = snd . fst . snd
+                  
+                  inter [] [] = throwError "no more options"
+                  inter cg [] = appendErr "" $ F.asum $ reverse cg
+                  inter cg ((nm,((sequ,_),targ)):l) = do
+                    res <- Just <$> ls (nm,targ)
+                    if sequ 
+                      then (if not $ null cg then (appendErr "" (F.asum $ reverse cg) <|>) else id) $ 
+                           (appendErr "" $ ret res) <|> inter [] l
+                      else inter (ret res:cg) l
+                      
+                      
 a .-. s = foldr (\k v -> M.delete k v) a s 
 
 leftSearch (m,goal) (x,target) = vtrace 1 ("LS: " ++ show x++" ∈ " ++show target++" >> " ++show m ++" ∈ "++ show goal)
@@ -627,7 +635,7 @@ checkType sp ty = case sp of
       Nothing -> lift $ throwTrace 0 $ "variable: "++show head++" not found in the environment."
                                      ++ "\n\t from "++ show sp
                                      ++ "\n\t from "++ show ty
-      Just ty' -> Spine head <$> chop ty' args
+      Just ty' -> Spine head <$> chop (snd ty') args
 
 checkFullType :: Spine -> Type -> Env (Spine, Constraint)
 checkFullType val ty = typeCheckToEnv $ checkType val ty
@@ -635,8 +643,8 @@ checkFullType val ty = typeCheckToEnv $ checkType val ty
 ----------------------
 --- type inference ---
 ----------------------
-typeInfer :: ContextMap -> (Name,Spine,Type) -> Choice (Term,Type, ContextMap)
-typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
+typeInfer :: ContextMap -> ((Bool,Integer),Name,Spine,Type) -> Choice (Term,Type, ContextMap)
+typeInfer env (seqi,nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
   ty <- return $ alphaConvert mempty ty
   val <- return $ alphaConvert mempty val
   
@@ -652,7 +660,7 @@ typeInfer env (nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envCon
       resT = rebuildFromMem mem' $ unsafeSubst sub ty
 
   vtrace 0 ("RESULT: "++nm++" : "++show resV) $
-      return $ (resV,resT, M.insert nm resV env)
+      return $ (resV,resT, M.insert nm (seqi,resV) env)
 
 unsafeSubst s (Spine nm apps) = let apps' = unsafeSubst s <$> apps in case s ! nm of 
   Just nm -> rebuildSpine nm apps'
@@ -662,39 +670,43 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 ----------------------------
 --- the public interface ---
 ----------------------------
-typeCheckAxioms :: [(Maybe Name,Bool,Name,Term,Type)] -> Choice ContextMap
+
+type FlatPred = [(Maybe Name,(Bool,Integer,Bool),Name,Term,Type)]
+typeCheckAxioms :: FlatPred -> Choice Substitution
 typeCheckAxioms lst = do
   
   -- check the closedness of families.  this gets done
   -- after typechecking since family checking needs to evaluate a little bit
   -- in order to allow defs in patterns
-  let notval (_,s,'#':'v':':':_,_,_) = False
-      notval (_,s,_,_,_) = True 
+  let notval (_,_,'#':'v':':':_,_,_) = False
+      notval (_,_,_,_,_) = True 
       
-      unsound (_,s,_,_,_) = not s
+      unsound (_,(_,_,s),_,_,_) = not s
       
-      tys = M.fromList $ map (\(_,_,nm,ty,_) -> (nm,ty)) $ filter notval lst
+      tys = M.fromList $ map (\(_,(b,i,_),nm,ty,_) -> (nm,((b,i),ty))) $ filter notval lst
       uns = S.fromList $ map (\(_,_,nm,ty,_) -> nm) $ filter unsound $ filter notval lst
       
+      inferAll :: (ContextMap, FlatPred, FlatPred) -> Choice (FlatPred,ContextMap)
       inferAll (l , r, []) = return (r,l)
       inferAll (_ , r, (_,_,nm,_,_):_) | nm == tipeName = throwTrace 0 $ tipeName++" can not be overloaded"
       inferAll (_ , r, (_,_,nm,_,_):_) | nm == atomName = throwTrace 0 $ atomName++" can not be overloaded"
-      inferAll (l , r, (fam,s,nm,val,ty):toplst) = do
+      inferAll (l , r, (fam,(b,i,s),nm,val,ty):toplst) = do
         (val,ty,l') <- appendErr ("can not infer type for: "++nm++" : "++show val) $ 
                        trace ("Checking: " ++nm) $ 
                        vtrace 0 ("\tVAL: " ++show val  
                                  ++"\n\t:: " ++show ty) $
-                       typeInfer l (nm, val,ty) -- constrain the breadth first search to be local!
+                       typeInfer l ((b,i),nm, val,ty) -- constrain the breadth first search to be local!
                     
         -- do the family check after ascription removal and typechecking because it can involve computation!
         unless (fam == Nothing || Just (getFamily val) == fam)
           $ throwTrace 0 $ "not the right family: need "++show fam++" for "++nm ++ " = " ++show val                    
           
         inferAll $ case nm of
-          '#':'v':':':nm' -> (sub <$> l', (fam,s,nm,val,ty):r , fsub <$> toplst) 
-            where sub = subst $ nm' |-> ascribe val ty -- the ascription isn't necessary because we don't have unbound variables
+          '#':'v':':':nm' -> (sub' <$> l', (fam,(b,i,s),nm,val,ty):r , fsub <$> toplst) 
+            where sub' (b,a)= (b, sub a)
+                  sub = subst $ nm' |-> ascribe val ty -- the ascription isn't necessary because we don't have unbound variables
                   fsub (fam,s,nm,val,ty) = (fam,s,nm, sub val, sub ty)
-          _ -> (l', (fam,s,nm,val,ty):r, toplst)
+          _ -> (l', (fam,(b,i,s),nm,val,ty):r, toplst)
 
   (lst',l) <- inferAll (tys, [], topoSortAxioms lst)
   
@@ -712,22 +724,30 @@ typeCheckAxioms lst = do
   
   doubleCheckAll (S.union envSet uns) $ topoSortAxioms lst'
   
-  return l 
+  return $ snd <$> l 
   
 typeCheckAll :: [Predicate] -> Choice [Predicate]
 typeCheckAll preds = do
-  let toAxioms (Predicate s nm ty cs) = (Just $ atomName,s,nm,ty,tipe):map (\(nm',ty') -> (Just nm,False, nm',ty',atom)) cs
-      toAxioms (Query nm val) = [(Nothing, False,nm,val,atom)]
-      toAxioms (Define s nm val ty) = [(Nothing,False, nm,ty,kind), (Nothing,s, "#v:"++nm,val,ty)]
-  tyMap <- typeCheckAxioms $ concatMap toAxioms preds
+
+  tyMap <- typeCheckAxioms $ toAxioms True preds
   
-  let newPreds (Predicate t nm _ cs) = Predicate t nm (tyMap M.! nm) $ map (\(nm,_) -> (nm,tyMap M.! nm)) cs
+  let newPreds (Predicate t nm _ cs) = Predicate t nm (tyMap M.! nm) $ map (\(b,(nm,_)) -> (b,(nm, tyMap M.! nm))) cs
       newPreds (Query nm _) = Query nm (tyMap M.! nm)
       newPreds (Define t nm _ _) = Define t nm (tyMap M.! ("#v:"++nm)) (tyMap M.! nm)
   
   return $ newPreds <$> preds
+
+toAxioms :: Bool -> [Predicate] -> [(Maybe [Char], (Bool, Integer, Bool), Name, Type, Spine)]  
+toAxioms b = concat . zipWith toAxioms' [0..]
+  where toAxioms' j (Predicate s nm ty cs) = (Just $ atomName,(False,j,s),nm,ty,tipe):zipWith (\(sequ,(nm',ty')) i -> (Just nm,(sequ,i,False), nm',ty',atom)) cs [0..]
+        toAxioms' j (Query nm val) = [(Nothing, (False,j,False),nm,val,atom)]
+        toAxioms' j (Define s nm val ty) = (if b then ((Nothing,(False,j,s), "#v:"++nm,val,ty):) else id)
+                                           [(Nothing,(False,j,False), nm,ty,kind)] 
   
-solver :: [(Name,Type)] -> Type -> Either String [(Name, Term)]
-solver axioms tp = case runError $ runRWST (search tp) (M.union envConsts $ M.fromList axioms) emptyState of
+toSimpleAxioms :: [Predicate] -> ContextMap
+toSimpleAxioms l = M.fromList $ (\(_,(seqi,i,_),nm,t,_) -> (nm,((seqi,i),t))) <$> toAxioms False l
+
+solver :: ContextMap -> Type -> Either String [(Name, Term)]
+solver axioms tp = case runError $ runRWST (search tp) (M.union envConsts axioms) emptyState of
   Right ((_,tm),_,_) -> Right $ [("query", tm)]
   Left s -> Left $ "reification not possible: "++s

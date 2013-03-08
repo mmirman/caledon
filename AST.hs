@@ -39,7 +39,7 @@ data Spine = Spine Name [Type]
 type Type = Spine
 type Term = Spine
 
-data Predicate = Predicate { predIsSound :: !Bool, predName :: !Name, predType :: !Type, predConstructors :: ![(Name,Type)] }
+data Predicate = Predicate { predIsSound :: !Bool, predName :: !Name, predType :: !Type, predConstructors :: ![(Bool,(Name,Type))] }
                | Query { predName :: !Name, predType :: !Spine}
                | Define { predIsSound :: !Bool, predName :: !Name, predValue :: !Spine, predType :: !Type}
                deriving (Eq)
@@ -104,10 +104,10 @@ showT True = "defn "
 showT False = "unsound "
 
 instance Show Predicate where
-  show (Predicate s nm ty []) = showT s ++ nm ++ " : " ++ show ty ++ ";"
+  show (Predicate s nm ty []) = showT s ++ nm ++ " : " ++ show ty
   show (Predicate s nm ty (a:cons)) =
-    showT s++ nm ++ " : " ++ show ty ++ "\n" ++ "   | " ++ showSingle a ++ concatMap (\x-> "\n   | " ++ showSingle x) cons ++ ";"
-      where showSingle (nm,ty) = nm ++ " = " ++ show ty
+    showT s++ nm ++ " : " ++ show ty++showSingle a ++ concatMap (\x-> showSingle x) cons
+      where showSingle (b,(nm,ty)) = (if b then "\n   >| " else "   | ") ++nm ++ " = " ++ show ty
   show (Query nm val) = "query " ++ nm ++ " = " ++ show val
   show (Define s nm val ty) = showT s ++ nm ++ " : " ++ show ty ++"\n as "++show val
                                                
@@ -238,7 +238,7 @@ instance Alpha Spine where
                                  
   
 instance Subst Predicate where
-  substFree sub f (Predicate s nm ty cons) = Predicate s nm (substFree sub f ty) ((\(nm,t) -> (nm,substFree sub f t)) <$> cons)
+  substFree sub f (Predicate s nm ty cons) = Predicate s nm (substFree sub f ty) ((\(b,(nm,t)) -> (b,(nm,substFree sub f t))) <$> cons)
   substFree sub f (Query nm ty) = Query nm (substFree sub f ty)
   substFree sub f (Define s nm val ty) = Define s nm (substFree sub f val) (substFree sub f ty)
   
@@ -452,6 +452,8 @@ consts = [ (atomName , tipe)
          ]
 
 
+anonymous ty = ((False,100),ty)
+
 envSet = S.fromList $ map fst consts
 
 toNCCchar c = Spine ['\'',c,'\''] []
@@ -460,7 +462,7 @@ toNCCstring s = foldr cons nil $ map toNCCchar s
         nil = Spine "nil" [tycon "a" char]
         cons a l = Spine "cons" [tycon "a" char, a,l]
 
-envConsts = M.fromList consts
+envConsts = anonymous <$> M.fromList consts
 
 isChar  ['\'',_,'\''] = True
 isChar _ = False

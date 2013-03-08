@@ -11,19 +11,32 @@ defn =:= : {Q} Q -> Q -> prop
    | eq = [a : prop][b:a] (=:=) {Q = a} b b
 
 defn runBoth : bool -> prop
-
-   | runT = [A] runBoth A 
+  >| run0 = [A] runBoth A 
                 <- putChar 't'
                 <- putChar 't'
                 <- putChar 't'
                 <- putChar 't'
                 <- A =:= true
 
-   | runF = [A] runBoth A
-                <- putChar 'f'
-                <- putChar 'f'
-                <- putChar 'f'
-                <- putChar 'f'
-                <- A =:= false
+  | run1 = [A] runBoth A
+                <- putChar 'v'
+                <- putChar 'v'
+                <- putChar 'v'
+                <- putChar 'v'
+                <- A =:= true
 
+  | run2 = [A] runBoth A
+                <- putChar 'q'
+                <- putChar 'q'
+                <- putChar 'q'
+                <- putChar 'q'
+                <- A =:= true
+
+ >| run3 = [A] runBoth A
+                <- putChar 'j'
+                <- putChar 'j'
+                <- putChar 'j'
+                <- putChar 'j'
+                <- A =:= false
+  
 query main = runBoth false
