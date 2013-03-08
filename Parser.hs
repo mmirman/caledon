@@ -115,15 +115,17 @@ sound = do
 
 unsound = do
   reserved "unsound" 
-  vsn False               
-    
+  vsn False
+ 
+  
+  
 vsn s = do    
   (nm,ty) <- named decTipe
-  let more =  do reservedOp "|"
-
-                 lst <- flip sepBy1 (reservedOp "|") $ do
-                        (nm,t) <- named decPred
-                        return (nm,t)
+  let more =  do lst <- many1 $ do
+                   seqi <- (reservedOp "|"  >> return False) 
+                      <|> (reservedOp ">|" >> return True)
+                   (nm,t) <- named decPred
+                   return (seqi,(nm,t))
                         
                  optional semi
                  return $ Predicate s nm ty lst

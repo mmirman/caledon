@@ -9,7 +9,7 @@ getVars val ty = concatMap (\nm -> [nm,"#v:"++nm])
                $ filter (not . flip elem (map fst consts)) 
                $ S.toList $ freeVariables val `S.union` freeVariables ty 
 
-topoSortAxioms :: [(Maybe Name, Bool, Name,Term,Type)] -> [(Maybe Name, Bool, Name,Term,Type)]
+topoSortAxioms :: [(Maybe Name, (Bool,Integer,Bool), Name,Term,Type)] -> [(Maybe Name, (Bool,Integer,Bool), Name,Term,Type)]
 topoSortAxioms axioms = map ((\((fam,s,val,ty),n,_) -> (fam,s,n,val,ty)) . v2nkel) vlst
   where (graph, v2nkel, _) = 
           graphFromEdges $ map (\(fam,s,nm,val,ty) -> ((fam,s,val,ty), nm , getVars val ty)) axioms

@@ -21,7 +21,9 @@ import Debug.Trace
 --------------------
 ---  context map ---
 --------------------
-type ContextMap = Map Name Type
+type ContextMap = Map Name ((Bool,Integer),Type)
+type ContextMapT = Map Name Type
+
 
 --------------------------------
 ---  constraint context list ---
@@ -194,12 +196,12 @@ getAllBindings = do
 getForalls :: Env ContextMap
 getForalls = do
   ctx <- ctxtMap <$> stateCtxt <$> get
-  return $ elmType <$> M.filter (\q -> elmQuant q == Forall) ctx
+  return $ anonymous <$> elmType <$> M.filter (\q -> elmQuant q == Forall) ctx
   
 getExists :: Env ContextMap
 getExists = do
   ctx <- ctxtMap <$> stateCtxt <$> get
-  return $ elmType <$> M.filter (\q -> elmQuant q == Exists) ctx
+  return $ anonymous <$> elmType <$> M.filter (\q -> elmQuant q == Exists) ctx
 
 getConstants :: Env ContextMap
 getConstants = ask  
@@ -214,14 +216,15 @@ getFullCtxt :: Env ContextMap
 getFullCtxt = do
   constants <- getConstants
   ctx <- ctxtMap <$> stateCtxt <$> get
-  return $ M.union (elmType <$> ctx) constants
+  return $ M.union (anonymous <$> elmType <$> ctx) constants
 
 getVariablesBeforeExists :: Name -> Env ContextMap
 getVariablesBeforeExists nm = do
   constants <- getConstants
   ctx <- stateCtxt <$> get  
   let bind = ctxtMap ctx M.! nm
-  return $ M.union constants $ M.fromList $ snd <$> getBefore "IN: getVariablesBeforeExists" bind ctx
+  return $ M.union constants 
+         $ M.fromList $ (\(nm,v) -> (nm, anonymous v)) <$> snd <$> getBefore "IN: getVariablesBeforeExists" bind ctx
   
 
 modifyCtxt :: (Context -> Context) -> Env ()
@@ -232,7 +235,7 @@ modifyCtxt f = modify $ \m -> m { stateCtxt = f $ stateCtxt m }
 ---  traversal monads ---
 -------------------------
 lookupConstant :: Name -> Env (Maybe Type)
-lookupConstant x = (M.lookup x) <$> ask 
+lookupConstant x = fmap snd <$> (M.lookup x) <$> ask 
 
 type TypeChecker = ContT Spine Env
 
@@ -240,11 +243,7 @@ typeCheckToEnv :: TypeChecker Spine -> Env (Spine,Constraint)
 typeCheckToEnv m = listen $ runContT m return
 
 
-addToEnv :: (Name -> Spine -> Constraint -> Constraint) -> Name  -> Spine -> TypeChecker a -> TypeChecker a
-addToEnv e x ty = mapContT (censor $ e x ty) . liftLocal ask local (M.insert x ty)
 
-----------------------
---- Universe Monad ---
-----------------------
 
-  
+addToEnv :: (Name -> Type -> Constraint -> Constraint) -> Name -> Type -> TypeChecker a -> TypeChecker a
+addToEnv e x ty = mapContT (censor $ e x ty) . liftLocal ask local (M.insert x $ anonymous ty)

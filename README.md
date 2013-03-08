@@ -81,11 +81,13 @@ defn num  : prop
    | succ = num -> num
 
 defn add  : num -> num -> num -> prop
-   | add_zero = {N} add zero N N
-   | add_succ = {N}{M}{R} add (succ N) M (succ R) <- add N M R
+   | add_zero = [N] add zero N N
+   | add_succ = [N M R] add (succ N) M (succ R) <- add N M R
 
 -- we can define subtraction from addition!
-query subtract = add (succ (succ zero)) 'v (succ (succ (succ zero)))
+defn subtract : num -> num -> num -> prop
+  as \a b c : num . add b c a
+
 ```
 
 * Some basic IO: Using unix pipes, this Caledon can be used more seriously.  Somebody plz write a wrapper?

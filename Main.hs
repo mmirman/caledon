@@ -39,11 +39,13 @@ checkAndRun decs = do
   putStrLn "\nTARGETS: "
   forM_ targets $ \s -> putStrLn $ show s++"\n"
 
-  let allTypes c = (predName c, predType c):predConstructors c
-      predicates' = sub predicates
+  let predicates' = sub predicates
       targets' = sub targets
+      
+      axioms = toSimpleAxioms predicates'
+  
   forM_ targets' $ \target ->
-    case solver (concatMap allTypes predicates') $ predType target of
+    case solver axioms $ predType target of
       Left e -> putStrLn $ "ERROR: "++e
       Right sub -> putStrLn $
                    "\nTARGET: \n"++show target
