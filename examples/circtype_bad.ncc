@@ -1,0 +1,5 @@
+defn a : b av -> prop
+   | av = a bv
+
+defn b  : a bv -> prop
+   | bv = b av

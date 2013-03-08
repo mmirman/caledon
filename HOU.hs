@@ -472,7 +472,7 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
                   getVal = snd . fst . snd
                   
                   inter [] [] = throwError "no more options"
-                  inter cg [] = appendErr "" $ F.asum $ reverse cg
+                  inter cg [] = F.asum $ reverse cg
                   inter cg ((nm,((sequ,_),targ)):l) = do
                     res <- Just <$> ls (nm,targ)
                     if sequ 
