@@ -118,6 +118,9 @@ unifyOne (a :=: b) return = do
 unifyOne _ return = return Nothing
 
 unifyEq cons@(a :=: b) = case (a,b) of 
+  (Spine "#ascribe#" [ty,l], b) -> return $ Just (mempty, [l :=: b])
+  (b,Spine "#ascribe#" [ty,l]) -> return $ Just (mempty, [b :=: l])
+  
   (Spine "#imp_forall#" [ty, l], b) -> vtrace 1 "-implicit-" $ do
     a' <- getNewWith "@aL"
     modifyCtxt $ addToTail "-implicit-" Exists a' ty

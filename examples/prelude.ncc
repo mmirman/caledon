@@ -20,6 +20,7 @@ defn run : io -> prop
 defn readLine    : (string -> io) -> prop -- builtin 
    | readLineImp = [Foo : string -> io] [A : string] readLine Foo <- run (Foo A)
 
+
 defn string : prop
   as list char
 
@@ -59,9 +60,10 @@ defn flip : {at bt ct : prop} (at -> bt -> ct) -> bt -> at -> ct
 -------------------
 --- Constraints ---
 -------------------
-fixity none 1 =:=
+fixity none 5 =:=
 defn =:= : {Q} Q -> Q -> prop
   >| eq = [a : prop][b:a] (=:=) {Q = a} b b
+
 
 -- searching for these is SLOW
 fixity none 0 /\
@@ -208,3 +210,6 @@ defn ismain : prop
          , putStr "\nbye!\n")
 
 -- query main = ismain
+
+defn readLineIn : string -> prop
+  as \S . readLine (\R . do , S =:= R)
