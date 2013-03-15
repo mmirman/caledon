@@ -14,8 +14,8 @@ defn io : prop
 
 defn run : io -> prop
   >| runDo = run do
-  >| runSeq = [A][B] run (A , B) <- run A 
-                         	 <- B
+  >| runSeq = run (A , B) <- run A 
+                          <- B
 
 defn readLine    : (string -> io) -> prop -- builtin 
    | readLineImp = [Foo : string -> io] [A : string] readLine Foo <- run (Foo A)
@@ -27,15 +27,15 @@ defn string : prop
 ---------------
 -- searches ---
 ---------------
-defn any : {A : prop} (A -> prop) -> prop
-   | is = [a : prop][V : a][F : a -> prop] F V -> any { A = a } F
+defn any : (A -> prop) -> prop
+   | is = [V : A][F : A -> prop] F V -> any F
 
 
 defn openAny : [A][F : A -> prop] any F -> [V : A] F V -> prop
-   | openAnyDef = [A][F : A -> prop][V : A][FV : F V] openAny A F (is A V F FV) V FV
+   | openAnyDef = openAny A F (is V F FV) V FV
 
-defn sopen : {a : prop }{f : a -> prop} [V : a] {fv : f V} (exists v : a . f v) -> prop 
-  as ?\a : prop . ?\ f : a -> prop . \vt : a . ?\ fv : f vt . \an : (exists v : a . f v) . open a f an vt fv
+defn sopen : {A : prop }{F : A -> prop} [V : A] {FV : F V} (exists v : A . F v) -> prop 
+  as ?\A : prop . ?\ F : A -> prop . \vt : A . ?\ FV : F vt . \an : (exists v : A . F v) . open A F an vt FV
 
 
 fixity lambda free
@@ -46,34 +46,34 @@ defn free : [A : prop] (A -> prop) -> prop
 --- useful combinators ---
 --------------------------
 fixity right 0 $
-defn $ : {at bt:prop} (at -> bt) -> at -> bt
-  as ?\ at bt . \ f . \a . f a
+defn $ : {AT BT : prop } (AT -> BT) -> AT -> BT
+  as ?\ AT BT . \ f . \a . f a
 
 
 fixity right 0 @
-defn @ : {at bt ct:prop} (bt -> ct) -> (at -> bt) -> at -> ct
-  as ?\at bt ct : prop . \f : bt -> ct . \ g : at -> bt . \ a : at . f (g a)
+defn @ : {AT BT CT:prop} (BT -> CT) -> (AT -> BT) -> AT -> CT
+  as ?\AT BT CT : prop . \f : BT -> CT . \ g : AT -> BT . \ a : AT . f (g a)
 
-defn flip : {at bt ct : prop} (at -> bt -> ct) -> bt -> at -> ct
-  as ?\ at bt ct : prop . \ foo . \ b . \ a . foo a b
+defn flip : {AT BT CT : prop} (AT -> BT -> CT) -> BT -> AT -> CT
+  as ?\ AT BT CT : prop . \ foo . \ b . \ a . foo a b
 
 -------------------
 --- Constraints ---
 -------------------
 fixity none 5 =:=
-defn =:= : {Q} Q -> Q -> prop
-  >| eq = [a : prop][b:a] (=:=) {Q = a} b b
+defn =:= : Q -> Q -> prop
+  >| eq = (=:=) {Q = A} B B
 
 
 -- searching for these is SLOW
 fixity none 0 /\
 defn /\ : prop -> prop -> prop
-  >| and = [a b : prop] a -> b -> a /\ b
+  >| and = A -> B -> A /\ B
 
 fixity none 0 \/
 defn \/ : prop -> prop -> prop
-   | or1 = [a b:prop] a -> a \/ b
-   | or2 = [a b:prop] b -> a \/ b
+   | or1 = A -> A \/ B
+   | or2 = B -> A \/ B
 
 fixity left 0 ==
 -- currently we can't do any inference inside of definitional signatures
@@ -120,8 +120,8 @@ defn natural  : prop
 query findSat0 = free A : natural . A =:= zero
 
 defn add   : natural -> natural -> natural -> prop
-  >| add_z = [N] add zero N N
-  >| add_s = [N M R] add N M R -> add (succ N) M (succ R)
+  >| add_z = add zero N N
+  >| add_s = add N M R -> add (succ N) M (succ R)
 
 query add0 = add (succ zero) zero (succ zero)
 
@@ -129,17 +129,17 @@ query add1 = succ zero ++ zero == succ zero
 
 -- sub N M R is N - M = R
 defn sub   : natural -> natural -> natural -> prop
-   | sub_by_add = [N M R] sub N M R <- add M R N
+   | sub_by_add = sub N M R <- add M R N
 
 
 defn lte-nat : natural -> natural -> prop
-  >| leqZero = [B] lte-nat zero B
-  >| leqSucc = [A B] lte-nat (succ A) (succ B) <- lte-nat A B
+  >| leqZero = {B} lte-nat zero B
+  >| leqSucc = {A B} lte-nat (succ A) (succ B) <- lte-nat A B
 
 fixity none 3 <
 defn < : natural -> natural -> prop
-  >| ltZero = [B] zero < succ B
-  >| ltSucc = [A B] succ A < succ B <- A < B
+  >| ltZero = zero < succ B
+  >| ltSucc = succ A < succ B <- A < B
 
 query add2 = exists A : natural . add (succ zero) zero A
 
@@ -161,23 +161,22 @@ defn maybe : prop -> prop
 --- Lists ---
 -------------
 defn list : prop -> prop
-   | nil  = {a} list a
-   | cons = {a} a -> list a -> list a
+   | nil  = list A
+   | cons = A -> list A -> list A
 
-defn concatList : {A} list A -> list A -> list A -> prop
-  >| concatListNil  = [T][L:list T] concatList {A = T} nil L L
-  >| concatListCons = [T][A B C : list T][V:T] concatList (cons V A) B (cons V C) <- concatList A B C
+defn concatList : list A -> list A -> list A -> prop
+  >| concatListNil  = concatList {A = T} nil L L
+  >| concatListCons = concatList (cons V A) B (cons V C) <- concatList A B C
 
 ----------------
 --- printing ---
 ----------------
 
 defn putStr : string -> prop
-  >| putStr_Nil = putStr $ nil {a = char}
-  >| putStr_Cons = [v:char][l: string] 
-                   putStr $ cons {a = char} v l 
-                <- putChar v
-                <- putStr l
+  >| putStr_Nil = putStr $ nil {A = char}
+  >| putStr_Cons = putStr $ cons {A = char} V L
+                <- putChar V
+                <- putStr L
 
 ----------------
 --- Booleans ---
@@ -196,8 +195,8 @@ defn |:| : {t:prop} t -> t -> (t -> t -> t) -> t
 
 fixity none 0 ==>
 defn ==> : {A : prop} bool -> ((A -> A -> A) -> A) -> A -> prop
-  >| thentrue  = [a : prop][f: _ -> a] (true ==> f)  (f (\a1 a2 : a . a1))
-  >| thenfalse = [b : prop][f: _ -> b] (false ==> f) (f (\a1 a2 : b . a2))
+  >| thentrue  = [F: _ -> A] (true ==> F ) (F (\a1 a2 : A . a1) )
+  >| thenfalse = [F: _ -> B] (false ==> F) (F (\a1 a2 : B . a2))
 
 defn not : bool -> bool -> prop
   as \zq . if zq ==> false |:| true
@@ -211,5 +210,7 @@ defn ismain : prop
 
 -- query main = ismain
 
+-- switching the direction of the output to be input with unification!
 defn readLineIn : string -> prop
-  as \S . readLine (\R . do , S =:= R)
+  as \S . readLine $ \R . do , S =:= R
+

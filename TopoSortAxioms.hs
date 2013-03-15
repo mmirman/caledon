@@ -27,3 +27,8 @@ topoSort :: (a -> (Name,S.Set Name)) -> [a] -> [a]
 topoSort producer scons = finalizeList $ map ((\(a,_,_) -> a) . v2nkel) $ topSort graph
   where res = finalizeList $ map (\a -> let (nm, e) = producer a in (a,nm,S.toList e)) scons
         (graph,v2nkel,_) = graphFromEdges res
+
+topoSortComp producer scons = finalizeList $ map ((\(a,_,_) -> a) . v2nkel) $ topSort graph
+  where res = finalizeList $ map (\a -> let (nm, e) = producer a in (a,nm,S.toList e)) scons
+        (graph',v2nkel,_) = graphFromEdges res
+        graph = transposeG graph'

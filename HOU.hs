@@ -2,7 +2,8 @@
  FlexibleInstances,
  PatternGuards,
  UnicodeSyntax,
- BangPatterns
+ BangPatterns,
+ TupleSections
  #-}
 module HOU where
 
@@ -10,14 +11,15 @@ import Choice
 import AST
 import Context
 import TopoSortAxioms
-import Control.Monad.State (StateT, forM_,runStateT, modify, get)
+import Control.Monad.State (StateT, forM_,runStateT, modify, get,put, State, runState)
 import Control.Monad.RWS (RWST, runRWST, ask, tell)
 import Control.Monad.Error (throwError, MonadError)
-import Control.Monad (unless, forM, replicateM, void, (<=<))
+import Control.Monad (unless, forM, replicateM, void, (<=<), when)
 import Control.Monad.Trans (lift)
 import Control.Applicative
 import qualified Data.Foldable as F
 import Data.List
+import Data.Char (isUpper)
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Map as M
@@ -89,7 +91,9 @@ unify cons =  do
           $ checkFinished c >> 
           return (sub, c))
 
-  fst <$> uniWhile mempty cons
+  sub <- fst <$> uniWhile mempty cons
+  
+  return $ sub
 
 
 checkFinished [] = return ()
@@ -118,8 +122,8 @@ unifyOne (a :=: b) return = do
 unifyOne _ return = return Nothing
 
 unifyEq cons@(a :=: b) = case (a,b) of 
-  (Spine "#ascribe#" [ty,l], b) -> return $ Just (mempty, [l :=: b])
-  (b,Spine "#ascribe#" [ty,l]) -> return $ Just (mempty, [b :=: l])
+  (Spine "#ascribe#" (ty:v:l), b) -> return $ Just (mempty, [rebuildSpine v l :=: b])
+  (b,Spine "#ascribe#" (ty:v:l)) -> return $ Just (mempty, [b :=: rebuildSpine v l])
   
   (Spine "#imp_forall#" [ty, l], b) -> vtrace 1 "-implicit-" $ do
     a' <- getNewWith "@aL"
@@ -541,15 +545,15 @@ checkType sp ty = case sp of
       
   Spine "#ascribe#" (t:v:l) -> do
     (v'',mem) <- regenWithMem v
-    
+    t <- withKind $ checkType t
     t'' <- regenAbsVars t
-    v' <- checkType v'' t''
-    
+    v' <- checkType v'' t
     r <- getNewWith "@r"
-    Spine _ l' <- addToEnv (∀) r t $ checkType (Spine r l) ty
+    Spine _ l' <- addToEnv (∀) r t'' $ checkType (Spine r l) ty
     return $ rebuildSpine (rebuildFromMem mem v') l'
-
---    checkType (rebuildSpine (rebuildFromMem mem v') l) ty
+    
+  Spine "#dontcheck#" [v] -> do
+    return v
     
   Spine "#infer#" [_, Abs x tyA tyB ] -> do
     tyA <- withKind $ checkType tyA
@@ -646,6 +650,52 @@ checkType sp ty = case sp of
 checkFullType :: Spine -> Type -> Env (Spine, Constraint)
 checkFullType val ty = typeCheckToEnv $ checkType val ty
 
+
+---------------------------------
+--- Generalize Free Variables ---
+---------------------------------
+
+{- 
+Employ the use order heuristic, where 
+variables are ordered by use on the same level in terms.
+
+S A F (F A) = {(F,{A,F}), (A,{})}  [A,F,S]
+S F A (F A) = {(F,{A,F}), (A,{F})} [F,A,S]
+S F (F A S) = {(F,{}), (A,{}), (S,{A,F})} [S,F,A]
+S A (F S A) = {(F,{}), (A,{})} 
+-}
+
+buildOrderGraph :: S.Set Name              -- the list of variables to be generalized
+                -> Spine 
+                -> State (S.Set Name, M.Map Name (S.Set Name)) () -- an edge in the graph if a variable has occured before this one.
+buildOrderGraph gen s = case s of
+  Abs nm t v -> do
+    buildOrderGraph gen t
+    buildOrderGraph (S.delete nm gen) v
+  Spine "#tycon#" [Spine _ [l]] -> buildOrderGraph gen l  
+  
+  Spine nm l -> do
+    (prev,mp) <- get
+    when (S.member nm gen) $ do
+      let prevs = mp M.! nm
+      put (S.empty, M.insert nm (S.union prev prevs) mp)
+      
+    forM l $ buildOrderGraph gen
+
+    when (S.member nm gen) $ do
+      (prev2,mp) <- get
+      let prevs = mp M.! nm
+      put (S.insert nm (S.union prev prev2), M.insert nm (S.union prev2 prevs) mp)
+    
+getGenTys sp = S.filter isGen $ freeVariables sp
+  where isGen (c:s) = isUpper c
+        
+generateBinding sp = foldr (\a b -> imp_forall a ty_hole b) sp orderedgens
+  where genset = getGenTys sp
+        genlst = S.toList genset
+        (_,(_,graph)) = runState (buildOrderGraph genset sp) (mempty, M.fromList $ map (,mempty) genlst)
+        orderedgens = topoSortComp (\a -> (a, graph M.! a)) genlst
+
 ----------------------
 --- type inference ---
 ----------------------
@@ -662,8 +712,8 @@ typeInfer env (seqi,nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union e
   sub <- appendErr ("which became: "++show val ++ "\n\t :  " ++ show ty) $ 
          unify constraint
   
-  let resV = rebuildFromMem mem $ unsafeSubst sub val
-      resT = rebuildFromMem mem' $ unsafeSubst sub ty
+  let resV =  rebuildFromMem mem $ unsafeSubst sub $ val
+      resT =  rebuildFromMem mem' $   unsafeSubst sub $ ty
 
   vtrace 0 ("RESULT: "++nm++" : "++show resV) $
       return $ (resV,resT, M.insert nm (seqi,resV) env)
@@ -701,7 +751,7 @@ typeCheckAxioms verbose lst = do
                        mtrace verbose ("Checking: " ++nm) $ 
                        vtrace 0 ("\tVAL: " ++show val  
                                  ++"\n\t:: " ++show ty) $
-                       typeInfer l ((b,i),nm, val,ty) -- constrain the breadth first search to be local!
+                       typeInfer l ((b,i),nm, generateBinding val,ty) -- constrain the breadth first search to be local!
                     
         -- do the family check after ascription removal and typechecking because it can involve computation!
         unless (fam == Nothing || Just (getFamily val) == fam)
@@ -710,7 +760,10 @@ typeCheckAxioms verbose lst = do
         inferAll $ case nm of
           '#':'v':':':nm' -> (sub' <$> l', (fam,(b,i,s),nm,val,ty):r , fsub <$> toplst) 
             where sub' (b,a)= (b, sub a)
-                  sub = subst $ nm' |-> ascribe val ty -- the ascription isn't necessary because we don't have unbound variables
+                  sub = subst $ nm' |-> ascribe val (dontcheck ty) 
+                        -- the ascription isn't necessary because we don't have unbound variables, 
+                        -- and we already know that val : ty, but it pauses computation
+                        -- ascribe val ty 
                   fsub (fam,s,nm,val,ty) = (fam,s,nm, sub val, sub ty)
           _ -> (l', (fam,(b,i,s),nm,val,ty):r, toplst)
 
