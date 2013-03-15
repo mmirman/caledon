@@ -81,8 +81,8 @@ defn num  : prop
    | succ = num -> num
 
 defn add  : num -> num -> num -> prop
-   | add_zero = [N] add zero N N
-   | add_succ = [N M R] add (succ N) M (succ R) <- add N M R
+   | add_zero = add zero N N
+   | add_succ = add (succ N) M (succ R) <- add N M R
 
 -- we can define subtraction from addition!
 defn subtract : num -> num -> num -> prop
@@ -123,12 +123,12 @@ terminating, proof search can be used to search more intelligently for theorems 
 
 ```
 defn maybe   : prop → prop
-   | nothing = {a} maybe a
-   | just    = {a} a → maybe a
+   | nothing = maybe A
+   | just    = A → maybe A
 
 infix 1 =:=
-defn =:= : {a : prop} a -> a -> prop
-   | eq = {a : prop} a =:= a
+defn =:= : A -> A -> prop
+   | eq = (=:=) {A = A} V V
 
 infix 0 /\
 defn /\ : prop -> prop -> prop
@@ -155,9 +155,9 @@ unsound tm : {S : tm ty} tm S → prop
 * Holes:  types can have holes, terms can have holes.  The same proof search that is used in semantics is used in type inference, so you can use the same computational reasoning you use to program to reason about whether the type checker can infer types!  Holes get filled by a proof search on their type and the current context.  Since the entire type checking process is nondeterministic, if they get filled by a wrong term, they can always be filled again.
 
 ```
-defn fsum_maybe  : {a}{b} (a -> b -> prop) -> maybe a -> maybe b → prop
-   | fsum_nothing = {a}{b}[F : a -> b -> prop] maybe_fsum F nothing nothing
-   | fsum_just    = {a}{b}[F : _ -> _ -> prop][av : a][bv : b]
+defn fsum_maybe  : (A -> B -> prop) -> maybe A -> maybe B → prop
+   | fsum_nothing = [F : A -> B -> prop] maybe_fsum F nothing nothing
+   | fsum_just    = [F : _ -> _ -> prop][av : A][bv : B]
                    maybe_fsum F (just av) (just bv)
                    <- F av bv
 ```
@@ -181,21 +181,21 @@ defn functor_maybe : functor maybe -> prop.
 
 ```
 defn runBoth : bool -> prop
-  >| run0 = [A] runBoth A 
-                <- putStr "tttt "
-                <- A =:= true
+  >| run0 = runBoth A 
+            <- putStr "tttt "
+            <- A =:= true
 
-   | run1 = [A] runBoth A
-                <- putStr "vvvv"
-                <- A =:= true
+   | run1 = runBoth A
+            <- putStr "vvvv"
+            <- A =:= true
 
-   | run2 = [A] runBoth A
-                <- putStr "qqqq"
-                <- A =:= true
+   | run2 = runBoth A
+            <- putStr "qqqq"
+            <- A =:= true
 
-  >| run3 = [A] runBoth A
-                <- putStr " jjjj"
-                <- A =:= false
+  >| run3 = runBoth A
+            <- putStr " jjjj"
+            <- A =:= false
 
 query main = runBoth false
 
@@ -219,8 +219,8 @@ defn |:| : {a : prop} a -> a -> (a -> a -> a) -> a
 
 infix 0 ==>
 defn ==> : {a : prop} bool -> ((a -> a -> a) -> a) -> a -> prop
-   | thentrue =  [a:prop][f : (a -> a -> a) -> a] (true ==> f)  (f (\A B. A))
-   | thenfalse = [a:prop][f : (a -> a -> a) -> a] (false ==> f) (f (\A B. B))
+   | thentrue =  [f : _ -> A] (true ==> f)  (f (\a b : A. a))
+   | thenfalse = [f : _ -> A] (false ==> f) (f (\a b : A. b))
 
 defn not : bool -> bool -> prop
   as \v . if v ==> false |:| true
@@ -234,3 +234,21 @@ defn not : bool -> bool -> prop
     * abstraction: "λ x . t" or "\x.t"
     * Quantified implicits: "{x:A} t"  or  "?∀ x:A . t" or "?forall x:A . t"
     * implicit abstraction: "?λ x . t" or "?\x.t"
+
+
+
+Primary Contributers
+--------------------
+
+* Author: Matthew Mirman
+
+* Advisor: Frank Pfenning
+
+Secondary Contributers
+----------------------
+
+* Samuel Gélineau (gelisam)
+
+* Devin Nusbaum (el-devo)
+
+
