@@ -19,7 +19,7 @@ import Language.Preprocessor.Cpphs
 -------------------------- MAIN ---------------------------------------
 -----------------------------------------------------------------------
 checkAndRun verbose decs = do
-
+  
   when verbose $ do
     putStrLn "\nFILE: "
     forM_ decs $ \s -> putStrLn $ show s++"\n"
@@ -74,13 +74,11 @@ processFile verbose fname = do
           )
           fname file
   
-  putStrLn $ "FILE:\n"++file
-  
   let mError = parseCaledon fname file 
   decs <- case mError of
     Left e -> error $ show e
     Right l -> return l
-  checkAndRun verbose decs
+  checkAndRun verbose $ reduceDecsByName decs
 
 main = do
   fnames <- getArgs

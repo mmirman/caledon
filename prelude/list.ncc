@@ -7,4 +7,4 @@ defn list : prop -> prop
 
 defn concatList : list A -> list A -> list A -> prop
   >| concatListNil  = concatList {A = T} nil L L
-  >| concatListCons = concatList (cons V A) B (cons V C) <- concatList A B C
+  >| concatListCons = concatList (cons (V : T) A) B (cons V C) <- concatList A B C

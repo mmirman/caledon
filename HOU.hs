@@ -18,6 +18,7 @@ import Control.Monad (unless, forM, replicateM, void, (<=<), when)
 import Control.Monad.Trans (lift)
 import Control.Applicative
 import qualified Data.Foldable as F
+import Data.Foldable (foldlM)
 import Data.List
 import Data.Char (isUpper)
 import Data.Maybe
@@ -665,35 +666,47 @@ S F (F A S) = {(F,{}), (A,{}), (S,{A,F})} [S,F,A]
 S A (F S A) = {(F,{}), (A,{})} 
 -}
 
-buildOrderGraph :: S.Set Name              -- the list of variables to be generalized
+buildOrderGraph :: S.Set Name -- the list of variables to be generalized
+                -> S.Set Name -- the list of previously seen variables
                 -> Spine 
-                -> State (S.Set Name, M.Map Name (S.Set Name)) () -- an edge in the graph if a variable has occured before this one.
-buildOrderGraph gen s = case s of
+                -> State (M.Map Name (S.Set Name)) (S.Set Name) -- an edge in the graph if a variable has occured before this one.
+buildOrderGraph gen prev s = case s of
   Abs nm t v -> do
-    buildOrderGraph gen t
-    buildOrderGraph (S.delete nm gen) v
-  Spine "#tycon#" [Spine _ [l]] -> buildOrderGraph gen l  
-  
-  Spine nm l -> do
-    (prev,mp) <- get
-    when (S.member nm gen) $ do
-      let prevs = mp M.! nm
-      put (S.empty, M.insert nm (S.union prev prevs) mp)
-      
-    forM l $ buildOrderGraph gen
-
-    when (S.member nm gen) $ do
-      (prev2,mp) <- get
-      let prevs = mp M.! nm
-      put (S.insert nm (S.union prev prev2), M.insert nm (S.union prev2 prevs) mp)
+    prev' <- buildOrderGraph gen prev t
+    prev'' <- buildOrderGraph (S.delete nm gen) prev v
+    return $ S.union prev' prev''
+  Spine "#tycon#" [Spine _ [l]] -> buildOrderGraph gen prev l  
+  Spine s [t, l] | elem s ["#exists#", "#forall#", "#imp_forall#", "#imp_abs#"] -> do
+    prev1 <- buildOrderGraph gen prev t
+    prev2 <- buildOrderGraph gen prev l
+    return $ S.union prev1 prev2
     
+  Spine nm l -> do
+    mp <- get
+    prev' <- if (S.member nm gen) 
+             then do
+               let prevs = mp M.! nm
+               put (M.insert nm (S.union prev prevs) mp)
+               return $ mempty
+             else return prev
+      
+    prev'' <- foldlM (buildOrderGraph gen) prev' l
+
+    if S.member nm gen
+      then do
+      (mp) <- get
+      let prevs = mp M.! nm
+      put $ M.insert nm (S.union prev'' prevs) mp
+      return $ S.insert nm $ S.union prev prev'' 
+      else return prev''
+           
 getGenTys sp = S.filter isGen $ freeVariables sp
   where isGen (c:s) = isUpper c
         
 generateBinding sp = foldr (\a b -> imp_forall a ty_hole b) sp orderedgens
   where genset = getGenTys sp
         genlst = S.toList genset
-        (_,(_,graph)) = runState (buildOrderGraph genset sp) (mempty, M.fromList $ map (,mempty) genlst)
+        (_,graph) = runState (buildOrderGraph genset mempty sp) (M.fromList $ map (,mempty) genlst)
         orderedgens = topoSortComp (\a -> (a, graph M.! a)) genlst
 
 ----------------------
@@ -787,7 +800,7 @@ typeCheckAxioms verbose lst = do
   
 typeCheckAll :: Bool -> [Predicate] -> Choice [Predicate]
 typeCheckAll verbose preds = do
-
+  
   tyMap <- typeCheckAxioms verbose $ toAxioms True preds
   
   let newPreds (Predicate t nm _ cs) = Predicate t nm (tyMap M.! nm) $ map (\(b,(nm,_)) -> (b,(nm, tyMap M.! nm))) cs
@@ -810,3 +823,6 @@ solver :: ContextMap -> Type -> Either String [(Name, Term)]
 solver axioms tp = case runError $ runRWST (search tp) (M.union envConsts axioms) emptyState of
   Right ((_,tm),_,_) -> Right $ [("query", tm)]
   Left s -> Left $ "reification not possible: "++s
+
+reduceDecsByName :: [Predicate] -> [Predicate]
+reduceDecsByName decs = map snd $ M.toList $ M.fromList $ map (\a -> (predName a,a)) decs
