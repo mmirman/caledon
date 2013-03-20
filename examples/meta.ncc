@@ -1,3 +1,10 @@
-#include <prelude.ncc>
+#include "../prelude/prelude.ncc"
 
+defn chooseProp : bool -> prop -> prop
+  >| chooseTrue = chooseProp true natural
+  >| chooseFalse = chooseProp false bool
 
+defn getWorld : bool -> prop
+  >| getWorldImp = getWorld B
+                   <- readLine $ \S . do 
+		      	       	    , string_bool B S

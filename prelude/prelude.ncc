@@ -9,5 +9,6 @@ into an unambiguous map)!
 #include <concatable.ncc>
 #include <maybe.ncc>
 #include <list.ncc>
+#include <strings.ncc>
 #include <naturals.ncc>
 #include <io.ncc>

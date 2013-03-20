@@ -1,9 +1,8 @@
-#include <list.ncc>
+#include <strings.ncc>
 
 ---------------
 -- builtins ---
 ---------------
-defn char : prop  -- builtin
 
 defn putChar    :  char -> prop -- builtin
    | putCharImp = [A] putChar A
@@ -22,8 +21,6 @@ defn run : io -> prop
 defn readLine    : (string -> io) -> prop -- builtin 
    | readLineImp = [Foo : string -> io] [A : string] readLine Foo <- run (Foo A)
 
-defn string : prop
-  as list char
 
 ----------------
 --- printing ---

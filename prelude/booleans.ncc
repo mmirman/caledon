@@ -20,3 +20,10 @@ defn ==> : {A : prop} bool -> ((A -> A -> A) -> A) -> A -> prop
 
 defn not : bool -> bool -> prop
   as \zq . if zq ==> false |:| true
+
+
+#import <strings.ncc>
+
+defn string_bool : bool -> string -> prop
+  >| string_bool/true  = string_bool true "true"
+  >| string_bool/false = string_bool false "false"
