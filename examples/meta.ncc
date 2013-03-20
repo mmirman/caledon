@@ -5,21 +5,19 @@
 #include "../prelude/io.ncc"
 
 defn chooseProp : bool -> prop -> prop
-  >| chooseTrue = chooseProp true natural
-  >| chooseFalse = chooseProp false bool
-
+   | chooseTrue = chooseProp true natural
+   | chooseFalse = chooseProp false bool
 
 defn getWorld : bool -> prop
-  >| getWorldImp = [B] getWorld B
-                 <- putStr "t"
-                 <- B =:= true
--- 		 <- readLine ( \S . do 
---		    	          , string_bool B S )
+   | getWorldImp = getWorld B
+     		   <- putStr "f/t" 
+		   <- readLine ( \S . do 
+		      	            , string_bool B S )
 
 defn getProp : prop -> prop
-  >| getPropImp = getProp P
+   | getPropImp = getProp P
                   <- getWorld B2
                   <- chooseProp B2 P
 
 defn thing  : {Pp : prop } getProp Pp => Pp -> prop
-  >| heynow = thing zero
+   | heynow = thing zero
