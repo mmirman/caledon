@@ -1,0 +1,38 @@
+---------------
+-- searches ---
+---------------
+defn any : (A -> prop) -> prop
+   | is = [V : A][F : A -> prop] F V -> any F
+
+defn openAny : [A][F : A -> prop] any F -> [V : A] F V -> prop
+   | openAnyDef = openAny A F (is V F FV) V FV
+
+defn sopen : {A : prop }{F : A -> prop} [V : A] {FV : F V} (exists v : A . F v) -> prop 
+  as ?\A : prop . ?\ F : A -> prop . \vt : A . ?\ FV : F vt . \an : (exists v : A . F v) . open A F an vt FV
+
+
+fixity lambda free
+defn free : [A : prop] (A -> prop) -> prop
+  as \a : prop . any { A = a }
+
+-------------------
+--- Constraints ---
+-------------------
+fixity none 5 =:=
+defn =:= : Q -> Q -> prop
+  >| eq = (=:=) {Q = A} B B
+
+-- searching for these is SLOW
+fixity none 0 /\
+defn /\ : prop -> prop -> prop
+  >| and = A -> B -> A /\ B
+
+fixity none 0 \/
+defn \/ : prop -> prop -> prop
+   | or1 = A -> A \/ B
+   | or2 = B -> A \/ B
+
+fixity left 0 ==
+-- currently we can't do any inference inside of definitional signatures
+defn == : {q : prop} (q -> prop) -> q -> prop 
+  as ?\q . \foo : q -> prop . \v : q . foo v

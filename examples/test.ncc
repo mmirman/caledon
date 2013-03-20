@@ -1,12 +1,25 @@
+#include "../prelude/prelude.ncc"
 
-defn num  : prop
-   | zero = num
-   | succ = num → num
+query add0 = add (succ zero) zero (succ zero)
 
-defn add   : num → num → num → prop
-   | add-z = [N] add zero N N
-   | add-s = [N][M][R] add N M R → add (succ N) M (succ R)
+query add1 = succ zero ++ zero == succ zero
 
-query sum-1 = exists v . add (succ zero) (succ zero) v
--- query sum-2 = exists v . add (succ zero) v (succ (succ (succ zero)))
--- query sum-3 = exists v . add zero (succ zero) v
+query add2 = exists A : natural . add (succ zero) zero A
+
+query add3 = any $ add (succ zero) zero
+
+query findSat1 = succ zero =< succ (succ zero)
+
+query findSat2 = succ zero =< succ (succ zero) /\ zero =< succ (succ zero)
+
+query findSat0 = free A : natural . A =:= zero
+
+
+defn ismain : prop 
+  as run $ do 
+         , putStr "hey!\n"
+         , readLine (\A . do 
+   	 , putStr A
+         , putStr "\nbye!\n")
+
+query main = ismain

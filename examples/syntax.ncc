@@ -1,0 +1,38 @@
+
+infixr -2 ->
+defn -> : [a b: prop] prop
+  as \a : prop . \b : prop . [ha : a] b
+
+infixr -2 →
+defn → : [a b: prop] prop 
+  as (->)
+
+infixl -3 <-
+defn <- : [a b: prop] prop
+  as \a : prop . \b : prop . b -> a
+
+infixl -1 ←
+defn → : [a b: prop] prop 
+  as (<-)
+
+infixr -2 =>
+defn => : [a b: prop] prop
+  as \a : prop . \b : prop . {ha : a} b
+
+infixr -2 ⇒
+defn ⇒ : [a b: prop] prop
+  as (=>)
+
+infixl -1 <=
+defn <= : [b a : prop] prop
+  as \a : prop . \b : prop . b => a
+
+infixl -1 ⇐
+defn ⇐ : [a b: prop] prop
+  as (<=)
+
+
+infixr 0 $
+defn $ : {a b:prop} (a -> b) -> a -> b
+  as ?\at bt : prop . \f . \ a : at . f a
+

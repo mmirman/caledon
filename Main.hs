@@ -63,6 +63,19 @@ processFile :: Bool -> String -> IO ()
 processFile verbose fname = do
   file <- readFile fname
   
+  file <- runCpphs 
+          (defaultCpphsOptions{ 
+              boolopts = defaultBoolOptions{ hashline = False 
+                                           , lang = False
+                                           , ansi = True
+                                           , layout = True
+                                           }
+              }
+          )
+          fname file
+  
+  putStrLn $ "FILE:\n"++file
+  
   let mError = parseCaledon fname file 
   decs <- case mError of
     Left e -> error $ show e

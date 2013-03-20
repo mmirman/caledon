@@ -1,0 +1,36 @@
+#include <list.ncc>
+
+---------------
+-- builtins ---
+---------------
+defn char : prop  -- builtin
+
+defn putChar    :  char -> prop -- builtin
+   | putCharImp = [A] putChar A
+
+-- for sequencing io actions
+fixity left 1 ,
+defn io : prop
+   | do = io
+   | ,  = io -> prop -> io 
+
+defn run : io -> prop
+  >| runDo = run do
+  >| runSeq = run (A , B) <- run A 
+                          <- B
+
+defn readLine    : (string -> io) -> prop -- builtin 
+   | readLineImp = [Foo : string -> io] [A : string] readLine Foo <- run (Foo A)
+
+defn string : prop
+  as list char
+
+----------------
+--- printing ---
+----------------
+
+defn putStr : string -> prop
+  >| putStr_Nil = putStr (nil {A = char})
+  >| putStr_Cons = putStr (cons {A = char} V L)
+                <- putChar V
+                <- putStr L

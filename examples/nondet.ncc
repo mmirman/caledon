@@ -1,43 +1,22 @@
-defn char : prop  -- builtin
-defn putChar    :  char -> prop -- builtin
-   | putCharImp = [A] putChar A
-
-defn bool : prop
-   | true = bool
-   | false = bool
-
-fixity none 1 =:=
-defn =:= : {Q} Q -> Q -> prop
-   | eq = [a : prop][b:a] (=:=) {Q = a} b b
+#include "../prelude/logic.ncc"
+#include "../prelude/booleans.ncc"
+#include "../prelude/prelude.ncc"
 
 defn runBoth : bool -> prop
   >| run0 = [A] runBoth A 
-                <- putChar 't'
-                <- putChar 't'
-                <- putChar 't'
-                <- putChar ' '
+                <- putStr "ttt "
                 <- A =:= true
 
   | run1 = [A] runBoth A
-                <- putChar 'v'
-                <- putChar 'v'
-                <- putChar 'v'
-                <- putChar 'v'
+                <- putStr "vvvv"
                 <- A =:= true
 
   | run2 = [A] runBoth A
-                <- putChar 'q'
-                <- putChar 'q'
-                <- putChar 'q'
-                <- putChar 'q'
+                <- putStr "qqqq
                 <- A =:= true
 
  >| run3 = [A] runBoth A
-                <- putChar ' '
-                <- putChar 'j'
-                <- putChar 'j'
-                <- putChar 'j'
-                <- putChar '\n'
+                <- putStr " jjj\n"
                 <- A =:= false
   
 query main = runBoth true

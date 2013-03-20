@@ -1,0 +1,12 @@
+{- 
+we can include multiple files that include the same thing - diamond problem is 
+solved by everything being parsed twice, but typechecked once (names are placed
+into an unambiguous map)!
+-}
+
+#include <logic.ncc>
+#include <booleans.ncc>
+#include <concatable.ncc>
+#include <maybe.ncc>
+#include <list.ncc>
+#include <io.ncc>

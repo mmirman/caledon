@@ -1,0 +1,22 @@
+----------------
+--- Booleans ---
+----------------
+defn bool : prop
+   | true = bool
+   | false = bool
+
+defn if : bool -> bool
+  as \b . b
+
+fixity none 1 |:|
+defn |:| : {t:prop} t -> t -> (t -> t -> t) -> t
+  as ?\t : prop . \a b : t. \f : t -> t -> t. f a b
+
+
+fixity none 0 ==>
+defn ==> : {A : prop} bool -> ((A -> A -> A) -> A) -> A -> prop
+  >| thentrue  = [F: _ -> A] (true ==> F ) (F (\a1 a2 : A . a1) )
+  >| thenfalse = [F: _ -> B] (false ==> F) (F (\a1 a2 : B . a2))
+
+defn not : bool -> bool -> prop
+  as \zq . if zq ==> false |:| true

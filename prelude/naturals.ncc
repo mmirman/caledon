@@ -1,0 +1,35 @@
+---------------------
+--- Unary Numbers ---
+---------------------
+
+defn natural  : prop
+   | zero = natural
+   | succ = natural -> natural
+
+defn add   : natural -> natural -> natural -> prop
+  >| add_z = add zero N N
+  >| add_s = add N M R -> add (succ N) M (succ R)
+
+-- sub N M R is N - M = R
+defn sub   : natural -> natural -> natural -> prop
+   | sub_by_add = sub N M R <- add M R N
+
+fixity none 3 =<
+defn =< : natural -> natural -> prop
+  >| leqZero = {B} zero =< B
+  >| leqSucc = {A B} (succ A) =< (succ B) <- A =< B
+
+fixity none 3 <
+defn < : natural -> natural -> prop
+  >| ltZero = zero < succ B
+  >| ltSucc = succ A < succ B <- A < B
+
+
+
+defn odd : nat -> prop
+   | odd/one = odd (succ z)
+   | odd/n = [A] even A -> odd (succ A)
+
+defn even : nat -> prop
+   | even/zero = even z
+   | even/succ = [B] odd B -> even (succ B)

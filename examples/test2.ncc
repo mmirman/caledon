@@ -1,2 +1,0 @@
-defn blah : {T:prop} T -> T
-  as (?\T : prop . \a : T . a) : ( {T:prop} T -> T)
