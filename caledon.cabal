@@ -34,7 +34,8 @@ executable caledon
                  mtl >= 2.0 && < 3.0,
                  parsec >= 3.0 && < 4.0, 
                  containers >= 0.4 && < 1.0, 
-                 transformers >= 0.3 && < 1.0
+                 transformers >= 0.3 && < 1.0,
+                 cpphs >= 1.0 && < 2.0
 
   Extensions: FlexibleContexts,
               FlexibleInstances,

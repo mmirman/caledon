@@ -15,7 +15,7 @@ defn runBoth : bool -> prop
                 <- putChar 't'
                 <- putChar 't'
                 <- putChar 't'
-                <- putChar 't'
+                <- putChar ' '
                 <- A =:= true
 
   | run1 = [A] runBoth A
@@ -33,11 +33,12 @@ defn runBoth : bool -> prop
                 <- A =:= true
 
  >| run3 = [A] runBoth A
+                <- putChar ' '
                 <- putChar 'j'
                 <- putChar 'j'
                 <- putChar 'j'
-                <- putChar 'j'
+                <- putChar '\n'
                 <- A =:= false
   
-query main = runBoth false
+query main = runBoth true
 

@@ -2,7 +2,7 @@
  RecordWildCards
  #-}
 
-module Parser where
+module Parser (parseCaledon) where
 
 import AST
 
@@ -20,10 +20,15 @@ import qualified Data.Set as S
 import Debug.Trace
 import qualified Data.Foldable as F
 
+
+
 -----------------------------------------------------------------------
 -------------------------- PARSER -------------------------------------
 -----------------------------------------------------------------------
 
+-- | `parseCaledon` is the external interface
+parseCaledon :: SourceName -> String -> Either ParseError [Predicate]
+parseCaledon = runP decls emptyState
 
 data ParseState = ParseState { currentVar :: Integer
                              , currentSet :: S.Set Name

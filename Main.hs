@@ -12,6 +12,8 @@ import Text.Parsec
 import Data.Monoid
 import Control.Arrow (first)
 
+import Language.Preprocessor.Cpphs
+
 -----------------------------------------------------------------------
 -------------------------- MAIN ---------------------------------------
 -----------------------------------------------------------------------
@@ -32,10 +34,10 @@ checkAndRun decs = do
       (predicates, targets) = flip partition others $ \x -> case x of
         Predicate {} -> True
         _ -> False
-
+  
   putStrLn "\nAXIOMS: "
   forM_ (defs++predicates) $ \s -> putStrLn $ show s++"\n"
-
+  
   putStrLn "\nTARGETS: "
   forM_ targets $ \s -> putStrLn $ show s++"\n"
 
@@ -58,7 +60,7 @@ main = do
     [fname] -> do
       file <- readFile fname
       
-      let mError = runP decls emptyState fname file 
+      let mError = parseCaledon fname file
       decs <- case mError of
         Left e -> error $ show e
         Right l -> return l
