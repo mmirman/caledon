@@ -1,5 +1,3 @@
-#include "../prelude/logic.ncc"
-#include "../prelude/booleans.ncc"
 #include "../prelude/prelude.ncc"
 
 defn runBoth : bool -> prop
@@ -12,12 +10,12 @@ defn runBoth : bool -> prop
                 <- A =:= true
 
   | run2 = [A] runBoth A
-                <- putStr "qqqq
+                <- putStr "qqqq"
                 <- A =:= true
 
  >| run3 = [A] runBoth A
                 <- putStr " jjj\n"
                 <- A =:= false
   
-query main = runBoth true
+query main = runBoth false
 

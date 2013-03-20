@@ -14,9 +14,9 @@ defn io : prop
    | ,  = io -> prop -> io 
 
 defn run : io -> prop
-  >| runDo = run do
-  >| runSeq = run (A , B) <- run A 
-                          <- B
+   | runDo = run do
+   | runSeq = run (Av , Bv) <- run Av
+                            <- Bv
 
 defn readLine    : (string -> io) -> prop -- builtin 
    | readLineImp = [Foo : string -> io] [A : string] readLine Foo <- run (Foo A)
@@ -27,7 +27,7 @@ defn readLine    : (string -> io) -> prop -- builtin
 ----------------
 
 defn putStr : string -> prop
-  >| putStr_Nil = putStr (nil {A = char})
-  >| putStr_Cons = putStr (cons {A = char} V L)
-                <- putChar V
-                <- putStr L
+   | putStr_Nil = putStr nil
+   | putStr_Cons = putStr (cons V L)
+                   <- putChar V
+                   <- putStr L

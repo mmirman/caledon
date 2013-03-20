@@ -797,7 +797,34 @@ typeCheckAxioms verbose lst = do
   doubleCheckAll (S.union envSet uns) $ topoSortAxioms lst'
   
   return $ snd <$> l 
-  
+
+
+topoSortAxioms :: [(Maybe Name, (Bool,Integer,Bool), Name,Term,Type)] -> [(Maybe Name, (Bool,Integer,Bool), Name,Term,Type)]
+topoSortAxioms axioms = topoSortComp (\(fam,s,nm,val,ty) -> (nm,) 
+                                                            $ S.union (getImplieds nm)
+                                                            $ S.fromList 
+                                                            $ concatMap (\nm -> [nm,"#v:"++nm])
+                                                            $ filter (not . flip elem (map fst consts)) 
+                                                            $ S.toList $ freeVariables val `S.union` freeVariables ty ) axioms
+                        
+  where nm2familyLst  = catMaybes $ (\(fam,_,nm,_,_) -> (nm,) <$> fam) <$> axioms
+
+        
+        family2nmsMap = foldr (\(fam,nm) m -> M.insert nm (case M.lookup nm m of
+                                  Nothing -> S.singleton fam
+                                  Just s -> S.insert fam s) m
+                                )  mempty nm2familyLst
+        
+        family2impliedsMap = M.fromList $ (\(_,_,nm,val,_) -> (nm, 
+                                                               mconcat 
+                                                               $ catMaybes 
+                                                               $ map (`M.lookup` family2nmsMap) 
+                                                               $ S.toList 
+                                                               $ getImpliedFamilies val 
+                                                              )) <$> axioms        
+        
+        getImplieds nm = fromMaybe mempty (M.lookup nm family2impliedsMap)
+
 typeCheckAll :: Bool -> [Predicate] -> Choice [Predicate]
 typeCheckAll verbose preds = do
   

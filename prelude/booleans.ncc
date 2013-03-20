@@ -2,8 +2,8 @@
 --- Booleans ---
 ----------------
 defn bool : prop
-   | true = bool
-   | false = bool
+  >| true = bool
+  >| false = bool
 
 defn if : bool -> bool
   as \b . b
@@ -22,7 +22,7 @@ defn not : bool -> bool -> prop
   as \zq . if zq ==> false |:| true
 
 
-#import <strings.ncc>
+#include <strings.ncc>
 
 defn string_bool : bool -> string -> prop
   >| string_bool/true  = string_bool true "true"

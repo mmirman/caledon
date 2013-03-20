@@ -3,8 +3,8 @@
 ---------------------
 
 defn natural  : prop
-   | zero = natural
-   | succ = natural -> natural
+  >| zero = natural
+  >| succ = natural -> natural
 
 defn add   : natural -> natural -> natural -> prop
   >| add_z = add zero N N

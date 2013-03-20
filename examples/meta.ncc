@@ -1,10 +1,25 @@
-#include "../prelude/prelude.ncc"
+#include "../prelude/combinators.ncc"
+#include "../prelude/logic.ncc"
+#include "../prelude/booleans.ncc"
+#include "../prelude/naturals.ncc"
+#include "../prelude/io.ncc"
 
 defn chooseProp : bool -> prop -> prop
   >| chooseTrue = chooseProp true natural
   >| chooseFalse = chooseProp false bool
 
+
 defn getWorld : bool -> prop
-  >| getWorldImp = getWorld B
-                   <- readLine $ \S . do 
-		      	       	    , string_bool B S
+  >| getWorldImp = [B] getWorld B
+                 <- putStr "t"
+                 <- B =:= true
+-- 		 <- readLine ( \S . do 
+--		    	          , string_bool B S )
+
+defn getProp : prop -> prop
+  >| getPropImp = getProp P
+                  <- getWorld B2
+                  <- chooseProp B2 P
+
+defn thing  : {Pp : prop } getProp Pp => Pp -> prop
+  >| heynow = thing zero

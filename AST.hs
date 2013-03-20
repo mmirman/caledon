@@ -190,6 +190,15 @@ newName nm so fo = (nm',s',f')
 class Subst a where
   substFree :: Substitution -> S.Set Name -> a -> a
   
+
+getImpliedFamilies s = S.intersection fs $ gif s
+  where fs = freeVariables s
+        gif (Spine "#imp_forall#" [ty,a]) = (case getFamilyM ty of
+          Nothing -> id
+          Just f -> S.insert f) $ gif ty `S.union` gif a 
+        gif (Spine a l) = mconcat $ gif <$> l
+        gif (Abs _ ty l) = S.union (gif ty) (gif l)
+        
 subst s = substFree s $ freeVariables s
 
 class Alpha a where  
@@ -411,17 +420,19 @@ instance RegenAbsVars Constraint where
     SCons l -> SCons <<$> regenWithMem l
     a :&: b -> regenM (:&:) a b    
   
-getFamily (Spine "#infer#" [_, Abs _ _ lm]) = getFamily lm
-getFamily (Spine "#ascribe#"  (_:v:l)) = getFamily (rebuildSpine v l)
-getFamily (Spine "#dontcheck#"  [v]) = getFamily v
-getFamily (Spine "#forall#" [_, Abs _ _ lm]) = getFamily lm
-getFamily (Spine "#imp_forall#" [_, Abs _ _ lm]) = getFamily lm
-getFamily (Spine "#exists#" [_, Abs _ _ lm]) = getFamily lm
-getFamily (Spine "#open#" (_:_:c:_)) = getFamily c
-getFamily (Spine "open" (_:_:c:_)) = getFamily c
-getFamily (Spine "pack" [_,_,_,e]) = getFamily e
-getFamily (Spine nm' _) = nm'
-getFamily v = error $ "values don't have families: "++show v
+getFamily v = fromMaybe (error ("values don't have families: "++show v)) $ getFamilyM v
+
+getFamilyM (Spine "#infer#" [_, Abs _ _ lm]) = getFamilyM lm
+getFamilyM (Spine "#ascribe#"  (_:v:l)) = getFamilyM (rebuildSpine v l)
+getFamilyM (Spine "#dontcheck#"  [v]) = getFamilyM v
+getFamilyM (Spine "#forall#" [_, Abs _ _ lm]) = getFamilyM lm
+getFamilyM (Spine "#imp_forall#" [_, Abs _ _ lm]) = getFamilyM lm
+getFamilyM (Spine "#exists#" [_, Abs _ _ lm]) = getFamilyM lm
+getFamilyM (Spine "#open#" (_:_:c:_)) = getFamilyM c
+getFamilyM (Spine "open" (_:_:c:_)) = getFamilyM c
+getFamilyM (Spine "pack" [_,_,_,e]) = getFamilyM e
+getFamilyM (Spine nm' _) = Just nm'
+getFamilyM v = Nothing
 
 
 consts = [ (atomName , tipe)
