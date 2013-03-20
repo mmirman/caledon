@@ -683,10 +683,10 @@ buildOrderGraph gen prev s = case s of
     
   Spine nm l -> do
     mp <- get
-    prev' <- if (S.member nm gen) 
+    prev' <- if S.member nm gen
              then do
                let prevs = mp M.! nm
-               put (M.insert nm (S.union prev prevs) mp)
+               put $ M.insert nm (S.union prev prevs) mp
                return $ mempty
              else return prev
       
@@ -694,7 +694,7 @@ buildOrderGraph gen prev s = case s of
 
     if S.member nm gen
       then do
-      (mp) <- get
+      mp <- get
       let prevs = mp M.! nm
       put $ M.insert nm (S.union prev'' prevs) mp
       return $ S.insert nm $ S.union prev prev'' 
