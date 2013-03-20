@@ -107,7 +107,7 @@ instance Show Predicate where
   show (Predicate s nm ty []) = showT s ++ nm ++ " : " ++ show ty
   show (Predicate s nm ty (a:cons)) =
     showT s++ nm ++ " : " ++ show ty++showSingle a ++ concatMap (\x-> showSingle x) cons
-      where showSingle (b,(nm,ty)) = (if b then "\n   >| " else "   | ") ++nm ++ " = " ++ show ty
+      where showSingle (b,(nm,ty)) = (if b then "\n  >| " else "\n   | ") ++nm ++ " = " ++ show ty
   show (Query nm val) = "query " ++ nm ++ " = " ++ show val
   show (Define s nm val ty) = showT s ++ nm ++ " : " ++ show ty ++"\n as "++show val
                                                
@@ -117,9 +117,11 @@ tipeName = "type"
 kindName = "#kind#"
 
 atom = var atomName
+ty_hole = var "#hole#"
 tipe = var tipeName
 kind = var kindName  -- can be either a type or an atom
 ascribe a t = Spine ("#ascribe#") [t, a]
+dontcheck t = Spine ("#dontcheck#") [t]
 forall x tyA v = Spine ("#forall#") [tyA, Abs x tyA v]
 exists x tyA v = Spine ("#exists#") [tyA, Abs x tyA v]
 pack e tau imp tp interface = Spine "pack" [tp, Abs imp tp interface, tau, e]
@@ -250,6 +252,7 @@ instance FV Spine where
   freeVariables t = case t of
     Abs nm t p -> (S.delete nm $ freeVariables p) `mappend` freeVariables t
     Spine "#tycon#" [Spine nm [v]] -> freeVariables v
+    Spine "#dontcheck#" [v] -> freeVariables v
     Spine ['\'',_,'\''] [] -> mempty
     Spine head others -> mappend (S.singleton head) $ mconcat $ map freeVariables others
 
@@ -410,6 +413,7 @@ instance RegenAbsVars Constraint where
   
 getFamily (Spine "#infer#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#ascribe#"  (_:v:l)) = getFamily (rebuildSpine v l)
+getFamily (Spine "#dontcheck#"  [v]) = getFamily v
 getFamily (Spine "#forall#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#imp_forall#" [_, Abs _ _ lm]) = getFamily lm
 getFamily (Spine "#exists#" [_, Abs _ _ lm]) = getFamily lm
@@ -459,8 +463,8 @@ envSet = S.fromList $ map fst consts
 toNCCchar c = Spine ['\'',c,'\''] []
 toNCCstring s = foldr cons nil $ map toNCCchar s
   where char = Spine "char" []
-        nil = Spine "nil" [tycon "a" char]
-        cons a l = Spine "cons" [tycon "a" char, a,l]
+        nil = Spine "nil" [ tycon "A" char]
+        cons a l = Spine "cons" [tycon "A" char, a,l]
 
 envConsts = anonymous <$> M.fromList consts
 

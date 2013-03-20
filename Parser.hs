@@ -202,7 +202,7 @@ pTipe = do
         let (ident,sep) = decAnon
         nml <- many ident
         ty <- optionMaybe $ reservedOp sep >> ptipe
-        return (nml,fromMaybe tyhole ty)
+        return (nml,fromMaybe ty_hole ty)
 
       binary fun assoc name = flip Infix assoc $ do 
         name
@@ -224,8 +224,8 @@ pTipe = do
                 , regPostfix angles ["??"] ["infer"] infer
                 , regPostfix brackets ["∀"] ["forall"] forall
                 , regPostfix braces ["?∀"] ["?forall"] imp_forall
-                ]++[ altPostfix [op] [] (\nm t s -> Spine op [t,Abs nm tyhole s] ) | op <- opLams ]
-                ++[ altPostfix [] [op] (\nm t s -> Spine op [t,Abs nm tyhole s] ) | op <- strLams ]
+                ]++[ altPostfix [op] [] (\nm t s -> Spine op [t,Abs nm ty_hole s] ) | op <- opLams ]
+                ++[ altPostfix [] [op] (\nm t s -> Spine op [t,Abs nm ty_hole s] ) | op <- strLams ]
               , [ binary (forall) AssocRight $ reservedOp "->" <|> reservedOp "→" 
                 , binary (const (~~>)) AssocRight $ reservedOp "=>" <|> reservedOp "⇒"
                 ]
@@ -282,7 +282,7 @@ pTipe = do
          <?> "operator"      
          
       pAt =  do reserved "_"
-                return $ hole
+                return $ ty_hole
          <|> do r <- idVar
                 return $ var r
          <|> do r <- identifier
@@ -298,10 +298,6 @@ pTipe = do
       myParens s m = between (symbol "(" <?> ("("++s)) (symbol ")" <?> (s++")")) m
       
   ptipe <?> "tipe"
-
-hole =  var "#hole#"
-tyhole = var "#hole#"
-
 
 reservedOperators = [ "->", "=>", "<=", "⇐", "⇒", "→", "<-", "←", 
                      "\\", "?\\", 

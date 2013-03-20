@@ -50,6 +50,8 @@ lookupWith s a ctxt = case M.lookup a ctxt of
   Just r -> r
   Nothing -> error s
 
+
+
 emptyContext = Context Nothing mempty Nothing
 
 -- assumes the element is not already in the context, or it is and the only thing that is changing is it's type.
@@ -87,8 +89,17 @@ removeFromContext nm ctxt@(Context h cmap t) = case M.lookup nm cmap of
           p' = M.insert cp $ (lookupWith "looking up a cmap for p'" cp cmap ) { elmNext = Just cn }
   where isSane bool a = if bool then a else error "This doesn't match intended binding"
 
-addToHead s quant nm tp ctxt = addToContext s ctxt $ Binding quant nm tp Nothing (ctxtHead ctxt)
-addToTail s quant nm tp ctxt = addToContext s ctxt $ Binding quant nm tp (ctxtTail ctxt) Nothing
+addToHead s quant nm tp ctxt@Context{ctxtMap = cmap} = case M.lookup nm cmap of 
+  Nothing -> addToContext s ctxt $ Binding quant nm tp Nothing (ctxtHead ctxt)
+  Just (Binding{ elmQuant = quant', elmType = tp'}) | quant' == quant && tp' == tp && quant == Forall -> 
+    addToContext s ctxt' $ Binding quant nm tp Nothing (ctxtHead ctxt')
+    where ctxt' = removeFromContext nm ctxt
+  _ -> error $ "Can't add to head, already in context: "++show nm++" : "++show tp++"\n@"++show ctxt
+  
+addToTail s quant nm tp ctxt@Context{ctxtMap = cmap} = case M.lookup nm cmap of
+  Nothing -> addToContext s ctxt $ Binding quant nm tp (ctxtTail ctxt) Nothing
+  Just (Binding{ elmQuant = quant', elmType = tp'}) | quant' == quant && tp' == tp && quant == Forall -> ctxt
+  _ -> error $ "Can't add to tail, already in context: "++show nm++" : "++show tp++"\n@"++show ctxt
 
 removeHead ctxt = case ctxtHead ctxt of 
   Nothing -> ctxt

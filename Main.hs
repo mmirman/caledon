@@ -10,6 +10,7 @@ import Data.Foldable as F (forM_)
 import Data.List (partition)
 import Text.Parsec
 import Data.Monoid
+import Control.Monad (when)
 import Control.Arrow (first)
 
 import Language.Preprocessor.Cpphs
@@ -17,15 +18,17 @@ import Language.Preprocessor.Cpphs
 -----------------------------------------------------------------------
 -------------------------- MAIN ---------------------------------------
 -----------------------------------------------------------------------
-checkAndRun decs = do
+checkAndRun verbose decs = do
 
-  putStrLn "\nFILE: "
-  forM_ decs $ \s -> putStrLn $ show s++"\n"
+  when verbose $ do
+    putStrLn "\nFILE: "
+    forM_ decs $ \s -> putStrLn $ show s++"\n"
 
-  putStrLn "\nTYPE CHECKING: "
-  decs <- case runError $ typeCheckAll decs of
+  when verbose $ putStrLn "\nTYPE CHECKING: "
+  decs <- case runError $ typeCheckAll verbose decs of
     Left e -> error e
-    Right e -> putStrLn "Type checking success!" >> return e
+    Right e -> do when verbose $ putStrLn "Type checking success!"
+                  return e
   let (defs,others)  = flip partition decs $ \x -> case x of
         Define {} -> True
         _ -> False
@@ -35,11 +38,13 @@ checkAndRun decs = do
         Predicate {} -> True
         _ -> False
   
-  putStrLn "\nAXIOMS: "
-  forM_ (defs++predicates) $ \s -> putStrLn $ show s++"\n"
-  
-  putStrLn "\nTARGETS: "
-  forM_ targets $ \s -> putStrLn $ show s++"\n"
+  when verbose $ do
+    putStrLn "\nAXIOMS: "
+    forM_ (defs++predicates) $ \s -> putStrLn $ show s++"\n"
+
+  when verbose $ do
+    putStrLn "\nTARGETS: "
+    forM_ targets $ \s -> putStrLn $ show s++"\n"
 
   let predicates' = sub predicates
       targets' = sub targets
@@ -47,22 +52,27 @@ checkAndRun decs = do
       axioms = toSimpleAxioms predicates'
   
   forM_ targets' $ \target -> do
-    putStrLn $ "\nTARGET: \n"++show target
+    when verbose $ putStrLn $ "\nTARGET: \n"++show target
     case solver axioms $ predType target of
       Left e -> putStrLn $ "ERROR: "++e
-      Right sub -> putStrLn $ "SOLVED WITH:\n"
+      Right sub -> when verbose $ putStrLn $ "SOLVED WITH:\n"
                    ++concatMap (\(a,b) -> a++" => "++show b++"\n") sub
+
+
+processFile :: Bool -> String -> IO ()
+processFile verbose fname = do
+  file <- readFile fname
+  
+  let mError = parseCaledon fname file 
+  decs <- case mError of
+    Left e -> error $ show e
+    Right l -> return l
+  checkAndRun verbose decs
 
 main = do
   fnames <- getArgs
   case fnames of
-    [] -> putStrLn "No file specified. Usage is \"caledon file.ncc\""
-    [fname] -> do
-      file <- readFile fname
-      
-      let mError = parseCaledon fname file
-      decs <- case mError of
-        Left e -> error $ show e
-        Right l -> return l
-      checkAndRun decs
-    _ -> putStrLn "Unrecognized arguments. Usage is \"caledon file.ncc\""
+    [] -> putStrLn "No file specified. Usage is \"caledon [--io-only] file.ncc\""
+    [fname] -> processFile True fname
+    ["--io-only", fname] -> processFile False fname
+    _ -> putStrLn "Unrecognized arguments. Usage is \"caledon [--io-only] file.ncc\""
