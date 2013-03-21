@@ -1,6 +1,6 @@
 Name: caledon
 
-Version: 2.1.1.0
+Version: 3.0.0.0
 
 Description:         a dependently typed, polymorphic, higher order logic programming language based on the calculus of constructions designed for easier metaprogramming capabilities. 
 
@@ -44,7 +44,7 @@ executable caledon
               RecordWildCards,
               BangPatterns,
               TypeSynonymInstances,
-	      TemplateHaskell
+              TemplateHaskell
               
   ghc-options:  -O2 -optc-O3 -funfolding-use-threshold=16 -fspec-constr-count=10 -fdo-lambda-eta-expansion
   
