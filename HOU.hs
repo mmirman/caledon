@@ -30,23 +30,20 @@ import Debug.Trace
 import System.IO.Unsafe
 import Data.IORef
 
-{-# INLINE levelVar #-}
+{-# NOINLINE levelVar #-}
 levelVar :: IORef Int
 levelVar = unsafePerformIO $ newIORef 0
 
-{-# INLINE level #-}
+{-# NOINLINE level #-}
 level = unsafePerformIO $ readIORef levelVar
 
-{-# INLINE vtrace #-}
 vtrace !i | i < level = trace
 vtrace !i = const id
 
-{-# INLINE vtraceShow #-}
 vtraceShow !i1 !i2 s v | i2 < level = trace $ s ++" : "++show v
 vtraceShow !i1 !i2 s v | i1 < level = trace s
 vtraceShow !i1 !i2 s v = id
 
-{-# INLINE throwTrace #-}
 throwTrace !i s = vtrace i s $ throwError s
 
 mtrace True = trace
