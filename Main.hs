@@ -84,7 +84,7 @@ processFile options = do
   decs <- case mError of
     Left e -> error $ show e
     Right l -> return l
-  checkAndRun (options ^. optIO_Only) $ reduceDecsByName decs
+  checkAndRun (not $ options ^. optIO_Only) $ reduceDecsByName decs
           
 main = do
   (options, files) <- compilerOpts =<< getArgs

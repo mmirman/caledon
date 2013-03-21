@@ -16,9 +16,9 @@ data Options = Options
 $(makeLenses ''Options)     
 
 defaultOptions = Options 
-               { _optIO_Only = False
+               { _optIO_Only  = False
                , _optVerbose  = 0
-               , _optFile   = ""
+               , _optFile     = ""
                }
 
 
