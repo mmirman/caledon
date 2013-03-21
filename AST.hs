@@ -200,14 +200,14 @@ getImpliedFamilies s = S.intersection fs $ gif s
 subst s = substFree s $ freeVariables s
 
 class Alpha a where  
-  alphaConvert :: S.Set Name -> a -> a
+  alphaConvert :: S.Set Name -> Map Name Name -> a -> a
   rebuildFromMem :: Map Name Name -> a -> a  
   
 instance Subst a => Subst [a] where
   substFree s f t = substFree s f <$> t
   
 instance Alpha a => Alpha [a] where  
-  alphaConvert s l = alphaConvert s <$> l
+  alphaConvert s m l = alphaConvert s m <$> l
   rebuildFromMem s l = rebuildFromMem s <$> l
   
 instance (Subst a, Subst b) => Subst (a,b) where
@@ -233,11 +233,12 @@ instance Subst Spine where
       _ -> Spine nm apps'
       
 instance Alpha Spine where
-  alphaConvert s (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a ty $ alphaConvert (S.insert a s) r
-  alphaConvert s (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a ty $ alphaConvert (S.insert a s) r
-  alphaConvert s (Abs nm ty r) = Abs nm' (alphaConvert s ty) $ alphaConvert (S.insert nm' s) r
+  alphaConvert s m (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a ty $ alphaConvert (S.insert a s) (M.delete a m) r
+  alphaConvert s m (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a ty $ alphaConvert (S.insert a s) (M.delete a m) r
+  alphaConvert s m (Abs nm ty r) = Abs nm' (alphaConvert s m ty) $ alphaConvert (S.insert nm' s) (M.insert nm nm' m) r
     where nm' = newNameFor nm s
-  alphaConvert s (Spine a l) = Spine a $ alphaConvert s l
+  alphaConvert s m (Spine "#tycon#" [Spine c [v]]) = tycon c $ alphaConvert s m v          
+  alphaConvert s m (Spine a l) = Spine (fromMaybe a (m ! a)) $ alphaConvert s m l
   
   rebuildFromMem s (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a (rebuildFromMem s ty) $ rebuildFromMem (M.delete a s) r
   rebuildFromMem s (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a (rebuildFromMem s ty) $ rebuildFromMem (M.delete a s) r
@@ -465,7 +466,7 @@ consts = [ (atomName , tipe)
          ]
 
 
-anonymous ty = ((False,100),ty)
+anonymous ty = ((False,1),ty)
 
 envSet = S.fromList $ map fst consts
 
