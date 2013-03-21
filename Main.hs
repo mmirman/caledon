@@ -1,18 +1,20 @@
+
 module Main where
 
+import Options
 import AST
 import Choice
 import HOU
 import Parser
 import System.Environment
-import Data.Functor
 import Data.Foldable as F (forM_)
 import Data.List (partition)
-import Text.Parsec
 import Data.Monoid
 import Control.Monad (when)
-import Control.Arrow (first)
 
+import Data.IORef
+
+import Control.Lens
 import Language.Preprocessor.Cpphs
 
 -----------------------------------------------------------------------
@@ -59,8 +61,12 @@ checkAndRun verbose decs = do
                    ++concatMap (\(a,b) -> a++" => "++show b++"\n") sub
 
 
-processFile :: Bool -> String -> IO ()
-processFile verbose fname = do
+processFile :: Options -> IO ()
+processFile options = do
+  let fname = options ^. optFile
+      
+  writeIORef levelVar $ options ^. optVerbose
+  
   file <- readFile fname
   
   file <- runCpphs 
@@ -78,12 +84,12 @@ processFile verbose fname = do
   decs <- case mError of
     Left e -> error $ show e
     Right l -> return l
-  checkAndRun verbose $ reduceDecsByName decs
-
+  checkAndRun (options ^. optIO_Only) $ reduceDecsByName decs
+          
 main = do
-  fnames <- getArgs
-  case fnames of
-    [] -> putStrLn "No file specified. Usage is \"caledon [--io-only] file.ncc\""
-    [fname] -> processFile True fname
-    ["--io-only", fname] -> processFile False fname
-    _ -> putStrLn "Unrecognized arguments. Usage is \"caledon [--io-only] file.ncc\""
+  (options, files) <- compilerOpts =<< getArgs
+  
+  processFile $ options & case files of
+    [] -> id
+    [fname] -> optFile .~ fname
+    _ -> error $ "Too many file arguments."++header

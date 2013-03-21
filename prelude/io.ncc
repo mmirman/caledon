@@ -31,3 +31,8 @@ defn putStr : string -> prop
    | putStr_Cons = putStr (cons V L)
                    <- putChar V
                    <- putStr L
+
+defn putStrLn : string -> prop
+  as \S . run $ do 
+              , putStr S
+              , putChar '\n'

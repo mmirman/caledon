@@ -19,8 +19,6 @@ import qualified Data.Set as S
 import Control.Monad.RWS (RWST)
 import Control.Monad.State.Class (MonadState(), get, modify)
 
-import Choice
-
 -----------------------------
 ---  abstract syntax tree ---
 -----------------------------

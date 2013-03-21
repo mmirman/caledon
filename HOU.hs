@@ -28,9 +28,14 @@ import qualified Data.Set as S
 import Debug.Trace
 
 import System.IO.Unsafe
+import Data.IORef
+
+{-# INLINE levelVar #-}
+levelVar :: IORef Int
+levelVar = unsafePerformIO $ newIORef 0
 
 {-# INLINE level #-}
-level = 0
+level = unsafePerformIO $ readIORef levelVar
 
 {-# INLINE vtrace #-}
 vtrace !i | i < level = trace

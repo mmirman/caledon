@@ -1,5 +1,12 @@
-#include <prelude.ncc>
+#include "../prelude/prelude.ncc"
 
 -- switching the direction of the output to be input with unification!
 defn readLineIn : string -> prop
-  as \S . readLine $ \R . do , S =:= R
+  as \S . readLine $ \R . do , R =:= S
+
+defn divergent : string -> prop
+   | divergentImp = divergent S -> divergent S
+
+query main = run $ do 
+    , putStrLn "hiya"
+    , divergent S
