@@ -4,6 +4,7 @@
 module Context where
 
 import AST
+import Substitution
 import Data.Monoid
 import Data.Functor
 import qualified Data.Map as M

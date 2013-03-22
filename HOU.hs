@@ -9,6 +9,7 @@ module HOU where
 
 import Choice
 import AST
+import Substitution
 import Context
 import TopoSortAxioms
 import Control.Monad.State (StateT, forM_,runStateT, modify, get,put, State, runState)

@@ -14,7 +14,7 @@ import Control.Monad (when)
 
 import Data.IORef
 
-import Control.Lens
+import Control.Lens.Getter ((^.))
 import Language.Preprocessor.Cpphs
 
 -----------------------------------------------------------------------

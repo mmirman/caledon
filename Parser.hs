@@ -5,7 +5,7 @@
 module Parser (parseCaledon) where
 
 import AST
-
+import Substitution
 import Data.Functor
 import Data.Functor.Identity
 import Text.Parsec

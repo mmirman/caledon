@@ -28,7 +28,9 @@ Source-repository head
 
 executable caledon
   main-is: Main.hs
-  other-modules: HOU, Choice, Parser, AST, TopoSortAxioms, Context
+  other-modules: HOU, Choice, Parser, 
+                 AST, TopoSortAxioms, 
+                 Context, Options, Substitution
 
   Build-depends: base >= 4.0 && < 5.0,
                  mtl >= 2.0 && < 3.0,
