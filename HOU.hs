@@ -535,8 +535,8 @@ search ty = do
 withKind m = do
   k <- getNewWith "@k"
   addToEnv (∃) k kind $ do
-    r <- m $ var k
     var k .@. kind
+    r <- m $ var k
     return r
 
 check v x = if x == "13@regm+f" then trace ("FOUND AT: "++ v) x else x
@@ -546,6 +546,7 @@ checkType sp ty | ty == kind = withKind $ checkType sp
 checkType sp ty = case sp of
   Spine "#hole#" [] -> do
     x' <- getNewWith "@hole"
+    
     addToEnv (∃) x' ty $ do
       var x' .@. ty
       return $ var x'
