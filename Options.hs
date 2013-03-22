@@ -5,7 +5,7 @@
 module Options where
 
 import Data.Maybe
-import Control.Lens
+import Control.Lens (makeLenses, (.~))
 import System.Console.GetOpt
 
 data Options = Options 

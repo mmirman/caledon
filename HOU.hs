@@ -9,6 +9,7 @@ module HOU where
 
 import Choice
 import AST
+import Substitution
 import Context
 import TopoSortAxioms
 import Control.Monad.State (StateT, forM_,runStateT, modify, get,put, State, runState)
@@ -26,6 +27,8 @@ import Data.Monoid
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Debug.Trace
+
+import Control.Lens hiding (Choice(..))
 
 import System.IO.Unsafe
 import Data.IORef
@@ -748,26 +751,34 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 --- the public interface ---
 ----------------------------
 
-type FlatPred = [(Maybe Name,(Bool,Integer,Bool),Name,Term,Type)]
-typeCheckAxioms :: Bool -> FlatPred -> Choice Substitution
+-- type FlatPred = [((Maybe Name,Bool,Integer,Bool),Name,Type,Kind)]
+
+typeCheckAxioms :: Bool -> [FlatPred] -> Choice Substitution
 typeCheckAxioms verbose lst = do
   
   -- check the closedness of families.  this gets done
   -- after typechecking since family checking needs to evaluate a little bit
   -- in order to allow defs in patterns
-  let notval (_,_,'#':'v':':':_,_,_) = False
-      notval (_,_,_,_,_) = True 
+  let notval p = case p ^. predName of 
+        '#':'v':':':_ -> False
+        _ -> True
       
-      unsound (_,(_,_,s),_,_,_) = not s
+      unsound = not . (^. predSound)
       
-      tys = M.fromList $ map (\(_,(b,i,_),nm,ty,_) -> (nm,((b,i),ty))) $ filter notval lst
-      uns = S.fromList $ map (\(_,_,nm,ty,_) -> nm) $ filter unsound $ filter notval lst
+      tys = M.fromList $ map (\p -> ( p^.predName, ((p^.predSequential,p^.predPriority),p^.predType))) $ filter notval lst
+      uns = S.fromList $ map (^.predName) $ filter unsound $ filter notval lst
       
-      inferAll :: (ContextMap, FlatPred, FlatPred) -> Choice (FlatPred,ContextMap)
+      inferAll :: (ContextMap, [FlatPred], [FlatPred]) -> Choice ([FlatPred],ContextMap)
       inferAll (l , r, []) = return (r,l)
-      inferAll (_ , r, (_,_,nm,_,_):_) | nm == tipeName = throwTrace 0 $ tipeName++" can not be overloaded"
-      inferAll (_ , r, (_,_,nm,_,_):_) | nm == atomName = throwTrace 0 $ atomName++" can not be overloaded"
-      inferAll (l , r, (fam,(b,i,s),nm,val,ty):toplst) = do
+      inferAll (_ , r, p:_) | p^.predName == tipeName = throwTrace 0 $ tipeName++" can not be overloaded"
+      inferAll (_ , r, p:_) | p^.predName == atomName = throwTrace 0 $ atomName++" can not be overloaded"
+      inferAll (l , r, p:toplst) = do
+        let fam = p^.predFamily
+            b = p^.predSequential
+            i = p^.predPriority
+            nm = p^.predName
+            val = p^.predType
+            ty = p^.predKind
         (val,ty,l') <- appendErr ("can not infer type for: "++nm++" : "++show val) $ 
                        mtrace verbose ("Checking: " ++nm) $ 
                        vtrace 0 ("\tVAL: " ++show val  
@@ -778,20 +789,22 @@ typeCheckAxioms verbose lst = do
         unless (fam == Nothing || Just (getFamily val) == fam)
           $ throwTrace 0 $ "not the right family: need "++show fam++" for "++nm ++ " = " ++show val                    
           
+        let resp = p & predType .~ val & predKind .~ ty
         inferAll $ case nm of
-          '#':'v':':':nm' -> (sub' <$> l', (fam,(b,i,s),nm,val,ty):r , fsub <$> toplst) 
+          '#':'v':':':nm' -> (sub' <$> l', resp:r , sub <$> toplst) 
             where sub' (b,a)= (b, sub a)
+                  sub :: Subst a => a -> a
                   sub = subst $ nm' |-> ascribe val (dontcheck ty) 
-                        -- the ascription isn't necessary because we don't have unbound variables, 
-                        -- and we already know that val : ty, but it pauses computation
-                        -- ascribe val ty 
-                  fsub (fam,s,nm,val,ty) = (fam,s,nm, sub val, sub ty)
-          _ -> (l', (fam,(b,i,s),nm,val,ty):r, toplst)
+          _ -> (l', resp:r, toplst)
 
   (lst',l) <- inferAll (tys, [], topoSortAxioms lst)
   
   let doubleCheckAll _ [] = return ()
-      doubleCheckAll l ((_,_,nm,val,ty):r) = do
+      doubleCheckAll l (p:r) = do
+        let nm = p^.predName
+            val = p^.predType
+            ty = p^.predKind
+        
         let usedvars = freeVariables val `S.union` freeVariables ty
         unless (S.isSubsetOf usedvars l)
           $ throwTrace 0 $ "Circular type:"
@@ -807,15 +820,15 @@ typeCheckAxioms verbose lst = do
   return $ snd <$> l 
 
 
-topoSortAxioms :: [(Maybe Name, (Bool,Integer,Bool), Name,Term,Type)] -> [(Maybe Name, (Bool,Integer,Bool), Name,Term,Type)]
-topoSortAxioms axioms = topoSortComp (\(fam,s,nm,val,ty) -> (nm,) 
-                                                            $ S.union (getImplieds nm)
-                                                            $ S.fromList 
-                                                            $ concatMap (\nm -> [nm,"#v:"++nm])
-                                                            $ filter (not . flip elem (map fst consts)) 
-                                                            $ S.toList $ freeVariables val `S.union` freeVariables ty ) axioms
+topoSortAxioms :: [FlatPred] -> [FlatPred]
+topoSortAxioms axioms = topoSortComp (\p -> (p^.predName,) 
+                                            $ S.union (getImplieds $ p^.predName)
+                                            $ S.fromList 
+                                            $ concatMap (\nm -> [nm,"#v:"++nm])
+                                            $ filter (not . flip elem (map fst consts)) 
+                                            $ S.toList $ freeVariables p ) axioms
                         
-  where nm2familyLst  = catMaybes $ (\(fam,_,nm,_,_) -> (nm,) <$> fam) <$> axioms
+  where nm2familyLst  = catMaybes $ (\p -> (p^.predName,) <$> (p^.predFamily)) <$> axioms
 
         
         family2nmsMap = foldr (\(fam,nm) m -> M.insert nm (case M.lookup nm m of
@@ -823,17 +836,18 @@ topoSortAxioms axioms = topoSortComp (\(fam,s,nm,val,ty) -> (nm,)
                                   Just s -> S.insert fam s) m
                                 )  mempty nm2familyLst
         
-        family2impliedsMap = M.fromList $ (\(_,_,nm,val,_) -> (nm, 
-                                                               mconcat 
-                                                               $ catMaybes 
-                                                               $ map (`M.lookup` family2nmsMap) 
-                                                               $ S.toList 
-                                                               $ getImpliedFamilies val 
-                                                              )) <$> axioms        
+        family2impliedsMap = M.fromList $ (\p -> (p^.predName, 
+                                                  mconcat 
+                                                  $ catMaybes 
+                                                  $ map (`M.lookup` family2nmsMap) 
+                                                  $ S.toList 
+                                                  $ getImpliedFamilies 
+                                                  $ p^.predType
+                                                 )) <$> axioms        
         
         getImplieds nm = fromMaybe mempty (M.lookup nm family2impliedsMap)
 
-typeCheckAll :: Bool -> [Predicate] -> Choice [Predicate]
+typeCheckAll :: Bool -> [Decl] -> Choice [Decl]
 typeCheckAll verbose preds = do
   
   tyMap <- typeCheckAxioms verbose $ toAxioms True preds
@@ -844,20 +858,23 @@ typeCheckAll verbose preds = do
   
   return $ newPreds <$> preds
 
-toAxioms :: Bool -> [Predicate] -> [(Maybe [Char], (Bool, Integer, Bool), Name, Type, Spine)]  
+toAxioms :: Bool -> [Decl] -> [FlatPred]
 toAxioms b = concat . zipWith toAxioms' [0..]
-  where toAxioms' j (Predicate s nm ty cs) = (Just $ atomName,(False,j,s),nm,ty,tipe):zipWith (\(sequ,(nm',ty')) i -> (Just nm,(sequ,i,False), nm',ty',atom)) cs [0..]
-        toAxioms' j (Query nm val) = [(Nothing, (False,j,False),nm,val,atom)]
-        toAxioms' j (Define s nm val ty) = (if b then ((Nothing,(False,j,s), "#v:"++nm,val,ty):) else id)
-                                           [(Nothing,(False,j,False), nm,ty,kind)] 
+  where toAxioms' j (Predicate s nm ty cs) = 
+          (FlatPred (PredData (Just $ atomName) False j s) nm ty tipe)
+          :zipWith (\(sequ,(nm',ty')) i -> (FlatPred (PredData (Just nm) sequ i False) nm' ty' atom)) cs [0..]
+        toAxioms' j (Query nm val) = [(FlatPred (PredData Nothing False j False) nm val atom)]
+        toAxioms' j (Define s nm val ty) = (if b then ((FlatPred (PredData Nothing False j s) ("#v:"++nm) val ty):) else id)
+                                           [(FlatPred (PredData Nothing False j False) nm ty kind)] 
   
-toSimpleAxioms :: [Predicate] -> ContextMap
-toSimpleAxioms l = M.fromList $ (\(_,(seqi,i,_),nm,t,_) -> (nm,((seqi,i),t))) <$> toAxioms False l
+toSimpleAxioms :: [Decl] -> ContextMap
+toSimpleAxioms l = M.fromList $ (\p -> (p^.predName, ((p^.predSequential, p^.predPriority), p^.predType))) 
+                   <$> toAxioms False l
 
 solver :: ContextMap -> Type -> Either String [(Name, Term)]
 solver axioms tp = case runError $ runRWST (search tp) (M.union envConsts axioms) emptyState of
   Right ((_,tm),_,_) -> Right $ [("query", tm)]
   Left s -> Left $ "reification not possible: "++s
 
-reduceDecsByName :: [Predicate] -> [Predicate]
-reduceDecsByName decs = map snd $ M.toList $ M.fromList $ map (\a -> (predName a,a)) decs
+reduceDecsByName :: [Decl] -> [Decl]
+reduceDecsByName decs = map snd $ M.toList $ M.fromList $ map (\a -> (a ^. declName,a)) decs
