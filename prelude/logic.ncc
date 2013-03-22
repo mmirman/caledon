@@ -20,7 +20,7 @@ defn free : [A : prop] (A -> prop) -> prop
 -------------------
 fixity none 5 =:=
 defn =:= : Q -> Q -> prop
-  >| eq = (=:=) {Q = A} B B
+  >| eq = (B : A) =:= B
 
 -- searching for these is SLOW
 fixity none 0 /\

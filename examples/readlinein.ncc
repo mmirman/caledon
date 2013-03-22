@@ -1,5 +1,15 @@
-#include <prelude.ncc>
+#include "../prelude/prelude.ncc"
 
 -- switching the direction of the output to be input with unification!
+
 defn readLineIn : string -> prop
-  as \S . readLine $ \R . do , S =:= R
+  as \S . readLine $ \R . do , R =:= S
+
+defn main : prop
+   | mainImp = [S] main 
+                   <- putStrLn "hi"
+		   <- S =:= "FOO"
+               	   <- putStrLn S
+                   <- putStrLn "ho"
+
+query main1 = main

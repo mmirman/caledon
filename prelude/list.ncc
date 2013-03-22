@@ -2,8 +2,8 @@
 --- Lists ---
 -------------
 defn list : prop -> prop
-   | nil  = list A
-   | cons = A -> list A -> list A
+  >| nil  = list A
+  >| cons = A -> list A -> list A
 
 defn concatList : list A -> list A -> list A -> prop
   >| concatListNil  = concatList {A = T} nil L L

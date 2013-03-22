@@ -35,14 +35,16 @@ executable caledon
                  parsec >= 3.0 && < 4.0, 
                  containers >= 0.4 && < 1.0, 
                  transformers >= 0.3 && < 1.0,
-                 cpphs >= 1.0 && < 2.0
+                 cpphs >= 1.0 && < 2.0,
+                 lens >= 3.0 && < 4.0
 
   Extensions: FlexibleContexts,
               FlexibleInstances,
               MultiParamTypeClasses,
               RecordWildCards,
               BangPatterns,
-              TypeSynonymInstances
+              TypeSynonymInstances,
+              TemplateHaskell
               
   ghc-options:  -O2 -optc-O3 -funfolding-use-threshold=16 -fspec-constr-count=10 -fdo-lambda-eta-expansion
   

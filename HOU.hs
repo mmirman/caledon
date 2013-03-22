@@ -28,20 +28,22 @@ import qualified Data.Set as S
 import Debug.Trace
 
 import System.IO.Unsafe
+import Data.IORef
 
-{-# INLINE level #-}
-level = 0
+{-# NOINLINE levelVar #-}
+levelVar :: IORef Int
+levelVar = unsafePerformIO $ newIORef 0
 
-{-# INLINE vtrace #-}
+{-# NOINLINE level #-}
+level = unsafePerformIO $ readIORef levelVar
+
 vtrace !i | i < level = trace
 vtrace !i = const id
 
-{-# INLINE vtraceShow #-}
 vtraceShow !i1 !i2 s v | i2 < level = trace $ s ++" : "++show v
 vtraceShow !i1 !i2 s v | i1 < level = trace s
 vtraceShow !i1 !i2 s v = id
 
-{-# INLINE throwTrace #-}
 throwTrace !i s = vtrace i s $ throwError s
 
 mtrace True = trace
@@ -313,7 +315,7 @@ gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(b'@(Spine x' y'l)
 
   modifyCtxt $ addToHead "-ggd-" Exists xN xNty -- THIS IS DIFFERENT FROM THE PAPER!!!!
   
-  vtrace 3 ("SUBST: -ggd- "++show sub) $ return $ Just (sub, []) -- var xN :@: xNty])
+  vtrace 3 ("SUBST: -ggd- "++show sub) $ return $ Just (sub, [] {- var xN :@: xNty] -})
   
 gvar_uvar_inside a@(Spine _ yl, _) b@(Spine y _, _) = 
   case elemIndex (var y) $ reverse yl of
@@ -464,6 +466,7 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
       targets <- case mfam of
         Just (nm,t) -> return $ [(nm,t)]
         Nothing -> do
+          {-
           let excludes = S.toList $ S.intersection (M.keysSet exists) $ freeVariables m
           searchMaps <- mapM getVariablesBeforeExists excludes
           
@@ -471,9 +474,12 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
               searchMap = M.union env $ case searchMaps of
                 [] -> mempty
                 a:l -> foldr (M.intersection) a l
-                
+              
           return $ filter sameFamily $ M.toList searchMap
-      
+          -}
+          
+          return $ filter sameFamily $ M.toList constants ++ M.toList foralls
+          
       if all isFixed $ S.toList $ S.union (freeVariables m) (freeVariables goal)
         then ret $ Just []
         else case targets of
@@ -714,13 +720,14 @@ generateBinding sp = foldr (\a b -> imp_forall a ty_hole b) sp orderedgens
 ----------------------
 typeInfer :: ContextMap -> ((Bool,Integer),Name,Spine,Type) -> Choice (Term,Type, ContextMap)
 typeInfer env (seqi,nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
-  ty <- return $ alphaConvert mempty ty
-  val <- return $ alphaConvert mempty val
+  ty <- return $ alphaConvert mempty mempty ty
+  val <- return $ alphaConvert mempty mempty val
   
   (ty,mem') <- regenWithMem ty
-  (val,mem) <- regenWithMem val
+  (val,mem) <- vtrace 1 ("ALPHAD TO: "++show val) $ regenWithMem val
   
-  (val,constraint) <- checkFullType val ty
+  (val,constraint) <- vtrace 1 ("REGENED TO: "++show val) $ 
+                      checkFullType val ty
   
   sub <- appendErr ("which became: "++show val ++ "\n\t :  " ++ show ty) $ 
          unify constraint
