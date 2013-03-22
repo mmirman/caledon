@@ -264,7 +264,7 @@ consts = [ (atomName , tipe)
          ]
 
 
-anonymous ty = ((False,1),ty)
+anonymous ty = ((False,10000),ty)
 
 envSet = S.fromList $ map fst consts
 

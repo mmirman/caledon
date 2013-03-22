@@ -1,10 +1,9 @@
-fixity right 0 $
-defn $ : {a b:prop} (a -> b) -> a -> b
-  as ?\At Bt :prop . \ F . \A . F A  
+#include "../prelude/combinators.ncc"
 
 fixity pre 1 ♢
 fixity lambda Π 
 fixity lambda lam 
+
 
 {-
 for the moment, circularly defined types are allowed!  this violates consistency.  
@@ -19,12 +18,12 @@ t in tm S T has type T where T has sort S.
 unsound tm : {S : tm ty} tm S → prop
    | ty  = tm ty
    | ♢   = tm ty -> tm ty
-   | Π   = [T : tm ty] (tm T → tm T) → tm $ ♢ T
+   | Π   = [T : tm ty] (tm T → tm T) → tm $ ♢  T
+   | raise = {T : tm ty} tm T → tm $ ♢  T
    | lam = [T : tm ty][F : tm T → tm T] tm {S = ♢ T} (Π A : T . F A)
-   | raise = {T : tm ty} tm T → tm $ ♢ T
 
-defn isTm : {S : tm ty} {A : tm S} tm A -> prop
+defn isTm : {Kind : tm ty} {Ty : tm Kind} tm Ty -> prop
    | hasValue = [S : tm ty][T : tm S][V : tm T] isTm V
 
-query whattype0 = isTm (Π A : ty . A)
+query whattype0 = isTm { Kind = ty } { Ty = ♢ ty } ( Π A : ty . A)
 query whattype1 = isTm (lam A : ty . A)

@@ -2,7 +2,10 @@
  RecordWildCards,
  TemplateHaskell,
  FlexibleContexts,
- IncoherentInstances
+ IncoherentInstances,
+ TypeSynonymInstances,
+ FlexibleInstances,
+ MultiParamTypeClasses
  #-}
 
 module Parser (parseCaledon) where
@@ -93,11 +96,11 @@ lamDef = do
   reserved "lambda"
   opLam <|> strLam
 
-opLam = addOpLam opLambdas
-strLam = addOpLam strLambdas
+opLam = addOpLam operator opLambdas
+strLam = addOpLam identifier strLambdas
 
-addOpLam lens = do
-  op <- identifier
+addOpLam ident lens = do
+  op <- ident
   currentTable.lens %= (op:)
   
 infixDef = do  
@@ -224,13 +227,14 @@ pTipe = do
                    (parens anonNamed <|> anonNamed)
         return $ \input -> foldr (flip out tp) input nml
       
+      
       table = [ [ altPostfix ["λ", "\\"] ["lambda"] Abs
                 , altPostfix ["?λ", "?\\"] ["?lambda"] imp_abs
                 , altPostfix ["∃"] ["exists"] exists
                 , regPostfix angles ["??"] ["infer"] infer
                 , regPostfix brackets ["∀"] ["forall"] forall
                 , regPostfix braces ["?∀"] ["?forall"] imp_forall
-                ]++[ altPostfix [op] [] (\nm t s -> Spine op [t,Abs nm ty_hole s] ) | op <- opLams ]
+                ]++[ altPostfix [op] [] (\nm t s -> Spine op [t, Abs nm ty_hole s] ) | op <- opLams ]
                 ++[ altPostfix [] [op] (\nm t s -> Spine op [t,Abs nm ty_hole s] ) | op <- strLams ]
               , [ binary (forall) AssocRight $ reservedOp "->" <|> reservedOp "→" 
                 , binary (const (~~>)) AssocRight $ reservedOp "=>" <|> reservedOp "⇒"

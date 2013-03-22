@@ -1,10 +1,10 @@
-fixity lambda .λ
+fixity lambda lam
 fixity lambda Π
 
 defn tm : prop
    | p = tm
    | t = tm
-   | .λ = tm → (tm → tm) → tm
+   | lam = tm → (tm → tm) → tm
    | Π = tm → (tm → tm) → tm
 
 fixity none 0 ::
@@ -12,4 +12,4 @@ defn :: : tm -> tm -> prop
    | p_t = p :: t
    | lam_pi =  [A : tm][T : tm -> tm][B : tm -> tm]
       ([x] x :: A -> T x :: B x )
-      -> (.λ x : A . T x) :: (Π x : A . B x) 
+      -> (lam x : A . T x) :: (Π x : A . B x) 
