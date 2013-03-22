@@ -21,6 +21,7 @@ import qualified Data.Set as S
 import Control.Monad.RWS (RWST)
 import Control.Monad.State.Class (MonadState(), get, modify)
 
+import Control.Lens hiding (Choice(..))
 ---------------------
 --- New Variables ---
 ---------------------
@@ -111,7 +112,8 @@ getImpliedFamilies s = S.intersection fs $ gif s
           Just f -> S.insert f) $ gif ty `S.union` gif a 
         gif (Spine a l) = mconcat $ gif <$> l
         gif (Abs _ ty l) = S.union (gif ty) (gif l)
-        
+
+subst :: Subst a => Substitution -> a -> a
 subst s = substFree s $ freeVariables s
 
 class Alpha a where  
@@ -162,10 +164,15 @@ instance Alpha Spine where
     where a' = fromMaybe a $ M.lookup a s
                                  
   
-instance Subst Predicate where
+instance Subst Decl where
   substFree sub f (Predicate s nm ty cons) = Predicate s nm (substFree sub f ty) ((\(b,(nm,t)) -> (b,(nm,substFree sub f t))) <$> cons)
   substFree sub f (Query nm ty) = Query nm (substFree sub f ty)
   substFree sub f (Define s nm val ty) = Define s nm (substFree sub f val) (substFree sub f ty)
+
+
+instance Subst FlatPred where
+  substFree sub f p = p & predType %~ substFree sub f
+                        & predKind %~ substFree sub f
 
   
 -------------------------

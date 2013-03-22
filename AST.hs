@@ -1,7 +1,9 @@
 {-# LANGUAGE
  FlexibleInstances,
  BangPatterns,
- FlexibleContexts
+ FlexibleContexts,
+ TemplateHaskell,
+ NoMonomorphismRestriction
  #-}
 module AST where
 
@@ -13,25 +15,60 @@ import Data.Maybe
 import Data.Monoid
 import Data.List
 
+import Control.Lens
+
 
 type Name = String
-
-infixr 0 ~>
-infixr 0 ~~>
-(~>) = forall ""
-(~~>) = imp_forall ""
 
 data Spine = Spine Name [Type]
            | Abs Name Type Spine 
            deriving (Eq)
+                    
+instance Monoid Spine where 
+  mempty  = undefined
+  mappend = undefined
+instance Monoid Bool where 
+  mempty  = undefined
+  mappend = undefined
 
+type Kind = Spine
 type Type = Spine
 type Term = Spine
+data Decl = Predicate { _declIsSound :: !Bool
+                      , _declName :: !Name
+                      , _declType :: !Type
+                      , _declConstructors :: ![(Bool,(Name,Type))] 
+                      }
+          | Query { _declName :: !Name
+                  , _declType :: !Type
+                  }
+          | Define { _declIsSound :: !Bool
+                   , _declName :: !Name
+                   , _declValue :: !Term
+                   , _declType :: !Type
+                   }
+          deriving (Eq)
 
-data Predicate = Predicate { predIsSound :: !Bool, predName :: !Name, predType :: !Type, predConstructors :: ![(Bool,(Name,Type))] }
-               | Query { predName :: !Name, predType :: !Spine}
-               | Define { predIsSound :: !Bool, predName :: !Name, predValue :: !Spine, predType :: !Type}
-               deriving (Eq)
+
+data PredData = PredData { _dataFamily :: Maybe Name
+                         , _dataSequential :: Bool
+                         , _dataPriority :: Integer
+                         , _dataSound :: Bool
+                         } 
+
+data FlatPred = FlatPred { _predData :: PredData
+                         , _predName :: Name
+                         , _predType :: Type
+                         , _predKind :: Kind
+                         }
+$(makeLenses ''PredData)
+$(makeLenses ''FlatPred)
+$(makeLenses ''Decl)
+
+predFamily = predData . dataFamily
+predSequential = predData . dataSequential
+predPriority = predData . dataPriority
+predSound = predData . dataSound
 
 -------------------------
 ---  Constraint types ---
@@ -55,10 +92,6 @@ data Constraint = SCons [SCons]
                 | !Constraint :&: Constraint 
                 | Bind !Quant !Name !Type !Constraint
                 deriving (Eq)
-
-
-
-
 
 
 -------------------------
@@ -103,7 +136,7 @@ instance Show Spine where
 
 
 
-instance Show Predicate where
+instance Show Decl where
   show a = case a of
     Predicate s nm ty [] -> showDef s ++ nm ++ " : " ++ show ty
     Predicate s nm ty (a:cons) ->
@@ -166,9 +199,16 @@ instance FV Spine where
     Spine ['\'',_,'\''] [] -> mempty
     Spine head others -> mappend (S.singleton head) $ mconcat $ map freeVariables others
 
+instance FV FlatPred where
+  freeVariables p = freeVariables (p^.predType) `S.union` freeVariables (p^.predKind)
+  
 --------------------------------
 --- Builtin Spines and types ---
 --------------------------------
+infixr 0 ~>
+infixr 0 ~~>
+(~>) = forall ""
+(~~>) = imp_forall ""
 
 var !nm = Spine nm []
 

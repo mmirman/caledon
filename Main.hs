@@ -3,6 +3,8 @@ module Main where
 
 import Options
 import AST
+import Substitution
+
 import Choice
 import HOU
 import Parser
@@ -14,7 +16,7 @@ import Control.Monad (when)
 
 import Data.IORef
 
-import Control.Lens.Getter ((^.))
+import Control.Lens ((^.), (.~), (&))
 import Language.Preprocessor.Cpphs
 
 -----------------------------------------------------------------------
@@ -35,7 +37,7 @@ checkAndRun verbose decs = do
         Define {} -> True
         _ -> False
       
-      sub = subst $ foldr (\a r -> r *** (predName a |-> subst r (predValue a))) mempty defs
+      sub = subst $ foldr (\a r -> r *** ((a^.declName) |-> subst r (a^.declValue))) mempty defs
       (predicates, targets) = flip partition others $ \x -> case x of
         Predicate {} -> True
         _ -> False
@@ -55,7 +57,7 @@ checkAndRun verbose decs = do
   
   forM_ targets' $ \target -> do
     when verbose $ putStrLn $ "\nTARGET: \n"++show target
-    case solver axioms $ predType target of
+    case solver axioms $ target ^. declType of
       Left e -> putStrLn $ "ERROR: "++e
       Right sub -> when verbose $ putStrLn $ "SOLVED WITH:\n"
                    ++concatMap (\(a,b) -> a++" => "++show b++"\n") sub

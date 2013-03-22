@@ -1,15 +1,20 @@
 {-# LANGUAGE
- RecordWildCards
+ RecordWildCards,
+ TemplateHaskell,
+ FlexibleContexts,
+ IncoherentInstances
  #-}
 
 module Parser (parseCaledon) where
 
 import AST
 import Substitution
+import Control.Applicative (Applicative(..))
 import Data.Functor
 import Data.Functor.Identity
 import Text.Parsec
 import Control.Monad (unless)
+import Control.Monad.State.Class
 import Text.Parsec.Language (haskellDef)
 import Text.Parsec.Expr 
 import Data.List
@@ -20,98 +25,102 @@ import qualified Data.Set as S
 import Debug.Trace
 import qualified Data.Foldable as F
 
-
+import Control.Lens 
 
 -----------------------------------------------------------------------
 -------------------------- PARSER -------------------------------------
 -----------------------------------------------------------------------
 
--- | `parseCaledon` is the external interface
-parseCaledon :: SourceName -> String -> Either ParseError [Predicate]
-parseCaledon = runP decls emptyState
-
-data ParseState = ParseState { currentVar :: Integer
-                             , currentSet :: S.Set Name
-                             , currentTable :: FixityTable 
-                             , currentOps :: [Name]
-                             }
-
 data Fixity = FixLeft | FixRight | FixNone
 
-data FixityTable = FixityTable { fixityBinary :: [(Integer,String, Assoc)] 
-                               , fixityPrefix :: [(Integer, String, Assoc)]
-                               , fixityPostfix :: [(Integer, String, Assoc)]
-                               , opLambdas :: [String]
-                               , strLambdas :: [String]
-                               , binds :: [(String,String,String)]
+data FixityTable = FixityTable { _fixityBinary :: [(Integer,String, Assoc)] 
+                               , _fixityPrefix :: [(Integer, String, Assoc)]
+                               , _fixityPostfix :: [(Integer, String, Assoc)]
+                               , _opLambdas :: [String]
+                               , _strLambdas :: [String]
+                               , _binds :: [(String,String,String)]
                                }
+                   
+                   
+data ParseState = ParseState { _currentVar :: Integer
+                             , _currentSet :: S.Set Name
+                             , _currentTable :: FixityTable 
+                             , _currentOps :: [Name]
+                             }
+$(makeLenses ''FixityTable)                  
+$(makeLenses ''ParseState)
+
+
+
+-- | `parseCaledon` is the external interface
+parseCaledon :: SourceName -> String -> Either ParseError [Decl]
+parseCaledon = runP decls emptyState
+
 
 emptyTable = FixityTable [] [] [] [] [] []
 emptyState = (ParseState 0 mempty emptyTable [])
 
 type Parser = ParsecT String ParseState Identity
 
-modifySet :: (S.Set Name -> S.Set Name) -> ParseState -> ParseState
-modifySet f s = s { currentSet = f $ currentSet s }
+instance MonadState ParseState Parser where
+  get = getState
+  put = putState
 
-modifyVar :: (Integer -> Integer) -> ParseState -> ParseState
-modifyVar f s = s { currentVar = f $ currentVar s }
 
 getNextVar :: Parser String
 getNextVar = do
-  v <- currentVar <$> getState
-  modifyState $ modifyVar (+1)
+  v <- use currentVar
+  currentVar %= (+1)
   return $ show v++"'"
 
-decls :: Parser [Predicate]
+decls :: Parser [Decl]
 decls = do
   whiteSpace
   lst <- many (topLevel <?> "declaration")
   eof
-  return lst
+  return $ catMaybes lst
 
-topLevel = fixityDef <|> query <|> defn
-
-fixityDef = do 
+topLevel = Nothing <$ fixityDef 
+       <|> Just <$> query 
+       <|> Just <$> defn 
+       <* optional (many semi)
+  
+fixityDef = do
   reserved "fixity"
   infixDef <|> lamDef
-  topLevel
                                                                     
 lamDef = do
   reserved "lambda"
   opLam <|> strLam
 
-opLam = do  
-  op <- operator
-  modifyState $ \b -> b { currentTable = let ct = currentTable b in ct { opLambdas = op:opLambdas ct} }
-                                                                    
-strLam = do
+opLam = addOpLam opLambdas
+strLam = addOpLam strLambdas
+
+addOpLam lens = do
   op <- identifier
-  modifyState $ \b -> b { currentTable = let ct = currentTable b in ct { strLambdas = op:strLambdas ct} }
-                                                                    
+  currentTable.lens %= (op:)
+  
 infixDef = do  
-  -- I wish template haskell worked with record wild cards!
-  (setFixity) <- (reserved "left" >> return (\b c -> b { fixityBinary = c AssocLeft $ fixityBinary b} )) 
-             <|> (reserved "none" >> return (\b c -> b { fixityBinary = c AssocNone $ fixityBinary b} )) 
-             <|> (reserved "right" >> return (\b c -> b { fixityBinary = c AssocRight $ fixityBinary b} )) 
-             <|> (reserved "pre" >> return (\b c -> b { fixityPrefix = c undefined $ fixityPrefix b}))
-             <|> (reserved "post" >> return (\b c -> b { fixityPostfix = c undefined $ fixityPostfix b}))
+  setFixity <- (reserved "left" >> return (\b c -> over fixityBinary (c AssocLeft) b))
+           <|> (reserved "none" >> return (\b c -> over fixityBinary (c AssocNone) b))
+           <|> (reserved "right" >> return (\b c -> over fixityBinary (c AssocRight) b))
+           <|> (reserved "pre" >> return (\b c -> over fixityPrefix (c undefined) b))
+           <|> (reserved "post" >> return (\b c -> over fixityPostfix (c undefined) b))
   n <- integer
-  op <- operator -- <|> identifier
+  op <- operator
   
   let modify assoc = insertBy (\(n,_,_) (m,_,_) -> compare n m) (n,op, assoc)
-  modifyState $ \b -> b { currentTable = setFixity (currentTable b) modify
-                        , currentOps = op:currentOps b}
+  
+  currentTable %= flip setFixity modify
+  currentOps %= (op:)
   
 
-query :: Parser Predicate
+query :: Parser Decl
 query = do
-  reserved "query"
-  (nm,ty) <- named decPred
-  optional semi
-  return $ Query nm ty
+  reserved "query" 
+  uncurry Query <$> named decPred
 
-defn :: Parser Predicate
+defn :: Parser Decl
 defn = sound <|> unsound
   
 sound = do
@@ -131,11 +140,8 @@ vsn s = do
                       <|> (reservedOp ">|" >> return True)
                    (nm,t) <- named decPred
                    return (seqi,(nm,t))
-                        
-                 optional semi
                  return $ Predicate s nm ty lst
-      none = do optional semi
-                return $ Predicate s nm ty []
+      none = do return $ Predicate s nm ty []
       letbe = do reserved "as"
                  val <- pTipe
                  return $ Define s nm val ty
@@ -168,11 +174,11 @@ named (ident, sep) = do
 
 tmpState :: String -> Parser a -> Parser a
 tmpState nm m = do
-  s <- currentSet <$> getState
+  s <- use currentSet
   let b = S.member nm s
-  modifyState $ modifySet (S.insert nm)
+  currentSet %= S.insert nm
   r <- m
-  unless b $ modifyState $ modifySet $ S.delete nm
+  unless b $ currentSet %= S.delete nm
   return r
 
 
@@ -183,7 +189,7 @@ pString = toNCCstring <$> stringLiteral
 
 
 pTipe = do
-  FixityTable bin prefix postfix opLams strLams binds <- currentTable <$> getState 
+  FixityTable bin prefix postfix opLams strLams binds <- use currentTable
   
   let getSnd [] = []
       getSnd (a:l) = l
@@ -276,7 +282,7 @@ pTipe = do
               return $ ascribe v t
         (asc <|> return v <?> "function") 
         
-      pOp = do operators <- currentOps <$> getState 
+      pOp = do operators <- use currentOps
                choice $ flip map operators $ \nm -> do reserved nm 
                                                        return $ var nm
          <?> "operator"      
@@ -291,11 +297,9 @@ pTipe = do
          <|> pString
          <?> "atom"
 
-      pTycon = braces $ do
-        (nm,ty) <- named decVar
-        return $ tycon nm ty
+      pTycon = braces $ uncurry tycon <$> named decVar
       
-      myParens s m = between (symbol "(" <?> ("("++s)) (symbol ")" <?> (s++")")) m
+      myParens s m = (symbol "(" <?> ("("++s)) *> m <*  (symbol ")" <?> (s++")"))
       
   ptipe <?> "tipe"
 
@@ -326,3 +330,5 @@ P.TokenParser{..} = P.makeTokenParser mydef
 
 getId :: Parser Char -> Parser String
 getId start = P.identifier $ P.makeTokenParser mydef { P.identStart = start }
+
+
