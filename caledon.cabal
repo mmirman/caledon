@@ -1,6 +1,6 @@
 Name: caledon
 
-Version: 2.1.1.0
+Version: 3.0.0.0
 
 Description:         a dependently typed, polymorphic, higher order logic programming language based on the calculus of constructions designed for easier metaprogramming capabilities. 
 
