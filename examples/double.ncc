@@ -12,5 +12,4 @@ defn main : prop
                <- S =:= 'h'
                <- putChar S
 
-
 query main1 = main
