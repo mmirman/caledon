@@ -42,7 +42,7 @@ getNew = do
   return $ show n
   
 getNewWith :: (Functor f, MonadState c f, ValueTracker c) => String -> f String
-getNewWith s = {- (++s) <$> -} getNew
+getNewWith s = (++s) <$> getNew
 
                                
 ---------------------
@@ -103,15 +103,6 @@ newName nm so fo = (nm',s',f')
 
 class Subst a where
   substFree :: Substitution -> S.Set Name -> a -> a
-  
-
-getImpliedFamilies s = S.intersection fs $ gif s
-  where fs = freeVariables s
-        gif (Spine "#imp_forall#" [ty,a]) = (case getFamilyM ty of
-          Nothing -> id
-          Just f -> S.insert f) $ gif ty `S.union` gif a 
-        gif (Spine a l) = mconcat $ gif <$> l
-        gif (Abs _ ty l) = S.union (gif ty) (gif l)
 
 subst :: Subst a => Substitution -> a -> a
 subst s = substFree s $ freeVariables s

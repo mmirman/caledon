@@ -90,8 +90,13 @@ removeFromContext nm ctxt@(Context h cmap t) = case M.lookup nm cmap of
           p' = M.insert cp $ (lookupWith "looking up a cmap for p'" cp cmap ) { elmNext = Just cn }
   where isSane bool a = if bool then a else error "This doesn't match intended binding"
 
-addAfter s top quant nm tp ctxt@Context{ctxtMap = cmap} = 
-  addToContext ("ADDAFTER: "++s) ctxt $ Binding quant nm tp (Just $ elmName top) (elmNext top)
+addAfter s t quant nm tp ctxt@Context{ctxtMap = cmap} = checkContext "addAfter" $ do
+  let top = lookupWith ("looking up "++t++"\n\t in context: "++show cmap++"\n\t"++s) t cmap
+  addToContext ("ADD_AFTER: "++s) ctxt $ Binding quant nm tp (Just $ elmName top) (elmNext top)
+
+addBefore s b quant nm tp ctxt@Context{ctxtMap = cmap} = checkContext "addBefore" $ do
+  let bot = lookupWith ("looking up "++b++"\n\t in context: "++show cmap++"\n\t"++s) b cmap
+  addToContext ("ADD_BEFORE: "++s) ctxt $ Binding quant nm tp (elmPrev bot) (Just $ elmName bot)
 
 addToHead s quant nm tp ctxt@Context{ctxtMap = cmap} = case M.lookup nm cmap of 
   Nothing -> addToContext ("ATH: "++s) ctxt $ Binding quant nm tp Nothing (ctxtHead ctxt)
@@ -120,8 +125,8 @@ getHead (Context (Just h) ctx _) = lookupWith "getting head" h ctx
 getHead (Context Nothing _ _) = error "no head"
 
 -- gets the list of bindings after (below) a given binding
-getAfter s bind ctx = tail $ getAfter' s bind ctx            
-getAfter' s bind ctx@(Context{ ctxtMap = ctxt }) = gb bind
+getAfter s bind ctx = tail $ getAfterInclusive s bind ctx            
+getAfterInclusive s bind ctx@(Context{ ctxtMap = ctxt }) = gb bind
   where gb ~(Binding quant nm ty _ n) = (quant, (nm,ty)):case n of
           Nothing -> []
           Just n -> gb $ case M.lookup n ctxt of 
@@ -129,8 +134,8 @@ getAfter' s bind ctx@(Context{ ctxtMap = ctxt }) = gb bind
             Just c -> c
 
 -- gets the list of bindings before (above) a given binding
-getBefore s bind ctx = tail $ getBefore' s bind ctx            
-getBefore' s bind ctx@(Context{ ctxtMap = ctxt }) = gb bind
+getBefore s bind ctx = tail $ getBeforeInclusive s bind ctx            
+getBeforeInclusive s bind ctx@(Context{ ctxtMap = ctxt }) = gb bind
   where gb ~(Binding quant nm ty p _) = (quant, (nm,ty)):case p of
           Nothing -> []
           Just p -> gb $ case M.lookup p ctxt of 
@@ -141,8 +146,8 @@ getBefore' s bind ctx@(Context{ ctxtMap = ctxt }) = gb bind
 
 checkContext _ c@(Context Nothing _ Nothing) = c
 checkContext s ctx = foldr (\v c -> seq (checkEquals v) c) ctx $ zip st (reverse $ ta)
-  where st = getBefore' s (getTail ctx) ctx
-        ta = getAfter' s (getHead ctx) ctx
+  where st = getBeforeInclusive s (getTail ctx) ctx
+        ta = getAfterInclusive s (getHead ctx) ctx
         checkEquals (a,b) | (a == b) = ()
         checkEquals (a,b) = error $ s++" \n\tNOT THE SAME" ++show (a,b) ++ " \n\t IN "++show ctx
 
@@ -186,12 +191,24 @@ getElm s !x = do
   case ty of
     Nothing -> Left <$> (\ctxt -> lookupWith ("looking up "++x++"\n\t in context: "++show ctxt++"\n\t"++s) x ctxt) <$> ctxtMap <$> stateCtxt <$> get
     Just a -> return $ Right a
+  
+getBindings :: Binding -> Env [(Name,Type)]
+getBindings bind = fmap snd <$> getQuantBindings bind
+
+getBindingsInclusive :: Binding -> Env [(Name,Type)]
+getBindingsInclusive bind = fmap snd <$> getQuantBindings bind
 
 -- | This gets all the bindings outside of a given bind and returns them in a list (not including that binding).
-getBindings :: Binding -> Env [(Name,Type)]
-getBindings bind = do
+getQuantBindings :: Binding -> Env [(Quant, (Name,Type))]
+getQuantBindings bind = do
   ctx <- stateCtxt <$> get
-  return $ snd <$> getBefore "IN: getBindings" bind ctx
+  return $ getBefore "IN: getQuantBindings" bind ctx
+  
+getQuantBindingsInclusive :: Binding -> Env [(Quant, (Name,Type))]
+getQuantBindingsInclusive bind = do
+  ctx <- stateCtxt <$> get
+  return $ getBeforeInclusive "IN: getQuantBindingsInclusive" bind ctx  
+    
   
 getBindingsBetween :: Binding -> Binding -> Env [(Name,Type)]
 getBindingsBetween top bottom = do
@@ -207,13 +224,16 @@ getAnExist = do
       last = (elmQuant til, (elmName til, elmType til))
   return $ case ctx of
     Context _ _ Nothing -> Nothing
-    _ -> snd <$> find (\(q,_) -> q == Exists) (last:getBefore "IN: getBindings" til ctx)
+    _ -> snd <$> find (\(q,_) -> q == Exists) (last:getBefore "IN: getAnExist" til ctx)
 
+-- | `getAllBindings` gets all bindings, listed from tightest to loosest
+-- ie, ∀a:t∃b:t will return [(∃,(b,t)), (∀,(a,t))]
 getAllBindings = do
   ctx <- stateCtxt <$> get
   case ctx of
     Context _ _ Nothing -> return []
-    _ -> (getBindings $ getTail ctx)
+    _ -> getQuantBindingsInclusive $ getTail ctx
+
     
 getForalls :: Env ContextMap
 getForalls = do
@@ -223,12 +243,12 @@ getForalls = do
 getForallsAfter :: Binding -> Env (S.Set Name)
 getForallsAfter bind = do
   ctx <- stateCtxt <$> get
-  return $ S.fromList $ map (fst . snd) $ filter ((== Forall) . fst) $ getAfter "IN: getBindings" bind ctx    
+  return $ S.fromList $ map (fst . snd) $ filter ((== Forall) . fst) $ getAfter "IN: getForalls" bind ctx
   
 getExistsAfter :: Binding -> Env (S.Set Name)
 getExistsAfter bind = do
   ctx <- stateCtxt <$> get
-  return $ S.fromList $ map (fst . snd) $ filter ((== Exists) . fst) $ getAfter "IN: getBindings" bind ctx      
+  return $ S.fromList $ map (fst . snd) $ filter ((== Exists) . fst) $ getAfter "IN: getExistsAfter" bind ctx      
 
 getExists :: Env ContextMap
 getExists = do
