@@ -62,16 +62,16 @@ addToContext s (Context Nothing ctxt Nothing) elm@(Binding _ nm _ Nothing Nothin
 addToContext s c (Binding _ _ _ Nothing Nothing) = error $ "context not empty so can't add to tail: "++show c
 addToContext s c@(Context h ctxt t) elm@(Binding _ nm _ t'@(Just p) Nothing) | t' == t = checkContext (s++"\naddToCtxt J N: "++show elm ++ "\n\tOLD CONTEXT: "++show c) $ 
   Context h (M.insert p t'val $ M.insert nm elm $ ctxt) (Just nm)
-  where t'val = (lookupWith "looking up p ctxt" p ctxt) { elmNext = Just nm }
+  where t'val = (lookupWith (s++" looking up p ctxt") p ctxt) { elmNext = Just nm }
 addToContext s _ (Binding _ _ _ _ Nothing) = error "can't add this to tail"
 addToContext s (Context h ctxt t) elm@(Binding _ nm _ Nothing h'@(Just n)) | h' == h = checkContext (s++"\naddToCtxt N J: ") $ 
   Context (Just nm) (M.insert n h'val $ M.insert nm elm $ ctxt) t
-  where h'val = (lookupWith "looking up n ctxt" n ctxt) { elmPrev = Just nm }
+  where h'val = (lookupWith (s++" looking up n ctxt") n ctxt) { elmPrev = Just nm }
 addToContext s _ (Binding _ _ _ Nothing _) = error "can't add this to head"
 addToContext s ctxt@Context{ctxtMap = cmap} elm@(Binding _ nm _ (Just p) (Just n)) = checkContext (s++"\naddToCtxt J J: ") $ 
   ctxt { ctxtMap = M.insert n n'val $ M.insert p p'val $ M.insert nm elm $ cmap }
-  where n'val = (lookupWith "looking up n cmap" n cmap) { elmPrev = Just nm }
-        p'val = (lookupWith "looking up p cmap" p cmap) { elmNext = Just nm }
+  where n'val = (lookupWith (s++" looking up n cmap") n cmap) { elmPrev = Just nm }
+        p'val = (lookupWith (s++" looking up p cmap") p cmap) { elmNext = Just nm }
   
 removeFromContext :: Name -> Context -> Context
 removeFromContext nm ctxt@(Context h cmap t) = case M.lookup nm cmap of
@@ -90,15 +90,18 @@ removeFromContext nm ctxt@(Context h cmap t) = case M.lookup nm cmap of
           p' = M.insert cp $ (lookupWith "looking up a cmap for p'" cp cmap ) { elmNext = Just cn }
   where isSane bool a = if bool then a else error "This doesn't match intended binding"
 
+addAfter s top quant nm tp ctxt@Context{ctxtMap = cmap} = 
+  addToContext ("ADDAFTER: "++s) ctxt $ Binding quant nm tp (Just $ elmName top) (elmNext top)
+
 addToHead s quant nm tp ctxt@Context{ctxtMap = cmap} = case M.lookup nm cmap of 
-  Nothing -> addToContext s ctxt $ Binding quant nm tp Nothing (ctxtHead ctxt)
+  Nothing -> addToContext ("ATH: "++s) ctxt $ Binding quant nm tp Nothing (ctxtHead ctxt)
   Just (Binding{ elmQuant = quant', elmType = tp'}) | quant' == quant && tp' == tp && quant == Forall -> 
-    addToContext s ctxt' $ Binding quant nm tp Nothing (ctxtHead ctxt')
+    addToContext ("ATH2: "++s) ctxt' $ Binding quant nm tp Nothing (ctxtHead ctxt')
     where ctxt' = removeFromContext nm ctxt
   _ -> error $ "Can't add to head, already in context: "++show nm++" : "++show tp++"\n@"++show ctxt
   
 addToTail s quant nm tp ctxt@Context{ctxtMap = cmap} = case M.lookup nm cmap of
-  Nothing -> addToContext s ctxt $ Binding quant nm tp (ctxtTail ctxt) Nothing
+  Nothing -> addToContext ("ATT: "++s) ctxt $ Binding quant nm tp (ctxtTail ctxt) Nothing
   Just (Binding{ elmQuant = quant', elmType = tp'}) | quant' == quant && tp' == tp && quant == Forall -> ctxt
   _ -> error $ "Can't add to tail, already in context: "++show nm++" : "++show tp++"\n@"++show ctxt
 
@@ -190,6 +193,13 @@ getBindings bind = do
   ctx <- stateCtxt <$> get
   return $ snd <$> getBefore "IN: getBindings" bind ctx
   
+getBindingsBetween :: Binding -> Binding -> Env [(Name,Type)]
+getBindingsBetween top bottom = do
+  above <- getBindings top
+  target <- getBindings bottom
+  let aboveSet = S.insert (elmName top) $ S.fromList $ fst <$> above 
+  return $ filter (\n -> not $ S.member (fst n) aboveSet) target
+  
 getAnExist :: Env (Maybe (Name,Type))
 getAnExist = do
   ctx <- stateCtxt <$> get
@@ -209,7 +219,17 @@ getForalls :: Env ContextMap
 getForalls = do
   ctx <- ctxtMap <$> stateCtxt <$> get
   return $ anonymous <$> elmType <$> M.filter (\q -> elmQuant q == Forall) ctx
+
+getForallsAfter :: Binding -> Env (S.Set Name)
+getForallsAfter bind = do
+  ctx <- stateCtxt <$> get
+  return $ S.fromList $ map (fst . snd) $ filter ((== Forall) . fst) $ getAfter "IN: getBindings" bind ctx    
   
+getExistsAfter :: Binding -> Env (S.Set Name)
+getExistsAfter bind = do
+  ctx <- stateCtxt <$> get
+  return $ S.fromList $ map (fst . snd) $ filter ((== Exists) . fst) $ getAfter "IN: getBindings" bind ctx      
+
 getExists :: Env ContextMap
 getExists = do
   ctx <- ctxtMap <$> stateCtxt <$> get
