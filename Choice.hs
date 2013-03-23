@@ -30,13 +30,16 @@ instance Applicative Choice where
   pure = Success
   mf <*> ma = mf >>= (<$> ma)
 
+--determine a b = appendErr "" $ (:<|>:) (appendErr "" a) (appendErr "" b)
+determine = (:<|>:)
+
 instance Alternative Choice where
   empty = Fail ""
-  (<|>) = (:<|>:)
+  (<|>) = determine
 
 instance MonadPlus Choice where
   mzero = Fail ""
-  mplus = (:<|>:)
+  mplus = determine
 
 class RunChoice m where
   runError :: m a -> Either String a

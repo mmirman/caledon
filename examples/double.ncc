@@ -1,0 +1,16 @@
+fixity none 5 =:=
+defn =:= : char -> char -> prop
+   | eq = (B) =:= B
+
+defn char : prop
+
+defn putChar    :  char -> prop -- builtin
+   | putCharImp = [A : char] putChar A
+
+defn main : prop
+   | mainImp = main 
+               <- S =:= 'h'
+               <- putChar S
+
+
+query main1 = main

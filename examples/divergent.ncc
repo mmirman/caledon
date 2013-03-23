@@ -1,0 +1,10 @@
+defn unit : prop
+  >| u1 = unit
+
+defn divergent : unit -> prop
+   | divergentImp = divergent u1 -> divergent S
+
+
+defn moop : prop
+   | moopimp = moop <- divergent T
+query main = moop

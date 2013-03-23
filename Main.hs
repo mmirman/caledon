@@ -64,6 +64,8 @@ checkAndRun verbose decs = do
 
 
 processFile :: Options -> IO ()
+processFile options | options ^. optHelp /= Nothing = case options ^. optHelp of
+  Just s -> putStrLn s
 processFile options = do
   let fname = options ^. optFile
       

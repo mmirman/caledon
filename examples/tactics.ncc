@@ -1,0 +1,23 @@
+#include "../prelude/logic.ncc"
+
+-- just because we can define the theorem 
+-- doesn't mean we can prove it (we don't have switch?)
+
+defn natural : prop
+  as ∀ a : prop . a → (a → a)  → a
+
+defn zero : natural
+  as λ a : prop . λ z : a . λ s : a → a . z
+
+defn succ : natural → natural
+  as λ n : natural . λ a : prop . λ z : a . λ s : a → a . s (n a z s)
+
+defn even : natural → prop
+   | even-zero = even zero
+   | even-succ = [A : natural] even A -> even (succ (succ A))
+
+defn add : natural → natural → natural
+  as λ n₁ n₂ : natural . n₁ natural n₂ succ
+
+defn thm : prop
+  as ∀ N . even (add N N)
