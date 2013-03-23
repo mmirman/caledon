@@ -168,25 +168,29 @@ unifyEq cons@(a :=: b) = case (a,b) of
   (s@(Spine x yl), s') -> vtrace 4 "-ss-" $ do
     bind <- getElm ("all: "++show cons) x
     case bind of
-      Left bind@Binding{ elmQuant = Exists } -> vtrace 4 "-g?-" $ do
-        raiseToTop bind (Spine x yl) $ \(a@(Spine x yl),ty) sub ->
-          case subst sub s' of
+      Left bind@Binding{ elmQuant = Exists, elmType = ty } -> vtrace 4 "-g?-" $ do
+        fors <- getForallsAfter bind
+        exis <- getExistsAfter bind
+        case s' of
             b@(Spine x' y'l) -> vtrace 4 "-gs-" $ do
               bind' <- getElm ("gvar-blah: "++show cons) x' 
               case bind' of
                 Right ty' -> vtraceShow 1 2 "-gc-" cons $ -- gvar-const
---                  if allElementsAreVariables yl
---                  then gvar_const (Spine x yl, ty) (Spine x' y'l, ty')  
---                   else return Nothing
-                  gvar_const (Spine x yl, ty) (Spine x' y'l, ty') 
-                Left Binding{ elmQuant = Forall } | not $ S.member x' $ freeVariables yl -> 
+                  if allElementsAreVariables fors yl
+                  then gvar_const (Spine x yl, ty) (Spine x' y'l, ty')  
+                  else return Nothing
+                Left Binding{ elmQuant = Forall } | (not $ S.member x' $ freeVariables yl) && S.member x' fors -> 
                   throwTrace 0 $ "CANT: gvar-uvar-depends: "++show (a :=: b)
                 Left Binding{ elmQuant = Forall } | S.member x $ freeVariables y'l -> 
                   throwTrace 0 $ "CANT: occurs check: "++show (a :=: b)
-                Left Binding{ elmQuant = Forall, elmType = ty' } -> vtrace 1 "-gui-" $  -- gvar-uvar-inside
-                  gvar_uvar_inside (Spine x yl, ty) (Spine x' y'l, ty')
-                Left bind@Binding{ elmQuant = Exists, elmType = ty' } -> 
-                  if not $ allElementsAreVariables yl && allElementsAreVariables y'l 
+                Left Binding{ elmQuant = Forall, elmType = ty' } | S.member x' fors -> vtrace 1 "-gui-" $  -- gvar-uvar-inside
+                  if allElementsAreVariables fors yl
+                  then gvar_uvar_inside (Spine x yl, ty) (Spine x' y'l, ty')
+                  else return Nothing
+                Left Binding{ elmQuant = Forall, elmType = ty' } -> vtrace 1 "-gui-" $ 
+                  return Nothing
+                Left bind'@Binding{ elmQuant = Exists, elmType = ty'} -> 
+                  if not $ allElementsAreVariables fors yl && allElementsAreVariables fors y'l && S.member x' exis
                   then return Nothing 
                   else if x == x' 
                        then vtraceShow 1 2 "-ggs-" cons $ -- gvar-gvar-same
@@ -194,7 +198,7 @@ unifyEq cons@(a :=: b) = case (a,b) of
                        else -- gvar-gvar-diff
                          if S.member x $ freeVariables y'l 
                          then throwTrace 0 $ "CANT: ggd-occurs check: "++show (a :=: b)
-                         else vtraceShow 1 2 "-ggd-" cons $ gvar_gvar_diff (Spine x yl, ty) (Spine x' y'l, ty') bind
+                         else vtraceShow 1 2 "-ggd-" cons $ gvar_gvar_diff bind (Spine x yl, ty) (Spine x' y'l, ty') bind'
             _ -> vtrace 1 "-ggs-" $ return Nothing
       _ -> vtrace 4 "-u?-" $ case s' of 
         b@(Spine x' _) | x /= x' -> do
@@ -218,10 +222,13 @@ unifyEq cons@(a :=: b) = case (a,b) of
           return $ Just (mempty, cons, False)
         _ -> throwTrace 0 $ "CANT: uvar against a pi WITH CONS "++show cons
             
-allElementsAreVariables :: [Spine] -> Bool
-allElementsAreVariables = all $ \c -> case c of
-  Spine _ [] -> True
-  _ -> False
+allElementsAreVariables :: S.Set Name -> [Spine] -> Bool
+allElementsAreVariables fors = partialPerm mempty 
+  where partialPerm s [] = True
+        partialPerm s (Spine nm []:l) | S.member nm fors && not (S.member nm s) = 
+          partialPerm (S.insert nm s) l
+        partialPerm _ _ = False
+
 
 typeToListOfTypes (Spine "#forall#" [_, Abs x ty l]) = (x,ty):typeToListOfTypes l
 typeToListOfTypes (Spine _ _) = []
@@ -230,9 +237,10 @@ typeToListOfTypes a@(Abs _ _ _) = error $ "not a type" ++ show a
 -- the problem WAS (hopefully) here that the binds were getting
 -- a different number of substitutions than the constraints were.
 -- make sure to check that this is right in the future.
-raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
-  
-  hl <- reverse <$> getBindings bind
+raiseToTop top@Binding{ elmNext = Just k}  bind@Binding{ elmName = x, elmType = ty } sp m | k == x = 
+  m (sp, ty) mempty
+raiseToTop top bind@Binding{ elmName = x, elmType = ty } sp m = do
+  hl <- reverse <$> getBindingsBetween top bind
   x' <- getNewWith "@newx"
   
   let newx_args = map (var . fst) hl
@@ -248,7 +256,7 @@ raiseToTop bind@Binding{ elmName = x, elmType = ty } sp m = do
         modifyCtxt $ subst sub'
         return $ Just (sub'', cons,b)
         
-  modifyCtxt $ addToHead "-rtt-" Exists x' ty' . removeFromContext x
+  modifyCtxt $ addAfter "-rtt-" top Exists x' ty' . removeFromContext x
   vtrace 3 ("RAISING: "++x' ++" +@+ "++ show newx_args ++ " ::: "++show ty'
          ++"\nFROM: "++x ++" ::: "++ show ty
           ) modifyCtxt $ subst sub
@@ -287,7 +295,7 @@ gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine _ y'l), _) = do
   
 gvar_gvar_same _ _ = error "gvar-gvar-same is not made for this case"
 
-gvar_gvar_diff (a',aty') (sp, _) bind = raiseToTop bind sp $ \(b'@(Spine x' y'l), bty) subO -> do
+gvar_gvar_diff top (a',aty') (sp, _) bind = raiseToTop top bind sp $ \(b'@(Spine x' y'l), bty) subO -> do
   
   let (Spine x yl, aty) = (subst subO a', subst subO aty')
 
