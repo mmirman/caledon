@@ -351,20 +351,13 @@ gvar_uvar_inside _ _ = error "gvar-uvar-inside is not made for this case"
 
 gvar_uvar_outside = gvar_const
 
-gvar_const a@(s@(Spine x yl), _) b@(s'@(Spine y _), bty) = vtrace 3 (show a++"   ≐   "++show b) $
-  case elemIndex (var y) $ yl of 
-    Nothing -> gvar_fixed a b $ var . const y
-    Just _ -> do
-      gvar_uvar_possibilities a b <|> gvar_fixed a b (var . const y)
-
+gvar_const a@(s@(Spine x yl), _) b@(s'@(Spine y _), bty) = gvar_fixed a b $ var . const y
 gvar_const _ _ = error "gvar-const is not made for this case"
 
-gvar_uvar_possibilities a@(s@(Spine x yl),_) b@(s'@(Spine y _),bty) = do
-  case [i | (i,y') <- zip [0..] yl , y' == var y] of
-    [] -> return Nothing
-    ilst -> do
-      i <- F.asum $ return <$> ilst
-      gvar_fixed a b $ (!! i)
+gvar_uvar_possibilities a@(s@(Spine x yl),_) b@(s'@(Spine y _),bty) = 
+  case elemIndex (var y) yl of
+    Just i -> gvar_fixed a b $ (!! i)
+    Nothing -> throwTrace 0 $ "CANT: gvar-uvar-depends: "++show (s :=: s')
 gvar_uvar_possibilities _ _ = error "gvar-uvar-possibilities is not made for this case"
 
 getTyNews (Spine "#forall#" [_, Abs _ _ t]) = Nothing:getTyNews t
