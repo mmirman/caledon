@@ -1,29 +1,23 @@
 #include "../prelude/combinators.ncc"
 #include "../prelude/logic.ncc"
 #include "../prelude/booleans.ncc"
-#include "../prelude/monad.ncc"
-
-defn at : prop
-   | atv = at
-
-defn bt : prop
-   | btv = bt
+#include "../prelude/io.ncc"
 
 defn chooseProp : bool -> prop -> prop
-   | chooseTrue = chooseProp true at
-   | chooseFalse = chooseProp false bt
+   | chooseTrue = chooseProp true natural
+   | chooseFalse = chooseProp false bool
 
 defn getWorld : (bool -> prop) -> prop
-   | getWorldImp = getWorld F 
+   | getWorldImp = [F : bool -> prop][S : string][B : bool] 
+                     getWorld F 
                    <- putStrLn "false/true"
-   		   <- readLine (\S . do , string_bool B S)
-		   <- F B
+   		   <- readLineIn S
+                   <- string_bool B S
+                   <- F B
 
 defn getProp : prop -> prop
-  as \P : prop . getWorld $ \B2 : bool . chooseProp B2 P
-                 
-{-
-defn thing  : {Gp : getProp Pp} Pp -> prop
-   | heynow = thing atv
--}
-query hi = any $ getProp 
+  as \P : prop . getWorld (\B2 : bool . chooseProp B2 P)
+
+defn metaThing    : {Gp : getProp Pp} Pp -> prop
+   | metaThingImp = metaThing zero
+

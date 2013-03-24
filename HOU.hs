@@ -850,7 +850,6 @@ topoSortAxioms accountPot axioms = showRes $ topoSortComp (\p -> (p^.predName,)
                                             -- unsound can mean this causes extra cyclical things to occur
                                             $ (if accountPot && p^.predSound then S.union (getImplieds $ p^.predName) else id)
                                             $ S.fromList 
-                                            $ concatMap (\nm -> [nm,"#v:"++nm])
                                             $ filter (not . flip elem (map fst consts)) 
                                             $ S.toList $ freeVariables p ) axioms
                         
@@ -869,8 +868,7 @@ topoSortAxioms accountPot axioms = showRes $ topoSortComp (\p -> (p^.predName,)
                                                   $ catMaybes 
                                                   $ map (`M.lookup` family2nmsMap) 
                                                   $ S.toList 
-                                                  $ getImpliedFamilies 
-                                                  $ p^.predType
+                                                  $ S.union (getImpliedFamilies $ p^.predType) (fromMaybe mempty $ freeVariables <$> p^.predValue)
                                                  )) <$> axioms
         
         getImplieds nm = fromMaybe mempty (M.lookup nm family2impliedsMap)

@@ -1,5 +1,6 @@
 #include <strings.ncc>
 #include <combinators.ncc>
+#include <logic.ncc>
 
 ---------------
 -- builtins ---
@@ -22,6 +23,8 @@ defn run : io -> prop
 defn readLine    : (string -> io) -> prop -- builtin 
    | readLineImp = [Foo : string -> io] [A : string] readLine Foo <- run (Foo A)
 
+defn readLineIn : string -> prop
+  as \S . readLine $ \R . do , R =:= S
 
 ----------------
 --- printing ---
