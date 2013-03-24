@@ -42,7 +42,7 @@ getNew = do
   return $ show n
   
 getNewWith :: (Functor f, MonadState c f, ValueTracker c) => String -> f String
-getNewWith s = (++s) <$> getNew
+getNewWith s = {- (++s) <$> -} getNew
 
                                
 ---------------------
@@ -160,10 +160,13 @@ instance Subst Decl where
   substFree sub f (Query nm ty) = Query nm (substFree sub f ty)
   substFree sub f (Define s nm val ty) = Define s nm (substFree sub f val) (substFree sub f ty)
 
-
+instance Subst a => Subst (Maybe a) where
+  substFree sub f p = substFree sub f <$> p
+  
 instance Subst FlatPred where
   substFree sub f p = p & predType %~ substFree sub f
                         & predKind %~ substFree sub f
+                        & predValue %~ substFree sub f
 
   
 -------------------------

@@ -518,7 +518,7 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
                     res <- Just <$> ls (nm,targ)
                     if sequ 
                       then (if not $ null cg then (appendErr "" (F.asum $ reverse cg) <|>) else id) $ 
-                           (appendErr ""$ ret res) <|> inter [] l
+                           (appendErr "" $ ret res) <|> inter [] l
                       else inter (ret res:cg) l
                       
                       
@@ -743,7 +743,7 @@ generateBinding sp = foldr (\a b -> imp_forall a ty_hole b) sp orderedgens
 ----------------------
 --- type inference ---
 ----------------------
-typeInfer :: ContextMap -> ((Bool,Integer),Name,Spine,Type) -> Choice (Term,Type, ContextMap)
+typeInfer :: ContextMap -> ((Bool,Integer),Name,Term,Type) -> Choice (Term, Type, ContextMap)
 typeInfer env (seqi,nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
   ty <- return $ alphaConvert mempty mempty ty
   val <- return $ alphaConvert mempty mempty val
@@ -751,8 +751,7 @@ typeInfer env (seqi,nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union e
   (ty,mem') <- regenWithMem ty
   (val,mem) <- vtrace 1 ("ALPHAD TO: "++show val) $ regenWithMem val
   
-  (val,constraint) <- vtrace 1 ("REGENED TO: "++show val) $ 
-                      checkFullType val ty
+  (val,constraint) <- vtrace 1 ("REGENED TO: "++show val) $ checkFullType val ty
   
   sub <- appendErr ("which became: "++show val ++ "\n\t :  " ++ show ty) $ 
          unify constraint
@@ -774,51 +773,56 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 
 -- type FlatPred = [((Maybe Name,Bool,Integer,Bool),Name,Type,Kind)]
 
-typeCheckAxioms :: Bool -> [FlatPred] -> Choice Substitution
+typeCheckAxioms :: Bool -> [FlatPred] -> Choice (Substitution, Substitution)
 typeCheckAxioms verbose lst = do
   
   -- check the closedness of families.  this gets done
   -- after typechecking since family checking needs to evaluate a little bit
   -- in order to allow defs in patterns
-  let notval p = case p ^. predName of 
-        '#':'v':':':_ -> False
-        _ -> True
+  let unsound = not . (^. predSound)
       
-      unsound = not . (^. predSound)
+      tys = M.fromList $ map (\p -> ( p^.predName, ((p^.predSequential,p^.predPriority),p^.predType))) lst
+      uns = S.fromList $ map (^.predName) $ filter unsound $ lst
       
-      tys = M.fromList $ map (\p -> ( p^.predName, ((p^.predSequential,p^.predPriority),p^.predType))) $ filter notval lst
-      uns = S.fromList $ map (^.predName) $ filter unsound $ filter notval lst
-      
-      inferAll :: (ContextMap, [FlatPred], [FlatPred]) -> Choice ([FlatPred],ContextMap)
-      inferAll (l , r, []) = return (r,l)
+      inferAll :: ((Substitution,ContextMap), [FlatPred], [FlatPred]) -> Choice ([FlatPred],(Substitution, ContextMap))
+      inferAll (l, r, []) = return (r,l)
       inferAll (_ , r, p:_) | p^.predName == tipeName = throwTrace 0 $ tipeName++" can not be overloaded"
       inferAll (_ , r, p:_) | p^.predName == atomName = throwTrace 0 $ atomName++" can not be overloaded"
-      inferAll (l , r, p:toplst) = do
+      inferAll ((lv,lt) , r, p:toplst) = do
         let fam = p^.predFamily
             b = p^.predSequential
             i = p^.predPriority
             nm = p^.predName
-            val = p^.predType
-            ty = p^.predKind
-        (val,ty,l') <- appendErr ("can not infer type for: "++nm++" : "++show val) $ 
-                       mtrace verbose ("Checking: " ++nm) $ 
-                       vtrace 0 ("\tVAL: " ++show val  
-                                 ++"\n\t:: " ++show ty) $
-                       typeInfer l ((b,i),nm, generateBinding val,ty) -- constrain the breadth first search to be local!
-                    
+            val = p^.predValue
+            ty = p^.predType
+            kind = p^.predKind
+            
+        (ty,kind,lt) <- appendErr ("can not infer type for: "++nm++" : "++show ty) $ 
+                            mtrace verbose ("Checking: " ++nm) $ 
+                            vtrace 0 ("\tTY: " ++show ty ++"\n\t:: " ++show kind) $ 
+                            typeInfer lt ((b,i),nm, generateBinding ty,kind) -- constrain the breadth first search to be local!
+                            
+        val <- case val of
+          Just val -> appendErr ("can not infer type for: \n"++nm++" : "++show ty ++"\nnm = "++show val ) $ 
+                      mtrace verbose ("Checking Value: "++nm) $ 
+                      vtrace 0 ("\tVAL: " ++show val ++"\n\t:: " ++show ty) $ 
+                      Just <$> typeInfer lt ((b,i),nm, val,ty)                    
+          Nothing -> return Nothing            
+                      
         -- do the family check after ascription removal and typechecking because it can involve computation!
-        unless (fam == Nothing || Just (getFamily val) == fam)
-          $ throwTrace 0 $ "not the right family: need "++show fam++" for "++nm ++ " = " ++show val                    
+        unless (fam == Nothing || Just (getFamily ty) == fam)
+          $ throwTrace 0 $ "not the right family: need "++show fam++" for "++nm ++ " = " ++show ty                    
           
-        let resp = p & predType .~ val & predKind .~ ty
-        inferAll $ case nm of
-          '#':'v':':':nm' -> (sub' <$> l', resp:r , sub <$> toplst) 
-            where sub' (b,a)= (b, sub a)
+        let resp = p & predType .~ ty 
+                     & predKind .~ kind 
+        inferAll $ case val of
+          Just (val,_,_) -> ((M.insert nm val lv, sub' <$> lt), (resp & predValue .~ Just val) :r , sub <$> toplst) 
+            where sub' (b,a) = (b, sub a)
                   sub :: Subst a => a -> a
-                  sub = subst $ nm' |-> ascribe val (dontcheck ty) 
-          _ -> (l', resp:r, toplst)
+                  sub = subst $ nm |-> ascribe val (dontcheck ty) 
+          _ -> ((lv, lt), resp:r, toplst)
 
-  (lst',l) <- inferAll (tys, [], topoSortAxioms True lst)
+  (lst',(lv,lt)) <- inferAll ((mempty,tys), [], topoSortAxioms True lst)
   
   let doubleCheckAll _ [] = return ()
       doubleCheckAll l (p:r) = do
@@ -826,7 +830,7 @@ typeCheckAxioms verbose lst = do
             val = p^.predType
             ty = p^.predKind
         
-        let usedvars = freeVariables val `S.union` freeVariables ty
+        let usedvars = freeVariables val `S.union` freeVariables ty `S.union` freeVariables val
         unless (S.isSubsetOf usedvars l)
           $ throwTrace 0 $ "Circular type:"
                         ++"\n\t"++nm++" : "++show val ++" : "++show ty
@@ -838,7 +842,7 @@ typeCheckAxioms verbose lst = do
   
   doubleCheckAll (S.union envSet uns) $ topoSortAxioms False lst' 
   
-  return $ snd <$> l 
+  return $ (lv, snd <$> lt)
 
 topoSortAxioms :: Bool -> [FlatPred] -> [FlatPred]
 topoSortAxioms accountPot axioms = showRes $ topoSortComp (\p -> (p^.predName,) 
@@ -884,22 +888,23 @@ getImpliedFamilies s = S.intersection fs $ gif s
 typeCheckAll :: Bool -> [Decl] -> Choice [Decl]
 typeCheckAll verbose preds = do
   
-  tyMap <- typeCheckAxioms verbose $ toAxioms True preds
+  (valMap, tyMap) <- typeCheckAxioms verbose $ toAxioms True preds
   
   let newPreds (Predicate t nm _ cs) = Predicate t nm (tyMap M.! nm) $ map (\(b,(nm,_)) -> (b,(nm, tyMap M.! nm))) cs
       newPreds (Query nm _) = Query nm (tyMap M.! nm)
-      newPreds (Define t nm _ _) = Define t nm (tyMap M.! ("#v:"++nm)) (tyMap M.! nm)
+      newPreds (Define t nm _ _) = Define t nm (valMap M.! nm) (tyMap M.! nm)
   
   return $ newPreds <$> preds
 
 toAxioms :: Bool -> [Decl] -> [FlatPred]
 toAxioms b = concat . zipWith toAxioms' [0..]
   where toAxioms' j (Predicate s nm ty cs) = 
-          (FlatPred (PredData (Just $ atomName) False j s) nm ty tipe)
-          :zipWith (\(sequ,(nm',ty')) i -> (FlatPred (PredData (Just nm) sequ i False) nm' ty' atom)) cs [0..]
-        toAxioms' j (Query nm val) = [(FlatPred (PredData Nothing False j False) nm val atom)]
-        toAxioms' j (Define s nm val ty) = (if b then ((FlatPred (PredData Nothing False j s) ("#v:"++nm) val ty):) else id)
-                                           [(FlatPred (PredData Nothing False j False) nm ty kind)] 
+          (FlatPred (PredData (Just $ atomName) False j s) nm Nothing ty tipe)
+          :zipWith (\(sequ,(nm',ty')) i -> (FlatPred (PredData (Just nm) sequ i False) nm' Nothing ty' atom)) cs [0..]
+        toAxioms' j (Query nm val) = [(FlatPred (PredData Nothing False j False) nm Nothing val atom)]
+        toAxioms' j (Define s nm val ty) = [ FlatPred (PredData Nothing False j s) nm (Just val) ty kind]
+                                           
+
   
 toSimpleAxioms :: [Decl] -> ContextMap
 toSimpleAxioms l = M.fromList $ (\p -> (p^.predName, ((p^.predSequential, p^.predPriority), p^.predType))) 

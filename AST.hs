@@ -58,6 +58,7 @@ data PredData = PredData { _dataFamily :: Maybe Name
 
 data FlatPred = FlatPred { _predData :: PredData
                          , _predName :: Name
+                         , _predValue :: Maybe Term
                          , _predType :: Type
                          , _predKind :: Kind
                          }
@@ -201,6 +202,7 @@ instance FV Spine where
 
 instance FV FlatPred where
   freeVariables p = freeVariables (p^.predType) `S.union` freeVariables (p^.predKind)
+                    `S.union` freeVariables (p^.predValue)
   
 --------------------------------
 --- Builtin Spines and types ---

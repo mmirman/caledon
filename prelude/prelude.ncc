@@ -10,5 +10,6 @@ into an unambiguous map)!
 #include <maybe.ncc>
 #include <list.ncc>
 #include <strings.ncc>
+#include <unit.ncc>
 #include <naturals.ncc>
 #include <io.ncc>

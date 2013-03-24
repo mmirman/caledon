@@ -8,3 +8,16 @@ defn list : prop -> prop
 defn concatList : list A -> list A -> list A -> prop
   >| concatListNil  = concatList {A = T} nil L L
   >| concatListCons = concatList (cons (V : T) A) B (cons V C) <- concatList A B C
+
+{-
+defn churchList : prop -> prop
+  as \A : prop . [lst : prop -> prop] lst A -> (A -> lst A -> lst A) -> lst A
+
+defn consCL : [B : prop] B -> churchList B -> churchList B
+  as \C : prop . 
+     \V : C . 
+     \cl : [lst : prop -> prop] lst C -> (C -> lst C -> lst C) -> lst C.
+     \lst : prop -> prop .
+     \nil : lst C. 
+     \cons : C -> lst C -> lst C . cons V (cl lst nil cons)
+-}
