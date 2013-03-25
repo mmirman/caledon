@@ -177,7 +177,7 @@ defn functor_maybe : functor maybe -> prop.
 -- this syntax is rather verbose for the moment.  I have yet to add typeclass syntax sugar.
 ```
 
-* Nondeterminism control:  You can now control what patterns to match against sequentially versus in concurrently.  This gives you massive control over program execution, and in the future might be implemented with REAL threads!
+* Nondeterminism control:  You can now control what patterns to match against sequentially versus concurrently.  This gives you massive control over program execution, and in the future might be implemented with REAL threads!
 
 ```
 defn runBoth : bool -> prop
