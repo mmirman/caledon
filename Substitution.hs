@@ -87,7 +87,7 @@ newName nm so fo' = (nm',s',f')
   
 freeWithout sp [] = freeVariables sp
 freeWithout (Abs nm rst) (a:lst) = S.delete nm $ freeWithout rst lst
-freeWithout (Spine "#imp_abs#" [tp, Abs nm rst]) apps = case findTyconInPrefix nm apps of
+freeWithout (Spine "#imp_abs#" [Abs nm rst]) apps = case findTyconInPrefix nm apps of
   Just (v,apps) -> S.delete nm $ freeWithout rst apps
   Nothing -> S.delete nm $ freeWithout rst apps
 freeWithout l apps = freeVariables l
@@ -137,8 +137,8 @@ instance Subst Spine where
   substFree s f sp@(Spine "#imp_forall#" [tp, Abs nm rst]) =
        imp_forall nm (substFree s f tp) $ substFree (M.delete nm s) (S.insert nm f) rst            
 
-  substFree s f sp@(Spine "#imp_abs#" [tp, Abs nm rst]) =
-      imp_abs nm (substFree s f tp) $ substFree (M.delete nm s) (S.insert nm f) rst 
+  substFree s f sp@(Spine "#imp_abs#" [Abs nm rst]) =
+      imp_abs_curry nm $ substFree (M.delete nm s) (S.insert nm f) rst 
   substFree s f (Abs nm rst) = Abs nm' $ substFree s' f' rst
     where (nm',s',f') = newName nm s f
   substFree s f (Spine "#tycon#" [Spine c [v]]) = Spine "#tycon#" [Spine c [substFree s f v]]
@@ -154,14 +154,14 @@ instance Subst Spine where
       
 instance Alpha Spine where
   alphaConvert s m (Spine "#imp_forall#" [ty,Abs a r]) = imp_forall a ty $ alphaConvert (S.insert a s) (M.delete a m) r
-  alphaConvert s m (Spine "#imp_abs#" [ty,Abs a r]) = imp_abs a ty $ alphaConvert (S.insert a s) (M.delete a m) r
+  alphaConvert s m (Spine "#imp_abs#" [Abs a r]) = imp_abs_curry a $ alphaConvert (S.insert a s) (M.delete a m) r
   alphaConvert s m (Abs nm r) = Abs nm' $ alphaConvert (S.insert nm' s) (M.insert nm nm' m) r
     where nm' = newNameFor nm s
   alphaConvert s m (Spine "#tycon#" [Spine c [v]]) = tycon c $ alphaConvert s m v          
   alphaConvert s m (Spine a l) = Spine (fromMaybe a (m ! a)) $ alphaConvert s m l
   
   rebuildFromMem s (Spine "#imp_forall#" [ty,Abs a r]) = imp_forall a (rebuildFromMem s ty) $ rebuildFromMem (M.delete a s) r
-  rebuildFromMem s (Spine "#imp_abs#" [ty,Abs a r]) = imp_abs a (rebuildFromMem s ty) $ rebuildFromMem (M.delete a s) r
+  rebuildFromMem s (Spine "#imp_abs#" [Abs a r]) = imp_abs_curry a $ rebuildFromMem (M.delete a s) r
   rebuildFromMem s (Abs nm r) = Abs (fromMaybe nm $ M.lookup nm s) $ rebuildFromMem s r
   rebuildFromMem s (Spine a l) = Spine a' $ rebuildFromMem s l
     where a' = fromMaybe a $ M.lookup a s
@@ -230,7 +230,7 @@ instance RegenAbsVars l => RegenAbsVars [l] where
   
 instance RegenAbsVars Spine where  
   regenAbsVars (Spine "#imp_forall#" [ty,Abs a r]) = imp_forall a ty <$> regenAbsVars r
-  regenAbsVars (Spine "#imp_abs#" [ty,Abs a r]) = imp_abs a ty <$> regenAbsVars r
+  regenAbsVars (Spine "#imp_abs#" [Abs a r]) = imp_abs_curry a <$> regenAbsVars r
   regenAbsVars (Abs a r) = do
     a' <- getNewWith $ "@rega"
     r' <- regenAbsVars $ subst (a |-> var a') r
@@ -238,7 +238,7 @@ instance RegenAbsVars Spine where
   regenAbsVars (Spine a l) = Spine a <$> regenAbsVars l
   
   regenWithMem (Spine "#imp_forall#" [ty,Abs a r]) = imp_forall a ty <<$> regenWithMem r
-  regenWithMem (Spine "#imp_abs#" [ty,Abs a r]) = imp_abs a ty <<$> regenWithMem r
+  regenWithMem (Spine "#imp_abs#" [Abs a r]) = imp_abs_curry a <<$> regenWithMem r
   regenWithMem (Abs a r) = do
     a' <- getNewWith $ "@regm"
     (r', s2) <- regenWithMem $ subst (a |-> var a') r

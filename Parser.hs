@@ -227,7 +227,6 @@ pTipe = do
                    (parens anonNamed <|> anonNamed)
         return $ \input -> foldr (flip out tp) input nml
       
-      
       table = [ [ altPostfix ["λ", "\\"] ["lambda"] lam
                 , altPostfix ["?λ", "?\\"] ["?lambda"] imp_abs
                 , altPostfix ["∃"] ["exists"] exists

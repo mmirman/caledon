@@ -132,7 +132,7 @@ instance Show Spine where
   show (Spine "#imp_forall#" [t,Abs nm t']) = "{"++nm++" : "++show t++"} "++show t'  
   show (Spine "#tycon#" [Spine nm [t]]) = "{"++nm++" = "++show t++"}"
   show (Spine "#exists#" [t,Abs nm t']) = "∃ "++nm++" : "++show t++". "++show t' 
-  show (Spine "#imp_abs#" [ty,Abs nm t]) = "?λ "++nm++" : "++showWithParens ty++" . "++show t
+  show (Spine "#imp_abs#" [Abs nm t]) = "?λ "++nm++" . "++show t
   show (Spine nm l@[_ , Abs _ _]) | isOperator nm = "("++nm++") "++show (Spine "" l)
   show (Spine nm (t:t':l)) | isOperator nm = "( "++showWithParens t++" "++nm++" "++ show t'++" )"++show (Spine "" l)
   show (Spine h l) = h++concatMap showWithParens l
@@ -226,6 +226,7 @@ atomName = "prop"
 tipeName = "type"
 kindName = "#kind#"
 
+--lam x tyA v | tyA == ty_hole = Abs x v
 lam x tyA v = ascribe (Abs x v) (forall x tyA ty_hole)
 
 atom = var atomName
@@ -242,7 +243,10 @@ open cl (imp,ty) (p,iface) cty inexp = Spine "#open#"
 infer x tyA v = Spine ("#infer#") [tyA, Abs x v]
 
 imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x v]
+
+--imp_abs x tyA v | tyA == ty_hole = imp_abs_curry x v
 imp_abs x tyA v = ascribe (Spine ("#imp_abs#") [Abs x v]) (imp_forall x tyA ty_hole)
+
 imp_abs_curry x v = Spine ("#imp_abs#") [Abs x v]
 tycon nm val = Spine "#tycon#" [Spine nm [val]]
 
@@ -256,8 +260,6 @@ consts = [ (atomName , tipe)
          , ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
            
          , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
-           
-         , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))
            
          , ("#exists#", forall "a" atom $ (var "a" ~> atom) ~> atom)
          , ("pack", forall "tp" atom 
