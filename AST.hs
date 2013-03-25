@@ -55,13 +55,21 @@ data PredData = PredData { _dataFamily :: Maybe Name
                          , _dataPriority :: Integer
                          , _dataSound :: Bool
                          } 
-
+              deriving Show
 data FlatPred = FlatPred { _predData :: PredData
                          , _predName :: Name
                          , _predValue :: Maybe Term
                          , _predType :: Type
                          , _predKind :: Kind
                          }
+instance Show FlatPred where
+  show (FlatPred a b c d e) = "FlatPred ("
+                              ++show a++")  ("
+                              ++show b++")  ("
+                              ++show c++")  ("
+                              ++show d++")  ("
+                              ++show e++")  ("
+                         
 $(makeLenses ''PredData)
 $(makeLenses ''FlatPred)
 $(makeLenses ''Decl)

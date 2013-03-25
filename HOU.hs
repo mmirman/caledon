@@ -818,7 +818,7 @@ typeCheckAxioms verbose lst = do
         inferAll $ case val of
           Just (val,_,_) -> ((M.insert nm val lv, sub' <$> lt), (resp & predValue .~ Just val) :r , sub <$> toplst) 
             where sub' (b,a) = (b, sub a)
-                  sub :: Subst a => a -> a
+                  sub :: (Show a, Subst a) => a -> a
                   sub = subst $ nm |-> ascribe val (dontcheck ty) 
           _ -> ((lv, lt), resp:r, toplst)
 

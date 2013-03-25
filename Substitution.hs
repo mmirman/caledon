@@ -66,6 +66,44 @@ findTyconInPrefix nm = fip []
 apply :: Spine -> Spine -> Spine
 apply !a !l = rebuildSpine a [l]
 
+
+newNameFor :: Name -> S.Set Name -> Name
+newNameFor nm fv = nm'
+  where nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/?") [0..]
+        free k = not $ S.member k fv
+        
+newName :: Name -> Map Name Spine -> S.Set Name -> (Name, Map Name Spine, S.Set Name)
+newName "" so fo = ("",so, S.delete "" fo)
+newName nm so fo' = (nm',s',f')
+  where fo = S.delete nm fo'
+        s = M.delete nm so  
+        -- could reduce the size of the free variable set here, but for efficiency it is not really necessary
+        -- for beautification of output it is
+        (s',f') = if nm == nm' then (s,fo) else (M.insert nm (var nm') s , fo)
+        nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/") [0..]
+        fv = mappend (M.keysSet s) (freeVariables s)
+        free k = not $ S.member k fv
+
+  
+freeWithout sp [] = freeVariables sp
+freeWithout (Abs nm tp rst) (a:lst) = S.delete nm $ freeWithout rst lst
+freeWithout (Spine "#imp_abs#" [_, Abs nm tp rst]) apps = case findTyconInPrefix nm apps of
+  Just (v,apps) -> S.delete nm $ freeWithout rst apps
+  Nothing -> S.delete nm $ freeWithout rst apps
+freeWithout l apps = freeVariables l
+
+
+subst :: (Show a, Subst a) => Substitution -> a -> a
+subst s a = substFree s mempty a
+
+class Subst a where
+  substFree :: Substitution -> S.Set Name -> a -> a
+  
+class Alpha a where  
+  alphaConvert :: S.Set Name -> Map Name Name -> a -> a
+  rebuildFromMem :: Map Name Name -> a -> a  
+
+
 rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
 rebuildSpine (Spine "#imp_abs#" [_, Abs nm ty rst]) apps = case findTyconInPrefix nm apps of 
@@ -78,38 +116,12 @@ rebuildSpine (Spine "#imp_abs#" [_, Abs nm ty rst]) apps = case findTyconInPrefi
                       -- irs - here, the proof might matter, but we don't know if we can prove the thing, 
                       -- so we need to try
      where nm' = newNameFor nm $ freeVariables apps
-           sp = subst (nm |-> var nm') rst
+           sp = substFree (nm |-> var nm') mempty rst
            rs = rebuildSpine sp apps
            irs = infer nm ty rs
 rebuildSpine (Spine c apps) apps' = Spine c $ apps ++ apps'
-rebuildSpine (Abs nm _ rst) (a:apps') = let sp = subst (nm |-> a) $ rst
+rebuildSpine (Abs nm _ rst) (a:apps') = let sp = substFree (nm |-> a) mempty rst
                                         in seq sp $ rebuildSpine sp apps'
-
-newNameFor :: Name -> S.Set Name -> Name
-newNameFor nm fv = nm'
-  where nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/?") [0..]
-        free k = not $ S.member k fv
-        
-newName :: Name -> Map Name Spine -> S.Set Name -> (Name, Map Name Spine, S.Set Name)
-newName "" so fo = ("",so,fo)
-newName nm so fo = (nm',s',f')
-  where s = M.delete nm so  
-        -- could reduce the size of the free variable set here, but for efficiency it is not really necessary
-        -- for beautification of output it is
-        (s',f') = if nm == nm' then (s,fo) else (M.insert nm (var nm') s , S.insert nm' fo)
-        nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/") [0..]
-        fv = mappend (M.keysSet s) (freeVariables s)
-        free k = not $ S.member k fv
-
-class Subst a where
-  substFree :: Substitution -> S.Set Name -> a -> a
-
-subst :: Subst a => Substitution -> a -> a
-subst s = substFree s $ freeVariables s
-
-class Alpha a where  
-  alphaConvert :: S.Set Name -> Map Name Name -> a -> a
-  rebuildFromMem :: Map Name Name -> a -> a  
   
 instance Subst a => Subst [a] where
   substFree s f t = substFree s f <$> t
@@ -120,24 +132,24 @@ instance Alpha a => Alpha [a] where
   
 instance (Subst a, Subst b) => Subst (a,b) where
   substFree s f ~(a,b) = (substFree s f a , substFree s f b)
-  
+
 instance Subst Spine where
-  substFree s f sp@(Spine "#imp_forall#" [_, Abs nm tp rst]) = case "" /= nm && S.member nm f && not (S.null $ S.intersection (M.keysSet s) $ freeVariables sp) of
-    False -> imp_forall nm (substFree s f tp) $ substFree (M.delete nm s) f rst
-    True -> error $ 
-            "can not capture free variables because implicits quantifiers can not alpha convert: "++ show sp 
-            ++ "\n\tfor: "++show s
-  substFree s f sp@(Spine "#imp_abs#" [_, Abs nm tp rst]) = case "" /= nm && S.member nm f && not (S.null $ S.intersection (M.keysSet s) $ freeVariables sp) of
-    False  -> imp_abs nm (substFree s f tp) $ substFree (M.delete nm s) f rst 
-    True   -> error $ 
-              "can not capture free variables because implicit binds can not alpha convert: "++ show sp
-              ++ "\n\tfor: "++show s
+  substFree s f sp@(Spine "#imp_forall#" [_, Abs nm tp rst]) =
+       imp_forall nm (substFree s f tp) $ substFree (M.delete nm s) (S.insert nm f) rst            
+
+  substFree s f sp@(Spine "#imp_abs#" [_, Abs nm tp rst]) =
+      imp_abs nm (substFree s f tp) $ substFree (M.delete nm s) (S.insert nm f) rst 
   substFree s f (Abs nm tp rst) = Abs nm' (substFree s f tp) $ substFree s' f' rst
     where (nm',s',f') = newName nm s f
   substFree s f (Spine "#tycon#" [Spine c [v]]) = Spine "#tycon#" [Spine c [substFree s f v]]
-  substFree s f (Spine nm apps) = let apps' = substFree s f <$> apps  in
+  substFree s f sp@(Spine nm apps) = let apps' = substFree s f <$> apps  in
     case s ! nm of
-      Just nm -> rebuildSpine nm apps'
+      Just new -> case S.null $ S.intersection f (freeWithout new apps') of
+        True -> rebuildSpine new apps'
+        False -> error $ 
+            "can not capture free variables because implicits quantifiers can not alpha convert: "++ show sp 
+            ++ "\n\tfor: "++show s
+            ++ "\n\tbound by: "++show f
       _ -> Spine nm apps'
       
 instance Alpha Spine where

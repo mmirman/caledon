@@ -96,8 +96,8 @@ defn subtract : num -> num -> num -> prop
 query main = run $ do 
                  , putStr "hey!\n"
 	  	 , readLine (\A . do 
-   		 , putStr A
-                 , putStr "\nbye!\n")
+   		     , putStr A
+                     , putStr "\nbye!\n")
 ```
 
 * Higher order logic programming: like in twelf and lambda-prolog.  This makes HOAS much easier to do.
