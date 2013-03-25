@@ -23,7 +23,7 @@ type Name = String
 data Spine = Spine Name [Type]
            | Abs Name Type Spine 
            deriving (Eq)
-                    
+
 instance Monoid Spine where 
   mempty  = undefined
   mappend = undefined
@@ -225,6 +225,8 @@ var !nm = Spine nm []
 atomName = "prop"
 tipeName = "type"
 kindName = "#kind#"
+
+lam x tyA v = ascribe (Abs x tyA v) (forall x tyA ty_hole)
 
 atom = var atomName
 ty_hole = var "#hole#"
