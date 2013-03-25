@@ -21,7 +21,7 @@ import Control.Lens
 type Name = String
 
 data Spine = Spine Name [Type]
-           | Abs Name Type Spine 
+           | Abs Name Spine 
            deriving (Eq)
 
 instance Monoid Spine where 
@@ -124,16 +124,16 @@ isOperator (a:_) = not $ elem a ('_':['a'..'z']++['A'..'Z']++['0'..'9'])
 
 instance Show Spine where
   show (Spine ['\'',c,'\''] []) = show c
-  show (Spine "#infer#" [_, Abs nm t t']) = "<"++nm++" : "++show t++"> "++show t'
+  show (Spine "#infer#" [t, Abs nm t']) = "<"++nm++" : "++show t++"> "++show t'
   show (Spine "#ascribe#" (ty:v:l)) = "( "++showWithParens v++ " : " ++ show ty++" ) "++show (Spine "" l)  
-  show (Spine "#forall#" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " → " ++ show t'
-  show (Spine "#imp_forall#" [_,Abs nm t t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " ⇒ " ++ show t'
-  show (Spine "#forall#" [_,Abs nm t t']) = "["++nm++" : "++show t++"] "++show t'  
-  show (Spine "#imp_forall#" [_,Abs nm t t']) = "{"++nm++" : "++show t++"} "++show t'  
+  show (Spine "#forall#" [t,Abs nm t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " → " ++ show t'
+  show (Spine "#imp_forall#" [t,Abs nm t']) | not (S.member nm $ freeVariables t') = showWithParens t++ " ⇒ " ++ show t'
+  show (Spine "#forall#" [t,Abs nm t']) = "["++nm++" : "++show t++"] "++show t'  
+  show (Spine "#imp_forall#" [t,Abs nm t']) = "{"++nm++" : "++show t++"} "++show t'  
   show (Spine "#tycon#" [Spine nm [t]]) = "{"++nm++" = "++show t++"}"
-  show (Spine "#exists#" [_,Abs nm t t']) = "∃ "++nm++" : "++show t++". "++show t' 
-  show (Spine "#imp_abs#" [_,Abs nm ty t]) = "?λ "++nm++" : "++showWithParens ty++" . "++show t
-  show (Spine nm l@[_ , Abs _ _ _]) | isOperator nm = "("++nm++") "++show (Spine "" l)
+  show (Spine "#exists#" [t,Abs nm t']) = "∃ "++nm++" : "++show t++". "++show t' 
+  show (Spine "#imp_abs#" [ty,Abs nm t]) = "?λ "++nm++" : "++showWithParens ty++" . "++show t
+  show (Spine nm l@[_ , Abs _ _]) | isOperator nm = "("++nm++") "++show (Spine "" l)
   show (Spine nm (t:t':l)) | isOperator nm = "( "++showWithParens t++" "++nm++" "++ show t'++" )"++show (Spine "" l)
   show (Spine h l) = h++concatMap showWithParens l
      where showWithParens t = " "++if case t of
@@ -141,7 +141,7 @@ instance Show Spine where
                           Spine "#tycon#" _ -> False
                           Spine _ lst -> not $ null lst
                       then "("++show t++")" else show t 
-  show (Abs nm ty t) = "λ "++nm++" : "++showWithParens ty++" . "++show t
+  show (Abs nm t) = "λ "++nm++" . "++show t
 
 
 
@@ -202,7 +202,7 @@ instance (FV a, F.Foldable f) => FV (f a) where
   freeVariables m = F.foldMap freeVariables m
 instance FV Spine where
   freeVariables t = case t of
-    Abs nm t p -> (S.delete nm $ freeVariables p) `mappend` freeVariables t
+    Abs nm p -> S.delete nm $ freeVariables p
     Spine "#tycon#" [Spine nm [v]] -> freeVariables v
     Spine "#dontcheck#" [v] -> freeVariables v
     Spine ['\'',_,'\''] [] -> mempty
@@ -226,7 +226,7 @@ atomName = "prop"
 tipeName = "type"
 kindName = "#kind#"
 
-lam x tyA v = ascribe (Abs x tyA v) (forall x tyA ty_hole)
+lam x tyA v = ascribe (Abs x v) (forall x tyA ty_hole)
 
 atom = var atomName
 ty_hole = var "#hole#"
@@ -234,14 +234,16 @@ tipe = var tipeName
 kind = var kindName  -- can be either a type or an atom
 ascribe a t = Spine ("#ascribe#") [t, a]
 dontcheck t = Spine ("#dontcheck#") [t]
-forall x tyA v = Spine ("#forall#") [tyA, Abs x tyA v]
-exists x tyA v = Spine ("#exists#") [tyA, Abs x tyA v]
-pack e tau imp tp interface = Spine "pack" [tp, Abs imp tp interface, tau, e]
-open cl (imp,ty) (p,iface) cty inexp = Spine "#open#" [cl, ty,Abs imp ty iface, Abs imp ty (Abs p iface cty), Abs imp ty (Abs p iface inexp)] 
-infer x tyA v = Spine ("#infer#") [tyA, Abs x tyA v]
+forall x tyA v = Spine ("#forall#") [tyA, Abs x v]
+exists x tyA v = Spine ("#exists#") [tyA, Abs x v]
+pack e tau imp tp interface = Spine "pack" [tp, Abs imp interface, tau, e]
+open cl (imp,ty) (p,iface) cty inexp = Spine "#open#" 
+                                       [cl, ty,Abs imp iface, Abs imp (Abs p cty), Abs imp (Abs p inexp)] 
+infer x tyA v = Spine ("#infer#") [tyA, Abs x v]
 
-imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
-imp_abs x tyA v = Spine ("#imp_abs#") [tyA, Abs x tyA v]
+imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x v]
+imp_abs x tyA v = ascribe (Spine ("#imp_abs#") [Abs x v]) (imp_forall x tyA ty_hole)
+imp_abs_curry x v = Spine ("#imp_abs#") [Abs x v]
 tycon nm val = Spine "#tycon#" [Spine nm [val]]
 
 consts = [ (atomName , tipe)

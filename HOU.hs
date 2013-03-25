@@ -141,28 +141,38 @@ unifyEq cons@(a :=: b) = case (a,b) of
     modifyCtxt $ addToTail "-implicit-" Exists a' ty
     return $ Just (mempty,  [b :=: l `apply` var a' , var a' :@: ty], False)
 
-  (Spine "#imp_abs#" (ty:l:r), b) -> vtrace 1 ("-imp_abs- : "++show a ++ "\n\t"++show b) $ do
+  (Spine "#imp_abs#" (l:r), b) -> vtrace 1 ("-imp_abs- : "++show a ++ "\n\t"++show b) $ do
     a <- getNewWith "@iaL"
-    modifyCtxt $ addToTail "-imp_abs-" Exists a ty
-    return $ Just (mempty, [rebuildSpine l (var a:r) :=: b , var a :@: ty], False)
-  (b, Spine "#imp_abs#" (ty:l:r)) -> vtrace 1 "-imp_abs-" $ do
+    k <- getNewWith "@>k"
+    modifyCtxt $ addToTail "-asR-" Exists k kind
+    modifyCtxt $ addToTail "-imp_abs-" Exists a (var k)
+    return $ Just (mempty, [rebuildSpine l (var a:r) :=: b , var a :@: var k], False)
+  (b, Spine "#imp_abs#" (l:r)) -> vtrace 1 "-imp_abs-" $ do
     a <- getNewWith "@iaR"
-    modifyCtxt $ addToTail "-imp_abs-" Exists a ty
-    return $ Just (mempty, [b :=: rebuildSpine l (var a:r) , var a :@: ty], False)
+    k <- getNewWith "@>k"
+    modifyCtxt $ addToTail "-asR-" Exists k kind    
+    modifyCtxt $ addToTail "-imp_abs-" Exists a (var k)
+    return $ Just (mempty, [b :=: rebuildSpine l (var a:r) , var a :@: var k], False)
 
   (Spine "#tycon#" [Spine nm [_]], Spine "#tycon#" [Spine nm' [_]]) | nm /= nm' -> throwTrace 0 $ "different type constraints: "++show cons
   (Spine "#tycon#" [Spine nm [val]], Spine "#tycon#" [Spine nm' [val']]) | nm == nm' -> 
     return $ Just (mempty, [val :=: val'], False)
 
-  (Abs nm ty s , Abs nm' ty' s') -> vtrace 1 "-aa-" $ do
-    modifyCtxt $ addToTail "-aa-" Forall nm ty
-    return $ Just (mempty, [ty :=: ty' , s :=: subst (nm' |-> var nm) s'], False)
-  (Abs nm ty s , s') -> vtraceShow 1 2 "-asL-" cons $ do
-    modifyCtxt $ addToTail "-asL-" Forall nm ty
+  (Abs nm s , Abs nm' s') -> vtrace 1 "-aa-" $ do
+    k <- getNewWith "@>k"
+    modifyCtxt $ addToTail "-asR-" Exists k kind
+    modifyCtxt $ addToTail "-aa-" Forall nm (var k)
+    return $ Just (mempty, [s :=: subst (nm' |-> var nm) s'], False)
+  (Abs nm s , s') -> vtraceShow 1 2 "-asL-" cons $ do
+    k <- getNewWith "@>k"
+    modifyCtxt $ addToTail "-asR-" Exists k kind
+    modifyCtxt $ addToTail "-asL-" Forall nm (var k)
     return $ Just (mempty, [s :=: s' `apply` var nm], False)
 
-  (s, Abs nm ty s' ) -> vtraceShow 1 2 "-asR-" cons $ do
-    modifyCtxt $ addToTail "-asR-" Forall nm ty
+  (s, Abs nm s' ) -> vtraceShow 1 2 "-asR-" cons $ do
+    k <- getNewWith "@>k"
+    modifyCtxt $ addToTail "-asR-" Exists k kind
+    modifyCtxt $ addToTail "-asR-" Forall nm (var k)
     return $ Just (mempty, [s `apply` var nm :=: s'], False)
 
   (s , s') | s == s' -> vtrace 1 "-eq-" $ return $ Just (mempty, [], False)
@@ -242,9 +252,9 @@ allElementsAreVariablesNoPP fors = partial
         partial _ = False
         
 
-typeToListOfTypes (Spine "#forall#" [_, Abs x ty l]) = (x,ty):typeToListOfTypes l
+typeToListOfTypes (Spine "#forall#" [ty, Abs x l]) = (x,ty):typeToListOfTypes l
 typeToListOfTypes (Spine _ _) = []
-typeToListOfTypes a@(Abs _ _ _) = error $ "not a type" ++ show a
+typeToListOfTypes a@(Abs _ _) = error $ "not a type" ++ show a
 
 -- the problem WAS (hopefully) here that the binds were getting
 -- a different number of substitutions than the constraints were.
@@ -280,10 +290,10 @@ raiseToTop top bind@Binding{ elmName = x, elmType = ty } sp m = do
 
       
 getBase 0 a = a
-getBase n (Spine "#forall#" [_, Abs _ _ r]) = getBase (n - 1) r
+getBase n (Spine "#forall#" [_, Abs _ r]) = getBase (n - 1) r
 getBase _ a = a
 
-makeBind xN us tyl arg = foldr (uncurry Abs) (Spine xN $ map var arg) $ zip us tyl
+makeBind xN us tyl arg = foldr (Abs . fst) (Spine xN $ map var arg) $ zip us tyl
 
 gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine _ y'l), _) = do
   aty <- regenAbsVars aty
@@ -360,16 +370,16 @@ gvar_uvar_possibilities a@(s@(Spine x yl),_) b@(s'@(Spine y _),bty) =
     Nothing -> throwTrace 0 $ "CANT: gvar-uvar-depends: "++show (s :=: s')
 gvar_uvar_possibilities _ _ = error "gvar-uvar-possibilities is not made for this case"
 
-getTyNews (Spine "#forall#" [_, Abs _ _ t]) = Nothing:getTyNews t
-getTyNews (Spine "#imp_forall#" [_, Abs nm _ t]) = Just nm:getTyNews t
+getTyNews (Spine "#forall#" [_, Abs _ t]) = Nothing:getTyNews t
+getTyNews (Spine "#imp_forall#" [_, Abs nm t]) = Just nm:getTyNews t
 getTyNews _ = []
 
 gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
   let m = getTyNews bty
       cons = a :=: b
   
-  let getArgs (Spine "#forall#" [ty, Abs ui _ r]) = ((var ui,ui),Left ty):getArgs r
-      getArgs (Spine "#imp_forall#" [ty, Abs ui _ r]) = ((tycon ui $ var ui,ui),Right ty):getArgs r
+  let getArgs (Spine "#forall#" [ty, Abs ui r]) = ((var ui,ui),Left ty):getArgs r
+      getArgs (Spine "#imp_forall#" [ty, Abs ui r]) = ((tycon ui $ var ui,ui),Right ty):getArgs r
       getArgs _ = []
       
       untylr = getArgs aty
@@ -384,8 +394,8 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
       
   let xml = map (snd . snd) xm
       -- when rebuilding the spine we want to use typeconstructed variables if bty contains implicit quantifiers
-      toLterm (Spine "#forall#" [ty, Abs ui _ r]) = Abs ui ty $ toLterm r
-      toLterm (Spine "#imp_forall#" [ty, Abs ui _ r]) = imp_abs ui ty $ toLterm r      
+      toLterm (Spine "#forall#" [ty, Abs ui r]) = Abs ui $ toLterm r
+      toLterm (Spine "#imp_forall#" [ty, Abs ui r]) = imp_abs_curry ui $ toLterm r      
       toLterm _ = rebuildSpine (action vun) $ xml
 
       
@@ -397,10 +407,10 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
                        ) e untylr
                  
       -- returns the list in the same order as xm
-      substBty sub (Spine "#forall#" [_, Abs vi bi r]) ((x,xi):xmr) = (x,vbuild $ subst sub bi)
-                                                                :substBty (M.insert vi (fst xi) sub) r xmr
-      substBty sub (Spine "#imp_forall#" [_, Abs vi bi r]) ((x,xi):xmr) = (x,vbuild $ subst sub bi)
-                                                                    : substBty (M.insert vi (fst xi) sub) r xmr
+      substBty sub (Spine "#forall#" [bi, Abs vi r]) ((x,xi):xmr) = (x,vbuild $ subst sub bi)
+                                                                    :substBty (M.insert vi (fst xi) sub) r xmr
+      substBty sub (Spine "#imp_forall#" [bi, Abs vi r]) ((x,xi):xmr) = (x,vbuild $ subst sub bi)
+                                                                        : substBty (M.insert vi (fst xi) sub) r xmr
       substBty _ _ [] = []
       substBty _ s l  = error $ "is not well typed: "++show s
                         ++"\nFOR "++show l 
@@ -435,7 +445,7 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
       modifyCtxt $ addToTail "-rsFe-" Exists y b'
       ret $ Just [ var y :=: m `apply` var x' , var y :@: b']
 
-    Spine "#imp_forall#" [_, Abs x a b] -> do
+    Spine "#imp_forall#" [a, Abs x b] -> do
       y <- getNewWith "@isY"
       x' <- getNewWith "@isX"
       let b' = subst (x |-> var x') b
@@ -533,7 +543,7 @@ leftSearch (m,goal) (x,target) = vtrace 1 ("LS: " ++ show x++" ∈ " ++show targ
             cons <- leftCont (n `apply` var x') (b `apply` var x')
             return $ cons++[var x' :@: a]
 
-          Spine "#imp_forall#" [_ , Abs x a b] -> do  
+          Spine "#imp_forall#" [a , Abs x b] -> do  
             x' <- getNewWith "@isla"
             modifyCtxt $ addToTail "-lsI-" Exists x' a
             cons <- leftCont (n `apply` (tycon x $ var x')) (subst (x |-> var x') b)
@@ -575,6 +585,7 @@ checkType sp ty = case sp of
       var x' .@. ty
       return $ var x'
       
+
   Spine "#ascribe#" (t:v:l) -> do
     (v'',mem) <- regenWithMem v
     t <- withKind $ checkType t
@@ -583,11 +594,10 @@ checkType sp ty = case sp of
     r <- getNewWith "@r"
     Spine _ l' <- addToEnv (∀) r t'' $ checkType (Spine r l) ty
     return $ rebuildSpine (rebuildFromMem mem v') l'
-    
   Spine "#dontcheck#" [v] -> do
     return v
     
-  Spine "#infer#" [_, Abs x tyA tyB ] -> do
+  Spine "#infer#" [tyA, Abs x tyB ] -> do
     tyA <- withKind $ checkType tyA
     
     x' <- getNewWith "@inf"
@@ -595,50 +605,47 @@ checkType sp ty = case sp of
       var x' .@. tyA
       checkType (subst (x |-> var x') tyB) ty
 
-  Spine "#imp_forall#" [_, Abs x tyA tyB] -> do
+  Spine "#imp_forall#" [tyA, Abs x tyB] -> do
     tyA <- withKind $ checkType tyA
     tyB <- addToEnv (∀) (check "imp_forall" x) tyA $ checkType tyB ty
     return $ imp_forall x tyA tyB
     
-  Spine "#forall#" [_, Abs x tyA tyB] -> do
+  Spine "#forall#" [tyA, Abs x tyB] -> do
     tyA <- withKind $ checkType tyA
     forall x tyA <$> (addToEnv (∀) (check "forall" x) tyA $ 
       checkType tyB ty )
 
   -- below are the only cases where bidirectional type checking is useful 
-  Spine "#imp_abs#" [_, Abs x tyA sp] -> case ty of
-    Spine "#imp_forall#" [_, Abs x' tyA' tyF'] -> do
+  Spine "#imp_abs#" [Abs x sp] -> case ty of
+    Spine "#imp_forall#" [tyA, Abs x' tyF'] -> do
       unless ("" == x' || x == x') $ 
         lift $ throwTrace 0 $ "can not show: "++show sp ++ " : "++show ty 
-                           ++"since: "++x++ " ≠ "++x'
-      tyA <- withKind $ checkType tyA
-      tyA ≐ tyA'
+                            ++"since: "++x++ " ≠ "++x'
       addToEnv (∀) (check "impabs1" x) tyA $ do
-        imp_abs x tyA <$> checkType sp tyF'
+        imp_abs_curry x <$> checkType sp tyF'
         
     _ -> do
       e <- getNewWith "@e"
-      tyA <- withKind $ checkType tyA
-      withKind $ \k -> addToEnv (∃) e (forall x tyA k) $ do
+      tyA <- getNewWith "@tyA"
+      let tyAv = var tyA
+      withKind $ \k -> withKind $ \tyA -> addToEnv (∃) e (forall x tyA k) $ do
         imp_forall x tyA (Spine e [var x]) ≐ ty
-        sp <- addToEnv (∀) (check "impabs2" x) tyA $ checkType sp (Spine e [var x])
-        return $ imp_abs x tyA $ sp
+        imp_abs_curry x <$> (addToEnv (∀) (check "impabs2" x) tyA $ checkType sp (Spine e [var x]) )
 
-  Abs x tyA sp -> case ty of
-    Spine "#forall#" [_, Abs x' tyA' tyF'] -> do
-      tyA <- withKind $ checkType tyA
-      tyA ≐ tyA'
+  Abs x sp -> case ty of
+    Spine "#forall#" [tyA, Abs x' tyF'] -> do
       addToEnv (∀) (check "abs1" x) tyA $ do
-        Abs x tyA <$> checkType sp (subst (x' |-> var x) tyF')
+        Abs x <$> checkType sp (subst (x' |-> var x) tyF')
     _ -> do
       e <- getNewWith "@e"
-      tyA <- withKind $ checkType tyA
-      withKind $ \k -> addToEnv (∃) e (forall "" tyA k) $ do
+      withKind $ \k -> withKind $ \tyA -> addToEnv (∃) e (forall "" tyA k) $ do
         forall x tyA (Spine e [var x]) ≐ ty
-        Abs x tyA <$> (addToEnv (∀) (check "abs2" x) tyA $ checkType sp (Spine e [var x]))
+        Abs x <$> (addToEnv (∀) (check "abs2" x) tyA $ checkType sp (Spine e [var x]))
+            
   Spine nm [] | isChar nm -> do
     ty ≐ Spine "char" []
     return sp
+  
   Spine head args -> do
     let chop mty [] = do
           ty ≐ mty
@@ -646,7 +653,7 @@ checkType sp ty = case sp of
           
         chop mty lst@(a:l) = case mty of 
           
-          Spine "#imp_forall#" [ty', Abs nm _ tyv] -> case findTyconInPrefix nm lst of
+          Spine "#imp_forall#" [ty', Abs nm tyv] -> case findTyconInPrefix nm lst of
             Nothing -> do
               x <- getNewWith "@xin"
               addToEnv (∃) x ty' $ do
@@ -702,10 +709,7 @@ buildOrderGraph :: S.Set Name -- the list of variables to be generalized
                 -> Spine 
                 -> State (M.Map Name (S.Set Name)) (S.Set Name) -- an edge in the graph if a variable has occured before this one.
 buildOrderGraph gen prev s = case s of
-  Abs nm t v -> do
-    prev' <- buildOrderGraph gen prev t
-    prev'' <- buildOrderGraph (S.delete nm gen) prev v
-    return $ S.union prev' prev''
+  Abs nm v -> buildOrderGraph (S.delete nm gen) prev v
   Spine "#tycon#" [Spine _ [l]] -> buildOrderGraph gen prev l  
   Spine s [t, l] | elem s ["#exists#", "#forall#", "#imp_forall#", "#imp_abs#"] -> do
     prev1 <- buildOrderGraph gen prev t
@@ -765,7 +769,7 @@ typeInfer env (seqi,nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union e
 unsafeSubst s (Spine nm apps) = let apps' = unsafeSubst s <$> apps in case s ! nm of 
   Just nm -> rebuildSpine nm apps'
   _ -> Spine nm apps'
-unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
+unsafeSubst s (Abs nm rst) = Abs nm (unsafeSubst s rst)
   
 ----------------------------
 --- the public interface ---
@@ -880,7 +884,7 @@ getImpliedFamilies s = S.intersection fs $ gif s
           Just f | f == atomName -> id
           Just f -> S.insert f) $ gif ty `S.union` gif a 
         gif (Spine a l) = mconcat $ gif <$> l
-        gif (Abs _ ty l) = S.union (gif ty) (gif l)
+        gif (Abs nm l) = S.delete nm $ gif l
 
 
 typeCheckAll :: Bool -> [Decl] -> Choice [Decl]

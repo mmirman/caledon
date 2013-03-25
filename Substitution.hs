@@ -86,8 +86,8 @@ newName nm so fo' = (nm',s',f')
 
   
 freeWithout sp [] = freeVariables sp
-freeWithout (Abs nm tp rst) (a:lst) = S.delete nm $ freeWithout rst lst
-freeWithout (Spine "#imp_abs#" [_, Abs nm tp rst]) apps = case findTyconInPrefix nm apps of
+freeWithout (Abs nm rst) (a:lst) = S.delete nm $ freeWithout rst lst
+freeWithout (Spine "#imp_abs#" [tp, Abs nm rst]) apps = case findTyconInPrefix nm apps of
   Just (v,apps) -> S.delete nm $ freeWithout rst apps
   Nothing -> S.delete nm $ freeWithout rst apps
 freeWithout l apps = freeVariables l
@@ -106,9 +106,9 @@ class Alpha a where
 
 rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
-rebuildSpine (Spine "#imp_abs#" [_, Abs nm ty rst]) apps = case findTyconInPrefix nm apps of 
-  Just (v, apps) -> rebuildSpine (Abs nm ty rst) (v:apps)
-  Nothing -> seq sp $ if ty == atom && S.notMember nm (freeVariables rs) then rs else irs 
+rebuildSpine (Spine "#imp_abs#" [Abs nm rst]) apps = case findTyconInPrefix nm apps of 
+  Just (v, apps) -> rebuildSpine (Abs nm rst) (v:apps)
+  Nothing -> seq sp $ irs
                       -- proof irrelevance hack
                       -- we know we can prove that type "prop" is inhabited
                       -- irs - the proof doesn't matter
@@ -118,10 +118,10 @@ rebuildSpine (Spine "#imp_abs#" [_, Abs nm ty rst]) apps = case findTyconInPrefi
      where nm' = newNameFor nm $ freeVariables apps
            sp = substFree (nm |-> var nm') mempty rst
            rs = rebuildSpine sp apps
-           irs = infer nm ty rs
+           irs = Spine "#imp_abs#" [Abs nm rst]
 rebuildSpine (Spine c apps) apps' = Spine c $ apps ++ apps'
-rebuildSpine (Abs nm _ rst) (a:apps') = let sp = substFree (nm |-> a) mempty rst
-                                        in seq sp $ rebuildSpine sp apps'
+rebuildSpine (Abs nm rst) (a:apps') = let sp = substFree (nm |-> a) mempty rst
+                                      in seq sp $ rebuildSpine sp apps'
   
 instance Subst a => Subst [a] where
   substFree s f t = substFree s f <$> t
@@ -134,12 +134,12 @@ instance (Subst a, Subst b) => Subst (a,b) where
   substFree s f ~(a,b) = (substFree s f a , substFree s f b)
 
 instance Subst Spine where
-  substFree s f sp@(Spine "#imp_forall#" [_, Abs nm tp rst]) =
+  substFree s f sp@(Spine "#imp_forall#" [tp, Abs nm rst]) =
        imp_forall nm (substFree s f tp) $ substFree (M.delete nm s) (S.insert nm f) rst            
 
-  substFree s f sp@(Spine "#imp_abs#" [_, Abs nm tp rst]) =
+  substFree s f sp@(Spine "#imp_abs#" [tp, Abs nm rst]) =
       imp_abs nm (substFree s f tp) $ substFree (M.delete nm s) (S.insert nm f) rst 
-  substFree s f (Abs nm tp rst) = Abs nm' (substFree s f tp) $ substFree s' f' rst
+  substFree s f (Abs nm rst) = Abs nm' $ substFree s' f' rst
     where (nm',s',f') = newName nm s f
   substFree s f (Spine "#tycon#" [Spine c [v]]) = Spine "#tycon#" [Spine c [substFree s f v]]
   substFree s f sp@(Spine nm apps) = let apps' = substFree s f <$> apps  in
@@ -153,16 +153,16 @@ instance Subst Spine where
       _ -> Spine nm apps'
       
 instance Alpha Spine where
-  alphaConvert s m (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a ty $ alphaConvert (S.insert a s) (M.delete a m) r
-  alphaConvert s m (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a ty $ alphaConvert (S.insert a s) (M.delete a m) r
-  alphaConvert s m (Abs nm ty r) = Abs nm' (alphaConvert s m ty) $ alphaConvert (S.insert nm' s) (M.insert nm nm' m) r
+  alphaConvert s m (Spine "#imp_forall#" [ty,Abs a r]) = imp_forall a ty $ alphaConvert (S.insert a s) (M.delete a m) r
+  alphaConvert s m (Spine "#imp_abs#" [ty,Abs a r]) = imp_abs a ty $ alphaConvert (S.insert a s) (M.delete a m) r
+  alphaConvert s m (Abs nm r) = Abs nm' $ alphaConvert (S.insert nm' s) (M.insert nm nm' m) r
     where nm' = newNameFor nm s
   alphaConvert s m (Spine "#tycon#" [Spine c [v]]) = tycon c $ alphaConvert s m v          
   alphaConvert s m (Spine a l) = Spine (fromMaybe a (m ! a)) $ alphaConvert s m l
   
-  rebuildFromMem s (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a (rebuildFromMem s ty) $ rebuildFromMem (M.delete a s) r
-  rebuildFromMem s (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a (rebuildFromMem s ty) $ rebuildFromMem (M.delete a s) r
-  rebuildFromMem s (Abs nm ty r) = Abs (fromMaybe nm $ M.lookup nm s) (rebuildFromMem s ty) $ rebuildFromMem s r
+  rebuildFromMem s (Spine "#imp_forall#" [ty,Abs a r]) = imp_forall a (rebuildFromMem s ty) $ rebuildFromMem (M.delete a s) r
+  rebuildFromMem s (Spine "#imp_abs#" [ty,Abs a r]) = imp_abs a (rebuildFromMem s ty) $ rebuildFromMem (M.delete a s) r
+  rebuildFromMem s (Abs nm r) = Abs (fromMaybe nm $ M.lookup nm s) $ rebuildFromMem s r
   rebuildFromMem s (Spine a l) = Spine a' $ rebuildFromMem s l
     where a' = fromMaybe a $ M.lookup a s
                                  
@@ -229,22 +229,20 @@ instance RegenAbsVars l => RegenAbsVars [l] where
 
   
 instance RegenAbsVars Spine where  
-  regenAbsVars (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a ty <$> regenAbsVars r
-  regenAbsVars (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a ty <$> regenAbsVars r
-  regenAbsVars (Abs a ty r) = do
+  regenAbsVars (Spine "#imp_forall#" [ty,Abs a r]) = imp_forall a ty <$> regenAbsVars r
+  regenAbsVars (Spine "#imp_abs#" [ty,Abs a r]) = imp_abs a ty <$> regenAbsVars r
+  regenAbsVars (Abs a r) = do
     a' <- getNewWith $ "@rega"
-    ty' <- regenAbsVars ty
     r' <- regenAbsVars $ subst (a |-> var a') r
-    return $ Abs a' ty' r'
+    return $ Abs a' r'
   regenAbsVars (Spine a l) = Spine a <$> regenAbsVars l
   
-  regenWithMem (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a ty <<$> regenWithMem r
-  regenWithMem (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a ty <<$> regenWithMem r
-  regenWithMem (Abs a ty r) = do
+  regenWithMem (Spine "#imp_forall#" [ty,Abs a r]) = imp_forall a ty <<$> regenWithMem r
+  regenWithMem (Spine "#imp_abs#" [ty,Abs a r]) = imp_abs a ty <<$> regenWithMem r
+  regenWithMem (Abs a r) = do
     a' <- getNewWith $ "@regm"
-    (ty',s1) <- regenWithMem ty
     (r', s2) <- regenWithMem $ subst (a |-> var a') r
-    return $ (Abs a' ty' r', M.insert a' a $ M.union s1 s2)
+    return $ (Abs a' r', M.insert a' a $ s2)
   regenWithMem (Spine a l) = Spine a <<$> regenWithMem l
 
 
@@ -284,12 +282,12 @@ instance RegenAbsVars Constraint where
 
 getFamily v = fromMaybe (error ("values don't have families: "++show v)) $ getFamilyM v
 
-getFamilyM (Spine "#infer#" [_, Abs _ _ lm]) = getFamilyM lm
+getFamilyM (Spine "#infer#" [_, Abs _ lm]) = getFamilyM lm
 getFamilyM (Spine "#ascribe#"  (_:v:l)) = getFamilyM (rebuildSpine v l)
 getFamilyM (Spine "#dontcheck#"  [v]) = getFamilyM v
-getFamilyM (Spine "#forall#" [_, Abs _ _ lm]) = getFamilyM lm
-getFamilyM (Spine "#imp_forall#" [_, Abs _ _ lm]) = getFamilyM lm
-getFamilyM (Spine "#exists#" [_, Abs _ _ lm]) = getFamilyM lm
+getFamilyM (Spine "#forall#" [_, Abs _ lm]) = getFamilyM lm
+getFamilyM (Spine "#imp_forall#" [_, Abs _ lm]) = getFamilyM lm
+getFamilyM (Spine "#exists#" [_, Abs _ lm]) = getFamilyM lm
 getFamilyM (Spine "#open#" (_:_:c:_)) = getFamilyM c
 getFamilyM (Spine "open" (_:_:c:_)) = getFamilyM c
 getFamilyM (Spine "pack" [_,_,_,e]) = getFamilyM e

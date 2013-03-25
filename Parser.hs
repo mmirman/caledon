@@ -228,14 +228,14 @@ pTipe = do
         return $ \input -> foldr (flip out tp) input nml
       
       
-      table = [ [ altPostfix ["λ", "\\"] ["lambda"] Abs
+      table = [ [ altPostfix ["λ", "\\"] ["lambda"] lam
                 , altPostfix ["?λ", "?\\"] ["?lambda"] imp_abs
                 , altPostfix ["∃"] ["exists"] exists
                 , regPostfix angles ["??"] ["infer"] infer
                 , regPostfix brackets ["∀"] ["forall"] forall
                 , regPostfix braces ["?∀"] ["?forall"] imp_forall
-                ]++[ altPostfix [op] [] (\nm t s -> Spine op [t, Abs nm ty_hole s] ) | op <- opLams ]
-                ++[ altPostfix [] [op] (\nm t s -> Spine op [t,Abs nm ty_hole s] ) | op <- strLams ]
+                ]++[ altPostfix [op] [] (\nm t s -> Spine op [t, lam nm ty_hole s] ) | op <- opLams ]
+                ++[ altPostfix [] [op] (\nm t s -> Spine op [t,lam nm ty_hole s] ) | op <- strLams ]
               , [ binary (forall) AssocRight $ reservedOp "->" <|> reservedOp "→" 
                 , binary (const (~~>)) AssocRight $ reservedOp "=>" <|> reservedOp "⇒"
                 ]
