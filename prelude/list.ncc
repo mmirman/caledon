@@ -11,32 +11,31 @@ defn concatList : list A -> list A -> list A -> prop
 
 
 defn churchList : prop -> prop
-  as \A : prop . [lst : prop -> prop] ([A] lst A) -> (A -> [A] lst A -> lst A) -> [A] lst A
+  as \A : prop . [lst : prop] lst -> (A -> lst -> lst) -> lst
 
 defn consCL : [B : prop] B -> churchList B -> churchList B
   as \C : prop . 
      \V : C . 
      \cl : churchList C .
-     \lst : prop -> prop .
-     \nil : [C] lst C. 
-     \cons : C -> [C] lst C -> lst C . 
-     \A . 
-     cons V A (cl lst nil cons A)
+     \lst : prop.
+     \nil : lst. 
+     \cons : C -> lst -> lst . 
+     cons V (cl lst nil cons)
 
 defn nilCL : [B : prop] churchList B
   as \C : prop . 
-     \lst : prop -> prop .
-     \nil : [C] lst C. 
-     \cons : C -> [C] lst C -> lst C . 
+     \lst : prop.
+     \nil : lst. 
+     \cons : C -> lst -> lst .
      nil
 
 defn mapCL : {A B} (A -> B) -> churchList A -> churchList B
   as ?\A B : prop.
      \F : A -> B . 
      \cl : churchList A .
-     \lst : prop -> prop .
-     \nil : [B] lst B .
-     \cons : B -> [B] lst B -> lst B.
+     \lst : prop.
+     \nil : lst .
+     \cons : B -> lst -> lst.
      cl lst nil (\v . cons (F v))
 
 defn foldrCL : {A B} (A -> B -> A) -> A -> churchList B -> A
@@ -44,4 +43,4 @@ defn foldrCL : {A B} (A -> B -> A) -> A -> churchList B -> A
      \F : A -> B -> A. 
      \bc : A .
      \cl : churchList B .
-     cl (\ u . A) (\ u . bc) (\v : B . \a : prop . \c : A . F c v) A
+     cl A bc (\v : B . \c : A . F c v)

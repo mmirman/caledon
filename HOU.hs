@@ -128,24 +128,41 @@ unifyOne (a :=: b) return = do
     r -> return r
 unifyOne _ return = return Nothing
 
+impForallPrefix (Spine "#imp_forall#" [ty, Abs nm _ l]) = nm:impForallPrefix l
+impForallPrefix _ = []
+
+impAbsPrefix (Spine "#imp_abs#" (ty:(Abs nm _ l):r)) = nm:impAbsPrefix l
+impAbsPrefix _ = []
+
 unifyEq cons@(a :=: b) = case (a,b) of 
   (Spine "#ascribe#" (ty:v:l), b) -> return $ Just (mempty, [rebuildSpine v l :=: b], False)
   (b,Spine "#ascribe#" (ty:v:l)) -> return $ Just (mempty, [b :=: rebuildSpine v l], False)
   
-  (Spine "#imp_forall#" [ty, l], b) -> vtrace 1 "-implicit-" $ do
+  (Spine "#imp_forall#" [ty, Abs nm _ l], Spine "#imp_forall#" [ty',Abs nm' _ l']) | nm == nm' -> do
+    a <- getNewWith "@aL"
+    modifyCtxt $ addToTail "-implicit-" Forall a ty
+    return $ Just (mempty, [Abs nm ty l `apply` var a :=: Abs nm' ty' l' `apply` var a , ty :=: ty'], False)
+
+  (Spine "#imp_forall#" [ty, l@(Abs nm _ _)], b) | not $ elem nm $ impForallPrefix b -> vtrace 1 "-implicit-" $ do
     a' <- getNewWith "@aL"
     modifyCtxt $ addToTail "-implicit-" Exists a' ty
     return $ Just (mempty, [l `apply` var a' :=: b , var a' :@: ty], False)
-  (b, Spine "#imp_forall#" [ty, l]) -> vtrace 1 "-implicit-" $ do
+    
+  (b, Spine "#imp_forall#" [ty, l@(Abs nm _ _)]) | not $ elem nm $ impForallPrefix b -> vtrace 1 "-implicit-" $ do
     a' <- getNewWith "@aR"
     modifyCtxt $ addToTail "-implicit-" Exists a' ty
     return $ Just (mempty,  [b :=: l `apply` var a' , var a' :@: ty], False)
-
-  (Spine "#imp_abs#" (ty:l:r), b) -> vtrace 1 ("-imp_abs- : "++show a ++ "\n\t"++show b) $ do
+    
+  (Spine "#imp_abs#" (ty:(Abs nm _ l):r), Spine "#imp_abs#" (ty':(Abs nm' _ l'):r')) | nm == nm' -> do
+    a <- getNewWith "@aL"
+    modifyCtxt $ addToTail "-implicit-" Forall a ty
+    return $ Just (mempty, [rebuildSpine (Abs nm ty l) (var a:r) :=: rebuildSpine (Abs nm' ty' l') (var a:r'), ty :=: ty'], False)
+    
+  (Spine "#imp_abs#" (ty:(l@(Abs nm _ _)):r), b) | not $ elem nm $ impAbsPrefix b -> vtrace 1 ("-imp_abs- : "++show a ++ "\n\t"++show b) $ do
     a <- getNewWith "@iaL"
     modifyCtxt $ addToTail "-imp_abs-" Exists a ty
     return $ Just (mempty, [rebuildSpine l (var a:r) :=: b , var a :@: ty], False)
-  (b, Spine "#imp_abs#" (ty:l:r)) -> vtrace 1 "-imp_abs-" $ do
+  (b, Spine "#imp_abs#" (ty:(l@(Abs nm _ _)):r)) | not $ elem nm $ impAbsPrefix b -> vtrace 1 "-imp_abs-" $ do
     a <- getNewWith "@iaR"
     modifyCtxt $ addToTail "-imp_abs-" Exists a ty
     return $ Just (mempty, [b :=: rebuildSpine l (var a:r) , var a :@: ty], False)
@@ -756,8 +773,8 @@ typeInfer env (seqi,nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union e
   sub <- appendErr ("which became: "++show val ++ "\n\t :  " ++ show ty) $ 
          unify constraint
   
-  let resV =  rebuildFromMem mem $ unsafeSubst sub $ val
-      resT =  rebuildFromMem mem' $   unsafeSubst sub $ ty
+  let resV = rebuildFromMem mem  $ unsafeSubst sub $ val
+      resT = rebuildFromMem mem' $ unsafeSubst sub $ ty
 
   vtrace 0 ("RESULT: "++nm++" : "++show resV) $
       return $ (resV,resT, M.insert nm (seqi,resV) env)

@@ -38,6 +38,7 @@ data Binding = Binding { elmQuant :: Quant
                
 instance Subst Binding where
   substFree sub f b = b { elmType = substFree sub f $! elmType b }
+  etaReduce b = b { elmType = etaReduce $! elmType b }
                     
 data Context = Context { ctxtHead :: Maybe Name
                        , ctxtMap  :: Map Name Binding
@@ -46,6 +47,7 @@ data Context = Context { ctxtHead :: Maybe Name
                                   
 instance Subst Context where               
   substFree sub f b = b { ctxtMap = substFree sub f <$> ctxtMap b }
+  etaReduce b = b { ctxtMap = etaReduce <$> ctxtMap b }
 
 lookupWith s a ctxt = case M.lookup a ctxt of
   Just r -> r
