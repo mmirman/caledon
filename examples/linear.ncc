@@ -1,6 +1,31 @@
-defn trm : prop
-   | lam = (trm -> trm) -> trm
-   | app = trm -> trm -> trm
+defn linear-prop : (prop -> prop) -> prop
+   | linear-var = linear-prop (\a . a)
 
-defn linear : (trm -> trm) -> prop
-   | linear_var = linear (λ V : trm . V )
+
+defn linear : {A} (A -> prop) -> prop
+   | linear-app2 = [M : _ -> _]
+                   linear {A = A} (\a : A . M (N a))
+                <- linear {A = A} (\a : A . N a)
+
+   | linear-app1 = [A : prop][B : prop][N : B][M : A -> B -> prop ]
+                   linear {A = A} (\a : A . (M a) N)
+                <- [b : B] linear {A = A} (\a : A . M a b)
+
+defn id : {Ai : prop} Ai -> Ai
+  as ?\Ai . \a : Ai . a
+
+fixity none 5 =:=
+defn =:= : {Aeq} Aeq -> Aeq -> prop
+   | eqImp = [Av][Q : Av] Q =:= Q
+
+defn functor : [F : prop -> prop] {fmap : {A}{B} (A -> B) -> F A -> F B } prop
+   | isFunctor = [F : prop -> prop]
+                 [FMAP : {A}{B} (A -> B) -> F A -> F B] 
+                 [A : prop]
+                 [M : FMAP {A = A} id =:= id -> prop ]
+                 linear {A = FMAP id =:= id } M ->
+		   functor F {fmap = FMAP}
+
+
+
+

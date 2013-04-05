@@ -143,6 +143,13 @@ unifyEq cons@(a :=: b) = case (a,b) of
     modifyCtxt $ addToTail "-implicit-" Forall a ty
     return $ Just (mempty, [Abs nm ty l `apply` var a :=: Abs nm' ty' l' `apply` var a , ty :=: ty'], False)
 
+  -- this case doesn't cover the case where we have 
+  -- ?\/x : t . A  =:= ?\/x :t . A, but "x in t" isn't necessarily solvable.
+    
+  -- this is solvable if we defer instantiation of x if we see x in b.
+  -- by these rules though, ?\/x y : t1 . A =:= ?\/ y x : t1 . A  is not provable.
+  -- this appears to be fine for the moment, although it won't imediately be derivable from the implicit CoC  
+  -- where such a statement is true.  
   (Spine "#imp_forall#" [ty, l@(Abs nm _ _)], b) | not $ elem nm $ impForallPrefix b -> vtrace 1 "-implicit-" $ do
     a' <- getNewWith "@aL"
     modifyCtxt $ addToTail "-implicit-" Exists a' ty
@@ -912,7 +919,7 @@ typeCheckAll verbose preds = do
   return $ newPreds <$> preds
 
 toAxioms :: Bool -> [Decl] -> [FlatPred]
-toAxioms b = concat . zipWith toAxioms' [0..]
+toAxioms b = concat . zipWith toAxioms' [1..]
   where toAxioms' j (Predicate s nm ty cs) = 
           (FlatPred (PredData (Just $ atomName) False j s) nm Nothing ty tipe)
           :zipWith (\(sequ,(nm',ty')) i -> (FlatPred (PredData (Just nm) sequ i False) nm' Nothing ty' atom)) cs [0..]

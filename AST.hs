@@ -263,18 +263,15 @@ consts = [ (atomName , tipe)
                   $ exists "z" (var "tp") (Spine "iface" [var "z"]))
          , ("open", forall "a" atom 
                   $ forall "f" (var "a" ~> atom) 
+                  $ forall "tau" kind
                   $ exists "z" (var "a") (Spine "f" [var "z"])
-                  ~> (forall "v" (var "a") 
-                     $ Spine "f" [var "v"] ~> atom ))
-         , ("openDef", forall "a" atom 
-                    $ forall "f" (var "a" ~> atom) 
-                    $ forall "v" (var "a")
-                    $ forall "fv" (Spine "f" [var "z"])
-                    $ Spine "open" [var "a",  var "f", Spine "pack" [var "a", var "f", var "v", var "fv"] , var "v", var "fv"])
+                 ~> (forall "z" (var "a") 
+                     $ Spine "f" [var "z"] ~> var "tau")
+                 ~> var "tau")
          ]
 
 
-anonymous ty = ((False,10000),ty)
+anonymous ty = ((False,0),ty)
 
 envSet = S.fromList $ map fst consts
 
