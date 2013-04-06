@@ -489,35 +489,6 @@ gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
 --- proof search ---  
 --------------------
 
-{-
-∃ 6@hole : 5@k . 
-∀ 10@sub : 6@hole . ( 10@sub ∈ˢ A → prop )
-
-∃ 6@hole : 5@k . 
-∀ 10@sub : 6@hole . 
-10@sub ∈ˢ A → prop
---------------------
-∃ 6@hole : 5@k . 
-∀ 10@sub : 6@hole . 
-∀ 24@sX : A . 
-∃ z : prop . 
-z :=: 10@sub 24@sX  /\  z ∈ˢ prop
-
-----------------------------------------
-∃ 6@hole : 5@k . 
-∀ 10@sub : 6@hole . 
-∀ 24@sX : A . 
-10@sub 24@sX ∈ˢ prop
----------------------------------------
-∃ 6@hole : 5@k . 
-∀ 10@sub : 6@hole . 
-∀ 24@sX : A . 
-10@sub : 6@hole >> 10@sub 24@sX ∈ˢ prop
----------------------------------------
-
-
--}
-
 -- need bidirectional search!
 simpleGetType env (Abs n ty i) = forall n ty <$> simpleGetType (M.insert n ty env) i
 simpleGetType env (Spine "#imp_abs#" [_,Abs n ty i]) = imp_forall n ty <$> simpleGetType (M.insert n ty env) i
@@ -586,7 +557,7 @@ rightSearch sub m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fa
           getFixedType a | isChar a = Just $ anonymous $ var "char"
           getFixedType a = M.lookup a env
           
-          isBound m = M.member m constants || S.member m ctxt
+          isBound m = M.member m constants || M.member m foralls || M.member m exists
           
           isExists m = M.member m exists
           
@@ -603,7 +574,7 @@ a dependency.
 -}
           sameFamily (_, (_,Abs{})) = False
           sameFamily ("pack",_) = "#exists#" == nm
-          sameFamily (_,(_,s))  = ( not (isBound fam) || fam == nm) && 
+          sameFamily (_,(_,s))  = (fam == nm) && 
                                   all isBound (S.toList $ freeVariables s)
             where fam = getFamily s
           

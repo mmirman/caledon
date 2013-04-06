@@ -279,13 +279,6 @@ consts2 = [ ("#ascribe#", forall "a" atom $ (var "a") ~> (var "a"))
                    $ forall "tau" (var "tp") 
                    $ forall "e" (Spine "iface" [var "tau"]) 
                    $ exists "z" (var "tp") (Spine "iface" [var "z"]))
-          , ("open", forall "a" atom 
-                   $ forall "f" (var "a" ~> atom) 
-                   $ forall "tau" kind
-                   $ exists "z" (var "a") (Spine "f" [var "z"])
-                   ~> (forall "z" (var "a") 
-                       $ Spine "f" [var "z"] ~> var "tau")
-                   ~> var "tau")
           , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))            
           , ("#hole#" , imp_forall "a" kind (var "a"))
           ]
@@ -294,7 +287,7 @@ consts = consts0 ++ consts1 ++ consts2
 
 anonymous ty = ((False,10000),ty)
 anonymousINF ty = ((False,10000),ty)
-anonymous0 ty = ((True,-10),ty)
+anonymous0 ty = ((False,-10),ty)
 anonymous1 ty = ((False,-8),ty)
 
 envSet = S.fromList $ map fst consts
