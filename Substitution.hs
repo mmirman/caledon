@@ -42,7 +42,7 @@ getNew = do
   return $ show n
   
 getNewWith :: (Functor f, MonadState c f, ValueTracker c) => String -> f String
-getNewWith s = {- (++s) <$> -} getNew
+getNewWith s = (++s) <$> getNew
 
                                
 ---------------------
@@ -58,9 +58,11 @@ m1 *** m2 = M.union m2 $ subst m2 <$> m1
 (!) = flip M.lookup
 
 
+
+
 findTyconInPrefix nm = fip []
-  where fip l (Spine "#tycon#" [Spine nm' [v]]:r) | nm == nm' = Just (v, reverse l++r)
-        fip l (a@(Spine "#tycon#" [Spine _ [_]]):r) = fip (a:l) r
+  where fip l (Spine t [Spine nm' [v]]:r) | isTycon t && nm == nm' = Just (v, reverse l++r)
+        fip l (a@(Spine t [Spine _ [_]]):r) | isTycon t = fip (a:l) r
         fip _ _ = Nothing
 
 apply :: Spine -> Spine -> Spine
@@ -110,7 +112,7 @@ rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
 rebuildSpine (Spine "#imp_abs#" [_, Abs nm ty rst]) apps = case findTyconInPrefix nm apps of 
   Just (v, apps) -> rebuildSpine (Abs nm ty rst) (v:apps)
-  Nothing -> seq sp $ if ty == atom && S.notMember nm (freeVariables rs) then rs else irs 
+  Nothing -> seq sp $ if (ty == atom || ty == tipe || ty == kind) && S.notMember nm (freeVariables rs) then rs else irs 
                       -- proof irrelevance hack
                       -- we know we can prove that type "prop" is inhabited
                       -- irs - the proof doesn't matter
@@ -153,7 +155,6 @@ instance Subst Spine where
           rst' = etaReduce rst
   etaReduce (Spine h l) = Spine h (etaReduce l)          
   
-  
   substFree s f sp@(Spine "#imp_forall#" [_, Abs nm tp rst]) =
        imp_forall nm (substFree s f tp) $ substFree (M.delete nm s) (S.insert nm f) rst            
 
@@ -161,7 +162,7 @@ instance Subst Spine where
       imp_abs nm (substFree s f tp) $ substFree (M.delete nm s) (S.insert nm f) rst 
   substFree s f (Abs nm tp rst) = Abs nm' (substFree s f tp) $ substFree s' f' rst
     where (nm',s',f') = newName nm s f
-  substFree s f (Spine "#tycon#" [Spine c [v]]) = Spine "#tycon#" [Spine c [substFree s f v]]
+  substFree s f (Spine t [Spine c [v]]) | isTycon t = Spine t [Spine c [substFree s f v]]
   substFree s f sp@(Spine nm apps) = let apps' = substFree s f <$> apps  in
     case s ! nm of
       Just new -> case S.null $ S.intersection f (freeWithout new apps') of
@@ -177,12 +178,13 @@ instance Alpha Spine where
   alphaConvert s m (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a ty $ alphaConvert (S.insert a s) (M.delete a m) r
   alphaConvert s m (Abs nm ty r) = Abs nm' (alphaConvert s m ty) $ alphaConvert (S.insert nm' s) (M.insert nm nm' m) r
     where nm' = newNameFor nm s
-  alphaConvert s m (Spine "#tycon#" [Spine c [v]]) = tycon c $ alphaConvert s m v          
+  alphaConvert s m (Spine t [Spine c [v]]) | isTycon t = Spine t [Spine c [alphaConvert s m v]]
   alphaConvert s m (Spine a l) = Spine (fromMaybe a (m ! a)) $ alphaConvert s m l
   
   rebuildFromMem s (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a (rebuildFromMem s ty) $ rebuildFromMem (M.delete a s) r
   rebuildFromMem s (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a (rebuildFromMem s ty) $ rebuildFromMem (M.delete a s) r
   rebuildFromMem s (Abs nm ty r) = Abs (fromMaybe nm $ M.lookup nm s) (rebuildFromMem s ty) $ rebuildFromMem s r
+  rebuildFromMem s (Spine t [Spine c [v]]) | isTycon t = Spine t [Spine c [rebuildFromMem s v]]
   rebuildFromMem s (Spine a l) = Spine a' $ rebuildFromMem s l
     where a' = fromMaybe a $ M.lookup a s
                                  

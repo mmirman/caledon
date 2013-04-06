@@ -103,9 +103,25 @@ data Constraint = SCons [SCons]
                 deriving (Eq)
 
 
+instance FV SCons where
+  freeVariables t = case t of
+    t1 :@: t2 -> S.union (freeVariables t1) (freeVariables t2) 
+    t1 :=: t2 -> S.union (freeVariables t1) (freeVariables t2) 
+    
+instance FV Constraint where
+  freeVariables t = case t of
+    SCons l -> foldr (S.union . freeVariables) mempty l
+    Bind _ n t l -> S.union (freeVariables t) (S.delete n $ freeVariables l)
+    t1 :&: t2 -> S.union (freeVariables t1) (freeVariables t2)     
+        
+    
 -------------------------
 ---  Pretty Printing  ---
 -------------------------
+isTycon "#tycon#" = True
+isTycon "#tyconM#" = True
+isTycon _ = False
+
 showWithParens t = if (case t of
                           Abs{} -> True
                           Spine "#infer#" _ -> True
@@ -114,7 +130,7 @@ showWithParens t = if (case t of
                           Spine "#exists#" _ -> True
                           Spine "#imp_forall#" _ -> True
                           Spine "#ascribe#" _ -> True
-                          Spine "#tycon#" _ -> False
+                          Spine t _ | isTycon t -> False
                           Spine _ _ -> False
                       ) then "("++show t++")" else show t 
 
@@ -131,6 +147,7 @@ instance Show Spine where
   show (Spine "#forall#" [_,Abs nm t t']) = "["++nm++" : "++show t++"] "++show t'  
   show (Spine "#imp_forall#" [_,Abs nm t t']) = "{"++nm++" : "++show t++"} "++show t'  
   show (Spine "#tycon#" [Spine nm [t]]) = "{"++nm++" = "++show t++"}"
+  show (Spine "#tyconM#" [Spine nm [t]]) = "{? "++nm++" = "++show t++"}"
   show (Spine "#exists#" [_,Abs nm t t']) = "∃ "++nm++" : "++show t++". "++show t' 
   show (Spine "#imp_abs#" [_,Abs nm ty t]) = "?λ "++nm++" : "++showWithParens ty++" . "++show t
   show (Spine nm l@[_ , Abs _ _ _]) | isOperator nm = "("++nm++") "++show (Spine "" l)
@@ -138,7 +155,7 @@ instance Show Spine where
   show (Spine h l) = h++concatMap showWithParens l
      where showWithParens t = " "++if case t of
                           Abs{} -> True
-                          Spine "#tycon#" _ -> False
+                          Spine t _ | isTycon t -> False
                           Spine _ lst -> not $ null lst
                       then "("++show t++")" else show t 
   show (Abs nm ty t) = "λ "++nm++" : "++showWithParens ty++" . "++show t
@@ -203,10 +220,11 @@ instance (FV a, F.Foldable f) => FV (f a) where
 instance FV Spine where
   freeVariables t = case t of
     Abs nm t p -> (S.delete nm $ freeVariables p) `mappend` freeVariables t
-    Spine "#tycon#" [Spine nm [v]] -> freeVariables v
+    Spine t [Spine nm [v]] | isTycon t -> freeVariables v
     Spine "#dontcheck#" [v] -> freeVariables v
     Spine ['\'',_,'\''] [] -> mempty
     Spine head others -> mappend (S.singleton head) $ mconcat $ map freeVariables others
+
 
 instance FV FlatPred where
   freeVariables p = freeVariables (p^.predType) `S.union` freeVariables (p^.predKind)
@@ -241,37 +259,42 @@ infer x tyA v = Spine ("#infer#") [tyA, Abs x tyA v]
 imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
 imp_abs x tyA v = Spine ("#imp_abs#") [tyA, Abs x tyA v]
 tycon nm val = Spine "#tycon#" [Spine nm [val]]
+tyconM nm val = Spine "#tyconM#" [Spine nm [val]]
 
-consts = [ (atomName , tipe)
-         , (tipeName , kind)
-         , (kindName , kind)
-         -- atom : kind
-           
-         , ("#ascribe#", forall "a" atom $ (var "a") ~> (var "a"))
+
+consts0 = [ (atomName , tipe)
+          , (tipeName , kind)
+          ]
+          
+consts1 = [ ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
+          , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
+          , ("#exists#", forall "a" atom $ (var "a" ~> atom) ~> atom)
+          , (kindName , kind)
+          ]
          
-         , ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
-           
-         , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
-           
-         , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))
-           
-         , ("#exists#", forall "a" atom $ (var "a" ~> atom) ~> atom)
-         , ("pack", forall "tp" atom 
-                  $ forall "iface" (var "tp" ~> atom) 
-                  $ forall "tau" (var "tp") 
-                  $ forall "e" (Spine "iface" [var "tau"]) 
-                  $ exists "z" (var "tp") (Spine "iface" [var "z"]))
-         , ("open", forall "a" atom 
-                  $ forall "f" (var "a" ~> atom) 
-                  $ forall "tau" kind
-                  $ exists "z" (var "a") (Spine "f" [var "z"])
-                 ~> (forall "z" (var "a") 
-                     $ Spine "f" [var "z"] ~> var "tau")
-                 ~> var "tau")
-         ]
+consts2 = [ ("#hole#" , imp_forall "a" kind (var "a"))
+          , ("#ascribe#", forall "a" atom $ (var "a") ~> (var "a"))
+          , ("pack", forall "tp" atom 
+                   $ forall "iface" (var "tp" ~> atom) 
+                   $ forall "tau" (var "tp") 
+                   $ forall "e" (Spine "iface" [var "tau"]) 
+                   $ exists "z" (var "tp") (Spine "iface" [var "z"]))
+          , ("open", forall "a" atom 
+                   $ forall "f" (var "a" ~> atom) 
+                   $ forall "tau" kind
+                   $ exists "z" (var "a") (Spine "f" [var "z"])
+                   ~> (forall "z" (var "a") 
+                       $ Spine "f" [var "z"] ~> var "tau")
+                   ~> var "tau")
+          , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))
+          ]
 
+consts = consts0 ++ consts1 ++ consts2
 
-anonymous ty = ((False,0),ty)
+anonymous ty = ((False,10000),ty)
+anonymousINF ty = ((False,10000),ty)
+anonymous0 ty = ((False,-10),ty)
+anonymous1 ty = ((False,-8),ty)
 
 envSet = S.fromList $ map fst consts
 
@@ -281,7 +304,9 @@ toNCCstring s = foldr cons nil $ map toNCCchar s
         nil = Spine "nil" [ tycon "A" char]
         cons a l = Spine "cons" [tycon "A" char, a,l]
 
-envConsts = anonymous <$> M.fromList consts
+envConsts = M.union (anonymous0 <$> M.fromList consts0) 
+            $ M.union (anonymous1 <$> M.fromList consts1) 
+                      (anonymousINF <$> M.fromList consts2)
 
 isChar  ['\'',_,'\''] = True
 isChar _ = False
