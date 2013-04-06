@@ -495,7 +495,8 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
       foralls <- getForalls
       exists <- getExists
       let env = M.union foralls constants
-      
+          
+          isBound a = M.member a exists || M.member a env
           isFixed a = isChar a || M.member a env
       
           getFixedType a | isChar a = Just $ anonymous $ var "char"
@@ -509,7 +510,8 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
 
           sameFamily (_, (_,Abs{})) = False
           sameFamily ("pack",_) = "#exists#" == nm
-          sameFamily (_,(_,s)) = getFamily s == nm
+          sameFamily (_,(_,s)) = ( getFamily s == nm ) -- && 
+                                 -- all isBound (S.toList $ freeVariables s)
           
       targets <- case mfam of
         Just (nm,t) -> return $ [(nm,t)]

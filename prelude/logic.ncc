@@ -7,10 +7,6 @@ defn any : (A -> prop) -> prop
 defn openAny : [A][F : A -> prop] any F -> [V : A] F V -> prop
    | openAnyDef = openAny A F (is V F FV) V FV
 
-defn sopen : {A : prop}{F : A -> prop} [V : A] {FV : F V} (exists v : A . F v) -> prop 
-  as ?\A : prop . ?\ F : A -> prop . \vt : A . ?\ FV : F vt . \an : (exists v : A . F v) . open A F an vt FV
-
-
 fixity lambda free
 defn free : [A : prop] (A -> prop) -> prop
   as \a : prop . any { A = a }

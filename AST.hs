@@ -261,13 +261,6 @@ consts = [ (atomName , tipe)
                   $ forall "tau" (var "tp") 
                   $ forall "e" (Spine "iface" [var "tau"]) 
                   $ exists "z" (var "tp") (Spine "iface" [var "z"]))
-         , ("open", forall "a" atom 
-                  $ forall "f" (var "a" ~> atom) 
-                  $ forall "tau" kind
-                  $ exists "z" (var "a") (Spine "f" [var "z"])
-                 ~> (forall "z" (var "a") 
-                     $ Spine "f" [var "z"] ~> var "tau")
-                 ~> var "tau")
          ]
 
 
