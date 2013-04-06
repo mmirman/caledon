@@ -216,10 +216,10 @@ instance Subst FlatPred where
 
 instance Subst SCons where
   substFree s f c = case c of
-    s1 :@: s2 -> subq s f (:@:) s1 s2
+    In b s1 s2 -> subq s f (In b) s1 s2
     s1 :=: s2 -> subq s f (:=:) s1 s2
   etaReduce c = case c of               
-    s1 :@: s2 -> etaReduce s1 :@: etaReduce s2 
+    In b s1 s2 -> In b (etaReduce s1) (etaReduce s2)
     s1 :=: s2 -> etaReduce s1 :=: etaReduce s2 
     
 instance Subst Constraint where
@@ -287,11 +287,11 @@ instance RegenAbsVars Spine where
 instance RegenAbsVars SCons where
   regenAbsVars cons = case cons of
     a :=: b -> regen (:=:) a b
-    a :@: b -> regen (:@:) a b
+    In s a b -> regen (In s) a b
     
   regenWithMem cons = case cons of
     a :=: b -> regenM (:=:) a b
-    a :@: b -> regenM (:@:) a b    
+    In s a b -> regenM (In s) a b    
       
 instance RegenAbsVars Constraint where  
   regenAbsVars cons = case cons of

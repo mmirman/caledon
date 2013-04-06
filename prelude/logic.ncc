@@ -4,7 +4,7 @@
 defn any : (A -> prop) -> prop
    | is = [V : A][F : A -> prop] F V -> any F
 
-defn openAny : [A][F : A -> prop] any F -> [V : A] F V -> prop
+defn openAny : [A : prop][F : A -> prop] any F -> [V : A] F V -> prop
    | openAnyDef = openAny A F (is V F FV) V FV
 
 defn sopen : {A : prop}{F : A -> prop} [V : A] {FV : F V} (exists v : A . F v) -> prop 

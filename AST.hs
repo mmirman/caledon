@@ -86,13 +86,12 @@ predSound = predData . dataSound
 data Quant = Forall | Exists deriving (Eq) 
 
 infix 2 :=:  
-infix 2 :@:  
 infixr 1 :&:
 
 -- we can make this data structure mostly strict since the only time we don't 
 -- traverse it is when we fail, and in order to fail, we always have to traverse
 -- the lhs!
-data SCons = !Term :@: !Type
+data SCons = In !Bool !Term !Type 
            | !Spine :=: !Spine
            deriving (Eq)
 data Constraint = SCons [SCons]
@@ -105,7 +104,7 @@ data Constraint = SCons [SCons]
 
 instance FV SCons where
   freeVariables t = case t of
-    t1 :@: t2 -> S.union (freeVariables t1) (freeVariables t2) 
+    In _ t1 t2 -> S.union (freeVariables t1) (freeVariables t2) 
     t1 :=: t2 -> S.union (freeVariables t1) (freeVariables t2) 
     
 instance FV Constraint where
@@ -180,7 +179,8 @@ instance Show Quant where
   
 instance Show SCons where
   show (a :=: b) = show a++" ≐ "++show b
-  show (a :@: b) = show a++" ∈ "++show b
+  show (In True a b) = show a++" ∈ˢ "++show b
+  show (In False a b) = show a++" ∈ "++show b
   
 instance Show Constraint where
   show (SCons []) = " ⊤ "
@@ -263,17 +263,17 @@ tyconM nm val = Spine "#tyconM#" [Spine nm [val]]
 
 
 consts0 = [ (atomName , tipe)
-          , (tipeName , kind)
           ]
           
 consts1 = [ ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
           , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
           , ("#exists#", forall "a" atom $ (var "a" ~> atom) ~> atom)
           , (kindName , kind)
+          , (tipeName , kind)
+
           ]
          
-consts2 = [ ("#hole#" , imp_forall "a" kind (var "a"))
-          , ("#ascribe#", forall "a" atom $ (var "a") ~> (var "a"))
+consts2 = [ ("#ascribe#", forall "a" atom $ (var "a") ~> (var "a"))
           , ("pack", forall "tp" atom 
                    $ forall "iface" (var "tp" ~> atom) 
                    $ forall "tau" (var "tp") 
@@ -286,14 +286,15 @@ consts2 = [ ("#hole#" , imp_forall "a" kind (var "a"))
                    ~> (forall "z" (var "a") 
                        $ Spine "f" [var "z"] ~> var "tau")
                    ~> var "tau")
-          , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))
+          , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))            
+          , ("#hole#" , imp_forall "a" kind (var "a"))
           ]
 
 consts = consts0 ++ consts1 ++ consts2
 
 anonymous ty = ((False,10000),ty)
 anonymousINF ty = ((False,10000),ty)
-anonymous0 ty = ((False,-10),ty)
+anonymous0 ty = ((True,-10),ty)
 anonymous1 ty = ((False,-8),ty)
 
 envSet = S.fromList $ map fst consts

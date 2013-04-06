@@ -236,6 +236,8 @@ getAllBindings = do
     Context _ _ Nothing -> return []
     _ -> getQuantBindingsInclusive $ getTail ctx
 
+getAnonSet :: Env (S.Set Name)
+getAnonSet = M.keysSet <$> ctxtMap <$> stateCtxt <$> get
     
 getForalls :: Env ContextMap
 getForalls = do
@@ -300,7 +302,6 @@ type TypeChecker = ContT Spine Env
 
 typeCheckToEnv :: TypeChecker Spine -> Env (Spine,Constraint)
 typeCheckToEnv m = listen $ runContT m return
-
 
 
 

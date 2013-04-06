@@ -51,6 +51,9 @@ throwTrace !i s = vtrace i s $ throwError s
 mtrace True = trace
 mtrace False = const id
 
+lastBreak l = case reverse l of
+  a:r -> (a,reverse r)
+  _ -> error "not enough elements"
 
 -----------------------------------------------
 ---  the higher order unification algorithm ---
@@ -74,19 +77,6 @@ unify cons =  do
   cons <- vtrace 5 ("CONSTRAINTS2: "++show cons) $ flatten cons
   let uniWhile :: Substitution -> [SCons] -> Env (Substitution, [SCons])
       uniWhile !sub c' = fail "" <|> do
-        exists <- getExists
-        
-        -- this little check is the unfortunate consequence of including everything in the environment without
-        -- any abandon for the purposes of search, in the case that the topological sort fails to notice
-        -- a dependency.  
-        bn <- getAllBoundNames
-        case S.isSubsetOf (freeVariables c') bn of
-          False -> throwTrace 0 $ "NOT YET READY FOR USE!"
-                   ++"\nNOT A SUBSET! \nCONSTRAINT: " ++ show c'
-                   ++ "\nCTXT: "++show bn 
-                   ++ "\nDIFF: "++show (S.difference (freeVariables c') bn)
-          True -> return ()
-
         c <- regenAbsVars c'     
         let uniWith !wth backup = searchIn c []
               where searchIn [] r = finish Nothing
@@ -106,6 +96,8 @@ unify cons =  do
         vtraceShow 2 3 "CONST" c 
           $ vtraceShow 3 3 "CTXT" (reverse ctxt)
           $ uniWith unifyOne 
+          $ uniWith unifySearchA
+          $ uniWith unifySearchAtomA
           $ uniWith unifySearch
           $ uniWith unifySearchAtom
           $ checkFinished c >> return (sub, c)
@@ -118,16 +110,24 @@ unify cons =  do
 checkFinished [] = return ()
 checkFinished cval = throwTrace 0 $ "ambiguous constraint: " ++show cval
 
-unifySearch :: SCons -> CONT_T b Env UnifyResult
-unifySearch (a :@: b) return | b /= atom = rightSearch a b $ newReturn return
-unifySearch _ return = return Nothing
+unifySearchA :: SCons -> CONT_T b Env UnifyResult
+unifySearchA (In True a b) return | b /= atom = rightSearch True a b $ newReturn return
+unifySearchA _ return = return Nothing
+
+unifySearchAtomA :: SCons -> CONT_T b Env UnifyResult
+unifySearchAtomA (In True a b) return = rightSearch True a b $ newReturn return
+unifySearchAtomA _ return = return Nothing
 
 newReturn return cons = return $ case cons of
   Nothing -> Nothing
   Just cons -> Just (mempty, cons, False)
 
+unifySearch :: SCons -> CONT_T b Env UnifyResult
+unifySearch (In sub a b) return | b /= atom = rightSearch sub a b $ newReturn return
+unifySearch _ return = return Nothing
+
 unifySearchAtom :: SCons -> CONT_T b Env UnifyResult
-unifySearchAtom (a :@: b) return = rightSearch a b $ newReturn return
+unifySearchAtom (In sub a b) return = rightSearch sub a b $ newReturn return
 unifySearchAtom _ return = return Nothing
 
 
@@ -283,7 +283,10 @@ unifyEq cons@(a :=: b) = case (a,b) of
               match al (Spine "#tyconM#" [Spine _ [_]]:bl) = match al bl 
               match (a:al) (b:bl) = ((a :=: b) :) <$> match al bl 
               match [] [] = return []
-              match _ _ = throwTrace 0 $ "CANT: different numbers of arguments: "++show cons
+              match _ _ = throwTrace 0 $ "CANT: different numbers of arguments: "++show cons 
+                                      ++ "\n a-arg : "++(show $ case bind of
+                                                                  Right ty -> ty
+                                                                  Left b -> elmType b)
 
           cons <- match yl yl'
           return $ Just (mempty, cons, False)
@@ -486,10 +489,47 @@ gvar_fixed _ _ _ = error "gvar-fixed is not made for this case"
 --- proof search ---  
 --------------------
 
+{-
+∃ 6@hole : 5@k . 
+∀ 10@sub : 6@hole . ( 10@sub ∈ˢ A → prop )
+
+∃ 6@hole : 5@k . 
+∀ 10@sub : 6@hole . 
+10@sub ∈ˢ A → prop
+--------------------
+∃ 6@hole : 5@k . 
+∀ 10@sub : 6@hole . 
+∀ 24@sX : A . 
+∃ z : prop . 
+z :=: 10@sub 24@sX  /\  z ∈ˢ prop
+
+----------------------------------------
+∃ 6@hole : 5@k . 
+∀ 10@sub : 6@hole . 
+∀ 24@sX : A . 
+10@sub 24@sX ∈ˢ prop
+---------------------------------------
+∃ 6@hole : 5@k . 
+∀ 10@sub : 6@hole . 
+∀ 24@sX : A . 
+10@sub : 6@hole >> 10@sub 24@sX ∈ˢ prop
+---------------------------------------
+
+
+-}
 
 -- need bidirectional search!
-rightSearch :: Term -> Type -> CONT_T b Env (Maybe [SCons])
-rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (show m++" ∈ "++show goal) <|>
+simpleGetType env (Abs n ty i) = forall n ty <$> simpleGetType (M.insert n ty env) i
+simpleGetType env (Spine "#imp_abs#" [_,Abs n ty i]) = imp_forall n ty <$> simpleGetType (M.insert n ty env) i
+simpleGetType env (Spine nm []) = env ! nm 
+simpleGetType env (Spine nm l) | (v,l') <- lastBreak l = 
+  case simpleGetType env (Spine nm l') of
+    Just (Spine "#forall#" [_, f]) -> Just $ rebuildSpine f [v]
+    Just (Spine "#imp_forall#" [ty, f]) -> Just $ rebuildSpine (Spine "#imp_abs#" [ty,f]) [v]
+    _ -> Nothing
+    
+rightSearch :: Bool -> Term -> Type -> CONT_T b Env (Maybe [SCons])
+rightSearch sub m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (show m++" ∈ "++show goal) <|>
   case goal of
     Spine "#forall#" [a, b] -> do
       y <- getNewWith "@sY"
@@ -497,7 +537,10 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
       let b' = b `apply` var x'
       modifyCtxt $ addToTail "-rsFf-" Forall x' a
       modifyCtxt $ addToTail "-rsFe-" Exists y b'
-      ret $ Just [ var y :=: m `apply` var x' , var y :@: b']
+
+      ret $ Just [ var y :=: m `apply` var x' 
+                 , In sub (var y) b'
+                 ]
 
     Spine "#imp_forall#" [_, Abs x a b] -> do
       y <- getNewWith "@isY"
@@ -505,8 +548,9 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
       let b' = subst (x |-> var x') b
       modifyCtxt $ addToTail "-rsIf-" Forall x' a        
       modifyCtxt $ addToTail "-rsIe-" Exists y b'
+      
       ret $ Just [ var y :=: m `apply` (tycon x $ var x')
-                 , var y :@: b'
+                 , In sub (var y) b'
                  ]
         
     Spine "putChar" [c@(Spine ['\'',l,'\''] [])] -> ret $ Just $ (m :=: Spine "putCharImp" [c]):seq action []
@@ -520,7 +564,7 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
           y <- getNewWith "@isY"
           let ls = l `apply` s
           modifyCtxt $ addToTail "-rl-" Exists y ls
-          ret $ Just [m :=: Spine "readLineImp" [l,s {- this is only safe because lists are lazy -}, var y], var y :@: Spine "run" [ls]]
+          ret $ Just [m :=: Spine "readLineImp" [l,s {- this is only safe because lists are lazy -}, var y], In sub (var y) $ Spine "run" [ls]]
     _ | goal == kind -> do
       case m of
         Abs{} -> throwError "not properly typed"
@@ -531,9 +575,10 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
                 depth = srch id (appendErr "" . ret)
     Spine nm l -> do
       constants <- getConstants
+
       foralls <- getForalls
       exists <- getExists
-      
+      ctxt <- getAnonSet      
       let env = M.union foralls constants
       
           isFixed a = isChar a || M.member a env
@@ -541,17 +586,25 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
           getFixedType a | isChar a = Just $ anonymous $ var "char"
           getFixedType a = M.lookup a env
           
-          isBound m = M.member m env || M.member m exists
+          isBound m = M.member m constants || S.member m ctxt
+          
+          isExists m = M.member m exists
           
       let mfam = case m of 
             Abs{} -> Nothing
             Spine nm _ -> case getFixedType nm of
               Just t -> Just (nm,t)
               Nothing -> Nothing
-
+{-
+the check "all isBound (S.toList $ freeVariables s)
+is the consequence of including everything in the environment without
+any abandon for the purposes of search, in the case that the topological sort fails to notice
+a dependency.  
+-}
           sameFamily (_, (_,Abs{})) = False
           sameFamily ("pack",_) = "#exists#" == nm
-          sameFamily (_,(_,s))  = {- not (isBound fam) || -} fam == nm
+          sameFamily (_,(_,s))  = ( not (isBound fam) || fam == nm) && 
+                                  all isBound (S.toList $ freeVariables s)
             where fam = getFamily s
           
       targets <- case mfam of
@@ -560,7 +613,7 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
           return $ filter sameFamily $ M.toList env
 
 
-      {- unfortunately we can no longer make the assumption that goals with no free variables 
+      {- unfortunately we can no longer make the assumption that searches with no free variables 
          are truly satisfying since the type of a search is no longer the same as the type of the variable, 
          ie. ∀ x : A . x ∈ B
 
@@ -573,20 +626,24 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
  
             2. do a local bidirectional type inference, 
                and check that the types of the resultant are syntactically equivalent.
-      -}
-      {- 
-      ignorable <- if all isFixed $ S.toList $ S.union (freeVariables m) (freeVariables goal) 
-        then typecheck m True
-        else return False 
-      -}
-      let ignorable = False    
+
+            3. the third and best option is to do both.  
+      -}      
+      let 
+                 
+          mTy = simpleGetType (snd <$> (M.union exists env)) m
+          isGoal = if mTy == Just goal then True else vtrace 0 ("MTY: "++show mTy++"\nGTY: "++show (Just goal)) False
+
+          ignorable = if all isFixed $ S.toList $ S.union (freeVariables m) (freeVariables goal)
+                      then not sub || isGoal
+                      else False
           
       if ignorable 
         then ret $ Just []
         else case targets of
           [] -> ret Nothing
           _  -> inter [] $ sortBy (\a b -> compare (getVal a) (getVal b)) targets
-            where ls (nm,target) = leftSearch (m,goal) (var nm, target)
+            where ls (nm,target) = leftSearch sub (m,goal) (var nm, target)
                   getVal = snd . fst . snd
                   
                   inter [] [] = throwError "no more options"
@@ -601,20 +658,20 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
                       
 a .-. s = foldr (\k v -> M.delete k v) a s 
 
-leftSearch (m,goal) (x,target) = vtrace 1 ("LS: " ++ show x++" ∈ " ++show target++" >> " ++show m ++" ∈ "++ show goal)
+leftSearch sub (m,goal) (x,target) = vtrace 1 ("LS: " ++ show x++" ∈ " ++show target++" >> " ++show m ++" ∈ "++ show goal)
                                $ leftCont x target
   where leftCont n target = case target of
           Spine "#forall#" [a, b] -> do
             x' <- getNewWith "@sla"
             modifyCtxt $ addToTail "-lsF-" Exists x' a
             cons <- leftCont (n `apply` var x') (b `apply` var x')
-            return $ cons++[var x' :@: a]
+            return $ cons++[In sub (var x') a]
 
           Spine "#imp_forall#" [_ , Abs x a b] -> do  
             x' <- getNewWith "@isla"
             modifyCtxt $ addToTail "-lsI-" Exists x' a
             cons <- leftCont (n `apply` tyconM x (var x')) (subst (x |-> var x') b)
-            return $ cons++[var x' :@: a]
+            return $ cons++[In sub (var x') a]
           Spine _ _ -> do
             return $ [goal :=: target, m :=: n]
           _ -> error $ "λ does not have type atom: " ++ show target
@@ -623,7 +680,7 @@ leftSearch (m,goal) (x,target) = vtrace 1 ("LS: " ++ show x++" ∈ " ++show targ
 search :: Type -> Env (Substitution, Term)
 search ty = do
   e <- getNewWith "@e"
-  sub <- unify $ (∃) e ty $ SCons [var e :@: ty]
+  sub <- unify $ (∃) e ty $ SCons [In False (var e) ty]
   return $ (sub, subst sub $ var e)
 
 -----------------------------
@@ -631,11 +688,11 @@ search ty = do
 -----------------------------
 
 (.=.) a b = lift $ tell $ SCons [a :=: b]
-(.@.) a b = lift $ tell $ SCons [a :@: b]
+(.@.) a b = lift $ tell $ SCons [In False a b]
 
 (.<.) a b = do
   s <- getNewWith "@sub"
-  lift $ tell $ (∀) s a $ SCons [ var s :@: b ]
+  lift $ tell $ (∀) s a $ SCons [In True (var s) b ]
   
 (.>.) = flip (.<.)
   
