@@ -280,7 +280,6 @@ consts2 = [ ("#ascribe#", forall "a" atom $ (var "a") ~> (var "a"))
                    $ forall "e" (Spine "iface" [var "tau"]) 
                    $ exists "z" (var "tp") (Spine "iface" [var "z"]))
           , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))            
-          , ("#hole#" , imp_forall "a" kind (var "a"))
           ]
 
 consts = consts0 ++ consts1 ++ consts2
