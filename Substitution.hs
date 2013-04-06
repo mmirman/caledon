@@ -118,8 +118,8 @@ rebuildSpine (Spine "#imp_abs#" [_, Abs nm ty rst]) apps = case findTyconInPrefi
                       -- irs - here, the proof might matter, but we don't know if we can prove the thing, 
                       -- so we need to try
      where nm' = newNameFor nm $ freeVariables apps
-           sp = subst (nm |-> var nm') rst
-           rs = rebuildSpine sp apps
+           sp  = subst (nm |-> var nm') rst
+           rs  = rebuildSpine sp apps
            irs = infer nm ty rs
 rebuildSpine (Spine c apps) apps' = Spine c $ apps ++ apps'
 rebuildSpine (Abs nm _ rst) (a:apps') = let sp = subst (nm |-> a) rst
@@ -159,6 +159,7 @@ instance Subst Spine where
 
   substFree s f sp@(Spine "#imp_abs#" [_, Abs nm tp rst]) =
       imp_abs nm (substFree s f tp) $ substFree (M.delete nm s) (S.insert nm f) rst 
+      
   substFree s f (Abs nm tp rst) = Abs nm' (substFree s f tp) $ substFree s' f' rst
     where (nm',s',f') = newName nm s f
   substFree s f (Spine "#tycon#" [Spine c [v]]) = Spine "#tycon#" [Spine c [substFree s f v]]

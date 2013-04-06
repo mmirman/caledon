@@ -28,11 +28,12 @@ checkAndRun verbose decs = do
     putStrLn "\nFILE: "
     forM_ decs $ \s -> putStrLn $ show s++"\n"
 
-  when verbose $ putStrLn "\nTYPE CHECKING: "
+  when verbose $ putStrLn "\nCOMPILING: "
   decs <- case runError $ typeCheckAll verbose decs of
     Left e -> error e
-    Right e -> do when verbose $ putStrLn "Type checking success!"
+    Right e -> do when verbose $ putStrLn "DONE: compilation success!\n"
                   return e
+                  
   let (defs,others)  = flip partition decs $ \x -> case x of
         Define {} -> True
         _ -> False
@@ -49,6 +50,7 @@ checkAndRun verbose decs = do
   when verbose $ do
     putStrLn "\nTARGETS: "
     forM_ targets $ \s -> putStrLn $ show s++"\n"
+
 
   let predicates' = sub predicates
       targets' = sub targets

@@ -600,14 +600,15 @@ checkType sp ty = case sp of
     addToEnv (∃) x' ty $ do
       var x' .@. ty
       return $ var x'
-      
+  
   Spine "#ascribe#" (t:v:l) -> do
     (v'',mem) <- regenWithMem v
-    t <- withKind $ checkType t
+    t   <- withKind $ checkType t
     t'' <- regenAbsVars t
-    v' <- checkType v'' t
-    r <- getNewWith "@r"
+    v'  <- checkType v'' t
+    r   <- getNewWith "@r"
     Spine _ l' <- addToEnv (∀) r t'' $ checkType (Spine r l) ty
+    
     return $ rebuildSpine (rebuildFromMem mem v') l'
     
   Spine "#dontcheck#" [v] -> do
@@ -615,7 +616,6 @@ checkType sp ty = case sp of
     
   Spine "#infer#" [_, Abs x tyA tyB ] -> do
     tyA <- withKind $ checkType tyA
-    
     x' <- getNewWith "@inf"
     addToEnv (∃) x' tyA $ do
       var x' .@. tyA
@@ -633,23 +633,28 @@ checkType sp ty = case sp of
 
   -- below are the only cases where bidirectional type checking is useful 
   Spine "#imp_abs#" [_, Abs x tyA sp] -> case ty of
-    Spine "#imp_forall#" [_, Abs x' tyA' tyF'] -> do
-      unless ("" == x' || x == x') $ 
-        lift $ throwTrace 0 $ "can not show: "++show sp ++ " : "++show ty 
-                           ++"since: "++x++ " ≠ "++x'
+    Spine "#imp_forall#" [_, Abs x' tyA' tyF'] | x == x' || "" == x' -> do
       tyA <- withKind $ checkType tyA
       tyA ≐ tyA'
       addToEnv (∀) (check "impabs1" x) tyA $ do
         imp_abs x tyA <$> checkType sp tyF'
-        
+    _ -> do
+      -- here this acts like "infers" since we can always initialize a ?\ like an infers!
+      tyA <- withKind $ checkType tyA
+      x' <- getNewWith "@inf"
+      addToEnv (∃) x' tyA $ do
+        var x' .@. tyA
+        checkType (subst (x |-> var x') sp) ty 
+{-
     _ -> do
       e <- getNewWith "@e"
       tyA <- withKind $ checkType tyA
       withKind $ \k -> addToEnv (∃) e (forall x tyA k) $ do
         imp_forall x tyA (Spine e [var x]) ≐ ty
-        sp <- addToEnv (∀) (check "impabs2" x) tyA $ checkType sp (Spine e [var x])
-        return $ imp_abs x tyA $ sp
-
+        sp <- addToEnv (∀) (check "impabs2" x) tyA $ 
+          checkType sp (Spine e [var x])
+        return $ imp_abs x tyA sp
+-}
   Abs x tyA sp -> case ty of
     Spine "#forall#" [_, Abs x' tyA' tyF'] -> do
       tyA <- withKind $ checkType tyA
@@ -716,13 +721,7 @@ checkFullType val ty = typeCheckToEnv $ checkType val ty
 {- 
 Employ the use order heuristic, where 
 variables are ordered by use on the same level in terms.
-
-S A F (F A) = {(F,{A,F}), (A,{})}  [A,F,S]
-S F A (F A) = {(F,{A,F}), (A,{F})} [F,A,S]
-S F (F A S) = {(F,{}), (A,{}), (S,{A,F})} [S,F,A]
-S A (F S A) = {(F,{}), (A,{})} 
 -}
-
 buildOrderGraph :: S.Set Name -- the list of variables to be generalized
                 -> S.Set Name -- the list of previously seen variables
                 -> Spine 
@@ -785,7 +784,7 @@ typeInfer env (seqi,nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union e
   let resV = rebuildFromMem mem  $ unsafeSubst sub $ val
       resT = rebuildFromMem mem' $ unsafeSubst sub $ ty
 
-  vtrace 0 ("RESULT: "++nm++" : "++show resV) $
+  vtrace 0 ("result: "++show resV) $
       return $ (resV,resT, M.insert nm (seqi,resV) env)
 
 unsafeSubst s (Spine nm apps) = let apps' = unsafeSubst s <$> apps in case s ! nm of 
@@ -799,6 +798,16 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 
 -- type FlatPred = [((Maybe Name,Bool,Integer,Bool),Name,Type,Kind)]
 
+
+typePipe verbose lt (b,nm,ty,kind) = do
+  (ty,kind,lt) <- mtrace verbose ("Inferring: " ++nm) $ 
+                  typeInfer lt (b,nm, ty,kind) -- type infer
+  (ty,kind,lt) <- mtrace verbose ("Elaborating: " ++nm) $ 
+                  typeInfer lt (b,nm, ty,kind) -- elaborate
+  (ty,kind,lt) <- mtrace verbose ("Checking: " ++nm) $ 
+                  typeInfer lt (b,nm, ty,kind) -- type check
+  return (ty,kind,lt)
+  
 typeCheckAxioms :: Bool -> [FlatPred] -> Choice (Substitution, Substitution)
 typeCheckAxioms verbose lst = do
   
@@ -824,15 +833,13 @@ typeCheckAxioms verbose lst = do
             kind = p^.predKind
             
         (ty,kind,lt) <- appendErr ("can not infer type for: "++nm++" : "++show ty) $ 
-                            mtrace verbose ("Checking: " ++nm) $ 
-                            vtrace 0 ("\tTY: " ++show ty ++"\n\t:: " ++show kind) $ 
-                            typeInfer lt ((b,i),nm, generateBinding ty,kind) -- constrain the breadth first search to be local!
+                            mtrace verbose "\nCompiling: type" $ vtrace 0 ("\t : " ++show ty ++"\n\t :: " ++show kind) $ 
+                            typePipe verbose lt ((b,i),nm, generateBinding ty,kind) -- constrain the breadth first search to be local!
                             
         val <- case val of
           Just val -> appendErr ("can not infer type for: \n"++nm++" : "++show ty ++"\nnm = "++show val ) $ 
-                      mtrace verbose ("Checking Value: "++nm) $ 
-                      vtrace 0 ("\tVAL: " ++show val ++"\n\t:: " ++show ty) $ 
-                      Just <$> typeInfer lt ((b,i),nm, val,ty)                    
+                      mtrace verbose "\nCompiling: value " $ vtrace 0 ("\t : " ++show val ++"\n\t:: " ++show ty) $ 
+                      Just <$> typePipe verbose lt ((b,i),nm, generateBinding val,ty)                    
           Nothing -> return Nothing            
                       
         -- do the family check after ascription removal and typechecking because it can involve computation!

@@ -5,14 +5,14 @@ defn linear-prop : (prop -> prop) -> prop
 defn linear : {A} (A -> prop) -> prop
    | linear-app2 = [M : _ -> _]
                    linear {A = A} (\a : A . M (N a))
-                <- linear {A = A} (\a : A . N a)
+                <- linear {A = A} N
 
    | linear-app1 = [A : prop][B : prop][N : B][M : A -> B -> prop ]
                    linear {A = A} (\a : A . (M a) N)
                 <- [b : B] linear {A = A} (\a : A . M a b)
 
 defn id : {Ai : prop} Ai -> Ai
-  as ?\Ai . \a : Ai . a
+  as ?\ Ai . \a : Ai . a
 
 fixity none 5 =:=
 defn =:= : {Aeq} Aeq -> Aeq -> prop
@@ -23,9 +23,5 @@ defn functor : [F : prop -> prop] {fmap : {A}{B} (A -> B) -> F A -> F B } prop
                  [FMAP : {A}{B} (A -> B) -> F A -> F B] 
                  [A : prop]
                  [M : FMAP {A = A} id =:= id -> prop ]
-                 linear {A = FMAP id =:= id } M ->
+                 linear M ->
 		   functor F {fmap = FMAP}
-
-
-
-
