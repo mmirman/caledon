@@ -12,9 +12,7 @@ defn formula : prop
    | *    = formula  -> formula -> formula
    | ^    = formula  -> formula -> formula
    | comp = (rat -> formula) -> formula -> formula
-   | ln  = formulat -> formula
-
-defn eq : formula -> formula -> prop
+   | ln  = formula -> formula
 
 -- defines a relationship between a function and its derivative
 defn deriv : (rat -> formula) -> (rat -> formula) -> prop
@@ -36,3 +34,19 @@ defn deriv : (rat -> formula) -> (rat -> formula) -> prop
                 <- deriv G G'
    | deriv-log  = deriv (\x . ln (var x) ) (\x . var x ^ var r-neg-one)
    | deriv-exp  = deriv (\x . A ^ var x )  (\x  . ln A * A ^ var x)
+
+defn eq : formula -> formula -> prop
+   | eq-sym = eq A A
+   | eq-refl = eq A B <- eq B A
+   | eq-sym-plus = eq (A + B) (B + A)
+   | eq-sym-times = eq (A * B) (B * A)
+   | eq-plus-times-trans = eq (A * (B + C)) (A * B + A * C)
+   | eq-plus-trans = eq (A + (B + C)) ((A + B) + C)
+   | eq-times-trans = eq (A * (B * C)) ((A * B) * C)
+   | eq-exp = eq (A ^ (B + C)) (A ^ B * A ^ C)
+   | eq-plus = eq (A + B) (A' + B') <- eq A A' <- eq B B'
+   | eq-prod = eq (A * B) (A' * B') <- eq A A' <- eq B B'
+   | eq-comp = eq (comp F A) (comp F' A') <- eq A A' <- [x] eq (F x) (F' x)
+   | eq-comp-trans = eq (comp ([x] comp G (H x)) F) (comp G (comp H F)).
+   | eq-sum-inst = eq (val A + val B) (val C) <- r-sum A B C
+   | eq-prod-inst = eq (val A * val B) (val C) <- r-prod A B C
