@@ -43,7 +43,6 @@ getNew = do
   
 getNewWith :: (Functor f, MonadState c f, ValueTracker c) => String -> f String
 getNewWith s = {- (++s) <$> -} getNew
-
                                
 ---------------------
 ---  substitution ---
@@ -66,21 +65,21 @@ findTyconInPrefix nm = fip []
 apply :: Spine -> Spine -> Spine
 apply !a !l = rebuildSpine a [l]
 
-
 newNameFor :: Name -> S.Set Name -> Name
+newNameFor "" fv = newNameFor "x" fv
 newNameFor nm fv = nm'
-  where nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/?") [0..]
+  where nm' = fromJust $ find free $ nm:map (\s -> nm++show s) [0..]
         free k = not $ S.member k fv
         
 newName :: Name -> Map Name Spine -> S.Set Name -> (Name, Map Name Spine, S.Set Name)
-newName "" so fo = ("",so, S.delete "" fo)
+newName "" so fo = newName "x" so fo -- ("",so, S.delete "" fo)
 newName nm so fo' = (nm',s',f')
   where fo = S.delete nm fo'
         s = M.delete nm so  
         -- could reduce the size of the free variable set here, but for efficiency it is not really necessary
         -- for beautification of output it is
         (s',f') = if nm == nm' then (s,fo) else (M.insert nm (var nm') s , fo)
-        nm' = fromJust $ find free $ nm:map (\s -> show s ++ "/") [0..]
+        nm' = fromJust $ find free $ nm:map (\s -> nm++show s ) [0..]
         fv = mappend (M.keysSet s) (freeVariables s)
         free k = not $ S.member k fv
 
@@ -99,7 +98,6 @@ subst s a = substFree s mempty a
 
 class Subst a where
   substFree :: Substitution -> S.Set Name -> a -> a
-  etaReduce :: a -> a
   
 class Alpha a where
   alphaConvert :: S.Set Name -> Map Name Name -> a -> a
@@ -127,7 +125,6 @@ rebuildSpine (Abs nm _ rst) (a:apps') = let sp = subst (nm |-> a) rst
                                            
 instance Subst a => Subst [a] where
   substFree s f t = substFree s f <$> t
-  etaReduce a = etaReduce <$> a
 
 instance Alpha a => Alpha [a] where  
   alphaConvert s m l = alphaConvert s m <$> l
@@ -135,23 +132,8 @@ instance Alpha a => Alpha [a] where
   
 instance (Subst a, Subst b) => Subst (a,b) where
   substFree s f ~(a,b) = (substFree s f a , substFree s f b)
-  etaReduce (a,b) = (etaReduce a , etaReduce b)
   
 instance Subst Spine where
-  
-  etaReduce (Abs nm ty i) = case etaReduce i of
-    -- TODO: this could be WAY optimized
-    i@(Spine h l') -> let l = etaReduce l' in case reverse l of
-      last:r | last == var nm && not (S.member nm $ freeVariables $ Spine h $ reverse r) -> Spine h $ reverse r
-      _ -> Abs nm ty (Spine h l)
-    i -> Abs nm ty i  
-  etaReduce (Spine "#forall#" [t, Abs nm _ rst]) = forall nm t' rst'
-    where t' = etaReduce t
-          rst' = etaReduce rst  
-  etaReduce (Spine "#imp_forall#" [t, Abs nm _ rst]) = imp_forall nm t' rst'
-    where t' = etaReduce t
-          rst' = etaReduce rst
-  etaReduce (Spine h l) = Spine h (etaReduce l)          
   
   
   substFree s f sp@(Spine "#imp_forall#" [_, Abs nm tp rst]) =
@@ -192,22 +174,14 @@ instance Subst Decl where
   substFree sub f (Predicate s nm ty cons) = Predicate s nm (substFree sub f ty) ((\(b,(nm,t)) -> (b,(nm,substFree sub f t))) <$> cons)
   substFree sub f (Query nm ty) = Query nm (substFree sub f ty)
   substFree sub f (Define s nm val ty) = Define s nm (substFree sub f val) (substFree sub f ty)
-  
-  etaReduce (Predicate s nm ty cons) = Predicate s nm (etaReduce ty) ((\(b,(nm,t)) -> (b,(nm,etaReduce t))) <$> cons)
-  etaReduce (Query nm ty) = Query nm (etaReduce ty)
-  etaReduce (Define s nm val ty) = Define s nm (etaReduce val) (etaReduce ty)  
 
 instance Subst a => Subst (Maybe a) where
   substFree sub f p = substFree sub f <$> p
-  etaReduce p = etaReduce <$> p
   
 instance Subst FlatPred where
   substFree sub f p = p & predType %~ substFree sub f
                         & predKind %~ substFree sub f
                         & predValue %~ substFree sub f
-  etaReduce p = p & predType %~ etaReduce
-                  & predKind %~ etaReduce
-                  & predValue %~ etaReduce
   
 -------------------------
 ---  Constraint types ---
@@ -217,9 +191,6 @@ instance Subst SCons where
   substFree s f c = case c of
     s1 :@: s2 -> subq s f (:@:) s1 s2
     s1 :=: s2 -> subq s f (:=:) s1 s2
-  etaReduce c = case c of               
-    s1 :@: s2 -> etaReduce s1 :@: etaReduce s2 
-    s1 :=: s2 -> etaReduce s1 :=: etaReduce s2 
     
 instance Subst Constraint where
   substFree s f c = case c of
@@ -227,10 +198,6 @@ instance Subst Constraint where
     s1 :&: s2 -> subq s f (:&:) s1 s2
     Bind q nm t c -> Bind q nm' (substFree s f t) $ substFree s' f' c
       where (nm',s',f') = newName nm s f
-  etaReduce c = case c of
-    SCons l -> SCons $ etaReduce l
-    s1 :&: s2 -> etaReduce s1 :&: etaReduce s2 
-    Bind q nm t c -> Bind q nm (etaReduce t) (etaReduce c)
 
 subq s f e c1 c2 = e (substFree s f c1) (substFree s f c2)
 
@@ -318,8 +285,6 @@ instance RegenAbsVars Constraint where
 
 getFamily v = fromMaybe (error ("values don't have families: "++show v)) $ getFamilyM v
 
-
-
 getFamilyM (Spine "#infer#" [_, Abs _ _ lm]) = getFamilyM lm
 getFamilyM (Spine "#ascribe#"  (_:v:l)) = getFamilyM (rebuildSpine v l)
 getFamilyM (Spine "#dontcheck#"  [v]) = getFamilyM v
@@ -333,3 +298,18 @@ getFamilyM v = Nothing
 
 removeTyconPrefix (Spine "#tycon#" _:l) = removeTyconPrefix l
 removeTyconPrefix l = l
+
+
+eta_expand :: Spine -> Name -> Spine
+eta_expand (Spine "#imp_forall#" [_, Abs a t1 t2]) n | n /= a = imp_abs a t1 $ Spine n [tycon a $ eta_expand t1 a]
+eta_expand (Spine "#forall#" [_, Abs a t1 t2]) n = Abs a' t1 $ Spine n [eta_expand t1 a']
+  where a' = newNameFor a $ S.singleton n
+eta_expand _ n = var n
+
+
+eta_expandAll :: M.Map Name Type -> Spine -> Spine
+eta_expandAll mp (Abs a ty l) = let ty' = eta_expandAll mp ty 
+                                in Abs a ty' $ eta_expandAll (M.insert a ty' mp) l
+eta_expandAll mp (Spine s l) = case mp ! s of
+  Nothing -> Spine s (eta_expandAll mp <$> l)
+  Just t  -> rebuildSpine (eta_expand t s) (eta_expandAll mp <$> l)

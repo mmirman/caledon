@@ -769,8 +769,8 @@ typeInfer env (seqi,nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union e
   sub <- appendErr ("which became: "++show val ++ "\n\t :  " ++ show ty) $ 
          unify constraint
   
-  let resV = rebuildFromMem mem  $ unsafeSubst sub $ val
-      resT = rebuildFromMem mem' $ unsafeSubst sub $ ty
+  let resV = rebuildFromMem mem  $ unsafeSubst sub $ eta_expandAll (snd <$> env) val
+      resT = rebuildFromMem mem' $ unsafeSubst sub $ eta_expandAll (snd <$> env) ty
 
   vtrace 0 ("result: "++show resV) $
       return $ (resV,resT, M.insert nm (seqi,resV) env)
@@ -783,9 +783,6 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 ----------------------------
 --- the public interface ---
 ----------------------------
-
--- type FlatPred = [((Maybe Name,Bool,Integer,Bool),Name,Type,Kind)]
-
 
 typePipe verbose lt (b,nm,ty,kind) = do
   (ty,kind,lt) <- mtrace verbose ("Inferring: " ++nm) $ 
