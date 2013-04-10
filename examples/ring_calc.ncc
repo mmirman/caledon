@@ -1,0 +1,57 @@
+defn ex-field : [ F : prop ] [ EQ : F -> F -> prop ]
+              { add mult : F -> F -> F }
+              { exp neg  inv : F -> F }
+              { zero one : F}
+              prop
+   | isExField = [EQ : F -> F -> prop]
+                 [ADD MULT : F -> F -> F] 
+                 [EXP NEG INV : F -> F]
+                 [ZERO ONE : F]
+                 ex-field F EQ
+                 { add  = ADD  } 
+		 { mult = MULT }
+		 { exp  = EXP  }
+                 { neg  = NEG  }
+                 { inv  = INV  }
+                 { zero = ZERO }
+                 { one  = ONE  }
+               <- ( [a b] EQ (ADD a b) (ADD b a) )
+               <- ([A B C] EQ (ADD A (ADD B C)) (ADD (ADD A B) C))
+               <- ([A] EQ (ADD A ZERO) A)
+               <- ([A] EQ (ADD A (NEG A)) ZERO)
+
+               <- ([A B] EQ (MULT A B) (MULT B A))
+               <- ([A B C] EQ (MULT A (MULT B C)) (MULT (MULT A B) C))
+               <- ([A] EQ (MULT A ONE) A)
+               <- ([A] EQ (MULT A (INV A)) ONE)
+
+               <- ([a b c] EQ (MULT a (ADD b c)) (ADD (MULT a b) (MULT a c))) 
+
+	       <- EQ (EXP ZERO) ONE
+               <- ([a b] EQ (EXP (ADD a b)) (MULT (EXP a) (EXP b)))
+
+fixity none 1 +
+fixity none 2 *
+
+defn + : { ef : ex-field F EQ
+                 { add  = ADD  } 
+		 { mult = MULT }
+		 { exp  = EXP  }
+                 { neg  = NEG  }
+                 { inv  = INV  }
+                 { zero = ZERO }
+                 { one  = ONE  }}
+	 F -> F -> F
+  as ?\ F EQ ADD MULT EXP NEG INV ZERO ONE ef . ADD
+
+defn * : { ef : ex-field F EQ
+                 { add  = ADD  } 
+		 { mult = MULT }
+		 { exp  = EXP  }
+                 { neg  = NEG  }
+                 { inv  = INV  }
+                 { zero = ZERO }
+                 { one  = ONE  }}
+	 F -> F -> F
+  as ?\ F EQ ADD MULT EXP NEG INV ZERO ONE ef . MULT
+

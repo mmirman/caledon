@@ -509,25 +509,13 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
               Nothing -> Nothing
 
           sameFamily (_, (_,Abs{})) = False
-          sameFamily ("pack",_) = "#exists#" == nm
-          sameFamily (_,(_,s)) = ( getFamily s == nm ) -- && 
-                                 -- all isBound (S.toList $ freeVariables s)
+          sameFamily ("pack",_) = "exists" == nm -- if we are searching for exists, try to pack!
+          sameFamily (_,(_,s)) = ( getFamily s == nm ) && 
+                                 all isBound (S.toList $ freeVariables s)
           
       targets <- case mfam of
         Just (nm,t) -> return $ [(nm,t)]
         Nothing -> do
-          {-
-          let excludes = S.toList $ S.intersection (M.keysSet exists) $ freeVariables m
-          searchMaps <- mapM getVariablesBeforeExists excludes
-          
-          let searchMap :: ContextMap
-              searchMap = M.union env $ case searchMaps of
-                [] -> mempty
-                a:l -> foldr (M.intersection) a l
-              
-          return $ filter sameFamily $ M.toList searchMap
-          -}
-          
           return $ filter sameFamily $ M.toList constants ++ M.toList foralls
           
       if all isFixed $ S.toList $ S.union (freeVariables m) (freeVariables goal)

@@ -1,3 +1,29 @@
+-------------
+-- exists  --
+-------------
+fixity lambda exists
+defn exists : [N : prop] ( N -> prop) -> prop
+  as \ N : prop      . 
+     \ P : N -> prop .
+     [ C : prop ] ([a : N] P a -> C) -> C
+
+defn pack : {N : prop }[F : N -> prop][V] F V -> ( exists a : N . F a )
+  as ?\ N  : prop             .
+      \ F  : N -> prop        . 
+      \ V  : N                .
+      \ FV : F V              .
+      \ C  : prop             .
+      \ FA : [a : N] F a -> C .
+        FA V FV
+
+defn open : {N}{F : N -> prop}{A : prop} ( exists a : N . F a ) -> ([a : N] F a -> A) -> A
+  as ?\ N  : prop               .
+     ?\ F  : N -> prop          .
+     ?\ A  : prop               .
+      \ EX : exists a : N . F a .
+      \ Fo : [a : N] F a -> A   .
+        EX A Fo
+
 ---------------
 -- searches ---
 ---------------

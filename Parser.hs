@@ -230,7 +230,6 @@ pTipe = do
       
       table = [ [ altPostfix ["λ", "\\"] ["lambda"] Abs
                 , altPostfix ["?λ", "?\\"] ["?lambda"] imp_abs
-                , altPostfix ["∃"] ["exists"] exists
                 , regPostfix angles ["??"] ["infer"] infer
                 , regPostfix brackets ["∀"] ["forall"] forall
                 , regPostfix braces ["?∀"] ["?forall"] imp_forall
@@ -312,12 +311,12 @@ reservedOperators = [ "->", "=>", "<=", "⇐", "⇒", "→", "<-", "←",
                      "λ","?λ", 
                      "∀", "?∀",
                      "?", 
-                     "??", "∃", "=", 
+                     "??", "=", 
                      ":", ";", "|"]
 identRegOps = "_'-/"              
                     
 reservedNames = ["defn", "as", "query", "unsound"
-                , "forall", "exists", "?forall", "lambda", "?lambda"
+                , "forall", "?forall", "lambda", "?lambda"
                 , "_" , "infer", "fixity"]
 
 mydef :: P.GenLanguageDef String ParseState Identity

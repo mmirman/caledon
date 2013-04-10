@@ -1,21 +1,20 @@
 #include "../prelude/prelude.ncc"
 
 defn runBoth : bool -> prop
-  >| run0 = [A] runBoth A 
-                <- putStr "ttt "
-                <- A =:= true
+  >| run0 = runBoth A 
+            <- putStr "ttt "
+            <- A =:= true
 
-  | run1 = [A] runBoth A
-                <- putStr "vvvv"
-                <- A =:= true
+  | run1 = runBoth A
+           <- putStr "vvvv"
+           <- A =:= true
 
-  | run2 = [A] runBoth A
-                <- putStr "qqqq"
-                <- A =:= true
+  | run2 = runBoth A
+            <- putStr "qqqq"
+            <- A =:= true
 
- >| run3 = [A] runBoth A
-                <- putStr " jjj\n"
-                <- A =:= false
+ >| run3 = runBoth A
+            <- putStr " jjj\n"
+            <- A =:= false
   
 query main = runBoth false
-

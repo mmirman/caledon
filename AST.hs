@@ -233,9 +233,6 @@ kind = var kindName  -- can be either a type or an atom
 ascribe a t = Spine ("#ascribe#") [t, a]
 dontcheck t = Spine ("#dontcheck#") [t]
 forall x tyA v = Spine ("#forall#") [tyA, Abs x tyA v]
-exists x tyA v = Spine ("#exists#") [tyA, Abs x tyA v]
-pack e tau imp tp interface = Spine "pack" [tp, Abs imp tp interface, tau, e]
-open cl (imp,ty) (p,iface) cty inexp = Spine "#open#" [cl, ty,Abs imp ty iface, Abs imp ty (Abs p iface cty), Abs imp ty (Abs p iface inexp)] 
 infer x tyA v = Spine ("#infer#") [tyA, Abs x tyA v]
 
 imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
@@ -254,13 +251,6 @@ consts = [ (atomName , tipe)
          , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
            
          , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))
-           
-         , ("#exists#", forall "a" atom $ (var "a" ~> atom) ~> atom)
-         , ("pack", forall "tp" atom 
-                  $ forall "iface" (var "tp" ~> atom) 
-                  $ forall "tau" (var "tp") 
-                  $ forall "e" (Spine "iface" [var "tau"]) 
-                  $ exists "z" (var "tp") (Spine "iface" [var "z"]))
          ]
 
 

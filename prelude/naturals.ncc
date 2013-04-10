@@ -12,7 +12,7 @@ defn add   : natural -> natural -> natural -> prop
 
 -- sub N M R is N - M = R
 defn sub   : natural -> natural -> natural -> prop
-  >| sub_by_add = sub N M R <- add M R N
+  as \N M R : natural . add M R N
 
 fixity none 3 =<
 defn =< : natural -> natural -> prop

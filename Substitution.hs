@@ -318,14 +318,18 @@ instance RegenAbsVars Constraint where
 
 getFamily v = fromMaybe (error ("values don't have families: "++show v)) $ getFamilyM v
 
+
+
 getFamilyM (Spine "#infer#" [_, Abs _ _ lm]) = getFamilyM lm
 getFamilyM (Spine "#ascribe#"  (_:v:l)) = getFamilyM (rebuildSpine v l)
 getFamilyM (Spine "#dontcheck#"  [v]) = getFamilyM v
 getFamilyM (Spine "#forall#" [_, Abs _ _ lm]) = getFamilyM lm
 getFamilyM (Spine "#imp_forall#" [_, Abs _ _ lm]) = getFamilyM lm
-getFamilyM (Spine "#exists#" [_, Abs _ _ lm]) = getFamilyM lm
-getFamilyM (Spine "#open#" (_:_:c:_)) = getFamilyM c
-getFamilyM (Spine "open" (_:_:c:_)) = getFamilyM c
-getFamilyM (Spine "pack" [_,_,_,e]) = getFamilyM e
+getFamilyM (Spine "exists" [_, Abs _ _ lm]) = getFamilyM lm
+getFamilyM (Spine "open" l) | [_,_,c] <- removeTyconPrefix l = getFamilyM c
+getFamilyM (Spine "pack" l) | (c: _)  <- removeTyconPrefix l = getFamilyM c
 getFamilyM (Spine nm' _) = Just nm'
 getFamilyM v = Nothing
+
+removeTyconPrefix (Spine "#tycon#" _:l) = removeTyconPrefix l
+removeTyconPrefix l = l
