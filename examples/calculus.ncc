@@ -18,7 +18,7 @@ defn formula : prop
 defn deriv : (rat -> formula) -> (rat -> formula) -> prop
    | deriv-eq  = deriv A B 
                <- ([x] eq (A x) (A' x))
-               <- ([x] eq (B' x) (B' x))
+               <- ([x] eq (B x) (B' x))
                <- deriv A' B'
    | deriv-pow = deriv (\ x . var x ^ val R) (\ x . val R * var x ^ val Rm)
               <- r-sub R r-one Rm
