@@ -109,7 +109,7 @@ checkFinished [] = return ()
 checkFinished cval = throwTrace 0 $ "ambiguous constraint: " ++show cval
 
 unifySearch :: SCons -> CONT_T b Env UnifyResult
-unifySearch (a :@: b) return | b /= atom && b /= kind = rightSearch a b $ newReturn return
+unifySearch (a :@: b) return | b /= tipe = rightSearch a b $ newReturn return
 unifySearch _ return = return Nothing
 
 newReturn return cons = return $ case cons of
@@ -136,9 +136,6 @@ impAbsPrefix (Spine "#imp_abs#" (ty:(Abs nm _ l):r)) = nm:impAbsPrefix l
 impAbsPrefix _ = []
 
 unifyEq cons@(a :=: b) = case (a,b) of 
-  
-  (a, b) | a == atom && b == tipe -> return $ Just (mempty,[], False)
-  (b, a) | a == atom && b == tipe -> return $ Just (mempty,[], False)
   
   (Spine "#ascribe#" (ty:v:l), b) -> return $ Just (mempty, [rebuildSpine v l :=: b], False)
   (b,Spine "#ascribe#" (ty:v:l)) -> return $ Just (mempty, [b :=: rebuildSpine v l], False)
@@ -485,14 +482,7 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
           let ls = l `apply` s
           modifyCtxt $ addToTail "-rl-" Exists y ls
           ret $ Just [m :=: Spine "readLineImp" [l,s {- this is only safe because lists are lazy -}, var y], var y :@: Spine "run" [ls]]
-    _ | goal == kind -> do
-      case m of
-        Abs{} -> throwError "not properly typed"
-        _ | m == tipe || m == atom -> ret $ Just []
-        _ -> depth -- we should pretty much always use breadth first search here maybe, since this is type search
-          where srch r1 r2 = r1 $ F.asum $ r2 . Just . return . (m :=:) <$> [atom, tipe] -- for breadth first
-                breadth = srch (ret =<<) return
-                depth = srch id (appendErr "" . ret)
+
     Spine nm _ -> do
       constants <- getConstants
       foralls <- getForalls
@@ -575,7 +565,6 @@ viewLast (reverse -> (a:l)) = (reverse l,a)
 
 viewApp (Spine nm (viewLast -> (l,arg))) = (Spine nm l, arg)
 
-lessThan a _ | a == atom = return () -- atoms are impredicative
 lessThan (Spine a [Spine nm []]) (Spine b [Spine nm' []]) | a == tipeName && b == tipeName = tell [(nm,nm')]
 lessThan a b = throwTrace 0 $ "Expecting type: "++show a ++ "  <  "++show b
 
@@ -609,9 +598,6 @@ universeCheck env sp = case sp of
     lessThan k1 k3
     lessThan k2 k3
     return k3
-  Spine a [] | a == atomName -> do 
-    v <- getNewWith "@tipeLevelRetA"
-    return $ tipe `apply` var v
     
   Spine a [Spine v []] | a == tipeName -> do 
     v' <- getNewWith "@tipeLevelRetB"
@@ -635,9 +621,6 @@ universeCheck env sp = case sp of
 initTypes (Spine a []) | a == tipeName = do
   v <- getNewWith "@tipeLevel"
   return $ Spine a [var v]
---initTypes (Spine a []) | a == atomName = do
---  v <- getNewWith "@prop"
---  return $ Spine tipeName [var v]  
 initTypes (Spine nm l) = Spine nm <$> T.mapM initTypes l
 initTypes (Abs nm ty a) = do
   ty <- initTypes ty
@@ -674,7 +657,6 @@ withKind m = do
     return r
 
 checkType :: Spine -> Type -> TypeChecker Spine
-checkType sp ty | ty == kind = withKind $ checkType sp
 checkType sp ty = case sp of
   Spine "#hole#" [] -> do
     x' <- getNewWith "@hole"
@@ -912,7 +894,6 @@ typeCheckAxioms verbose lst = do
       inferAll :: ((Substitution,ContextMap), [FlatPred], [FlatPred]) -> Choice ([FlatPred],(Substitution, ContextMap))
       inferAll (l, r, []) = return (r,l)
       inferAll (_ , r, p:_) | p^.predName == tipeName = throwTrace 0 $ tipeName++" can not be overloaded"
-      inferAll (_ , r, p:_) | p^.predName == atomName = throwTrace 0 $ atomName++" can not be overloaded"
       inferAll ((lv,lt) , r, p:toplst) = do
         let fam = p^.predFamily
             b = p^.predSequential
@@ -1000,7 +981,6 @@ getImpliedFamilies s = S.intersection fs $ gif s
   where fs = freeVariables s
         gif (Spine "#imp_forall#" [ty,a]) = (case getFamilyM ty of
           Nothing -> id
-          Just f | f == atomName -> id
           Just f | f == tipeName -> id
           Just f -> S.insert f) $ gif ty `S.union` gif a 
         gif (Spine a l) = mconcat $ gif <$> l
@@ -1021,10 +1001,10 @@ typeCheckAll verbose preds = do
 toAxioms :: Bool -> [Decl] -> [FlatPred]
 toAxioms b = concat . zipWith toAxioms' [1..]
   where toAxioms' j (Predicate s nm ty cs) = 
-          (FlatPred (PredData (Just $ atomName) False j s) nm Nothing ty tipe)
-          :zipWith (\(sequ,(nm',ty')) i -> (FlatPred (PredData (Just nm) sequ i False) nm' Nothing ty' atom)) cs [0..]
+          (FlatPred (PredData (Just $ tipeName) False j s) nm Nothing ty tipe)
+          :zipWith (\(sequ,(nm',ty')) i -> (FlatPred (PredData (Just nm) sequ i False) nm' Nothing ty' tipe)) cs [0..]
         toAxioms' j (Query nm val) = [(FlatPred (PredData Nothing False j False) nm Nothing val tipe)]
-        toAxioms' j (Define s nm val ty) = [ FlatPred (PredData Nothing False j s) nm (Just val) ty kind]
+        toAxioms' j (Define s nm val ty) = [ FlatPred (PredData Nothing False j s) nm (Just val) ty tipe]
                                            
 
   

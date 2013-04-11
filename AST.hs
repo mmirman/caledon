@@ -222,14 +222,10 @@ infixr 0 ~~>
 
 var !nm = Spine nm []
 
-atomName = "prop"
 tipeName = "type"
-kindName = "#kind#"
 
-atom = var atomName
 ty_hole = var "#hole#"
 tipe = var tipeName
-kind = var kindName  -- can be either a type or an atom
 ascribe a t = Spine "#ascribe#" [t, a]
 dontcheck t = Spine "#dontcheck#" [t]
 forall x tyA v = Spine "#forall#" [tyA, Abs x tyA v]
@@ -239,18 +235,16 @@ imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
 imp_abs x tyA v = Spine ("#imp_abs#") [tyA, Abs x tyA v]
 tycon nm val = Spine "#tycon#" [Spine nm [val]]
 
-consts = [ (atomName , tipe)
-         , (tipeName , tipe)
-         , (kindName , kind)
+consts = [ (tipeName , tipe)
          -- atom : kind
            
-         , ("#ascribe#", forall "a" atom $ (var "a") ~> (var "a"))
+         , ("#ascribe#", forall "a" tipe $ (var "a") ~> (var "a"))
          
-         , ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
+         , ("#forall#", forall "a" tipe $ (var "a" ~> tipe) ~> tipe)
            
-         , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
+         , ("#imp_forall#", forall "a" tipe $ (var "a" ~> tipe) ~> tipe)
            
-         , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))
+         , ("#imp_abs#", forall "a" tipe $ forall "foo" (var "a" ~> tipe) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))
          ]
 
 

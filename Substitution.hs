@@ -108,7 +108,7 @@ rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
 rebuildSpine (Spine "#imp_abs#" [_, Abs nm ty rst]) apps = case findTyconInPrefix nm apps of 
   Just (v, apps) -> rebuildSpine (Abs nm ty rst) (v:apps)
-  Nothing -> seq sp $ if ty == atom && S.notMember nm (freeVariables rs) then rs else irs 
+  Nothing -> seq sp $ if ty == tipe && S.notMember nm (freeVariables rs) then rs else irs 
                       -- proof irrelevance hack
                       -- we know we can prove that type "prop" is inhabited
                       -- irs - the proof doesn't matter

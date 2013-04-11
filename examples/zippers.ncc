@@ -77,9 +77,7 @@ defn piR : A * B -> B
       \ prod : A * B . 
         prod B (\a : A . \ b : B . b)
 
-
-
-defn dEq : type -> type -> prop
+defn dEq : type -> type -> type
    | dEq-sym = dEq Av Av
    
    | dEq-add-ident = dEq (Av + neg Av) zero
@@ -112,7 +110,7 @@ defn dEq : type -> type -> prop
             <- (B -> A)
 
 
-defn deriv : (type -> type) -> (type -> type) -> prop
+defn deriv : (type -> type) -> (type -> type) -> type
   >| deriv-one = deriv (\x . x ) (\ x . one)
   >| deriv-const = deriv (\ x . R) (\ x . zero)
 
@@ -126,8 +124,7 @@ defn deriv : (type -> type) -> (type -> type) -> prop
   >| deriv-pow = deriv (\ x . U x ^ (one + R) ) (\ x . U' x * (one + R) * U x ^ R)
               <- deriv U U' 
 
-   | deriv-dEq  = [A B A' B' : _ -> _ ]
-                  deriv A B 
+   | deriv-dEq  = deriv A B 
                <- ([x : type] dEq (A x) (A' x))
                <- ([x : type] dEq (B x) (B' x))
                <- deriv A' B'
