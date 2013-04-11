@@ -1,6 +1,6 @@
-fixity none 1 +
-fixity none 2 *
-fixity none 4 ^
+fixity left 1 +
+fixity left 2 *
+fixity left 4 ^
 
 defn zero : prop 
   as [A : prop] A
@@ -21,6 +21,9 @@ defn caseUnit : (one -> A) -> A
   as ?\ A   : prop     .
       \ foo : one -> A .
         foo unit
+
+defn neg : prop -> prop
+  as \ A : prop . [C : prop] A -> C
 
 defn ^ : prop -> prop -> prop
   as \ A B : prop . A -> B
@@ -74,17 +77,56 @@ defn piR : A * B -> B
       \ prod : A * B . 
         prod B (\a : A . \ b : B . b)
 
+
+
+defn eq : prop -> prop -> prop
+   | eq-sym = eq Av Av
+   
+   | eq-add-ident = eq (Av + neg Av) zero
+
+   | eq-zero-pow = eq (Av ^ zero ) one
+   | eq-one-pow = eq (Av ^ one ) Av
+
+   | eq-zero-mult = eq (Av * zero) zero
+   | eq-one-mult = eq (Av * one) Av
+
+   | eq-zero-add = eq (Av + zero) Av
+
+   | eq-exp = eq (Av ^ (Bv + Cv)) (Av ^ Bv * Av ^ Cv)
+
+   | eq-sym-plus = eq (Av + Bv) (Bv + Av)
+   | eq-sym-times = eq (Av * Bv) (Bv * Av)
+
+   | eq-plus-times-trans = eq (Av * (Bv + Cv)) (Av * Bv + Av * Cv)
+   | eq-plus-trans = eq (Av + (Bv + Cv)) ((Av + Bv) + Cv)
+   | eq-times-trans = eq (Av * (Bv * Cv)) ((Av * Bv) * Cv)
+ 
+   | eq-plus = eq (Av + Bv) (Av' + Bv') <- eq Av Av' <- eq Bv Bv'
+   | eq-prod = eq (Av * Bv) (Av' * Bv') <- eq Av Av' <- eq Bv Bv'
+   | eq-pow  = eq (Av ^ Bv) (Av' ^ Bv') <- eq Av Av' <- eq Bv Bv'
+   
+   | eq-refl = eq Av Bv <- eq Bv Av
+   
+   | eq-imp = eq A B 
+           <- (A -> B) 
+           <- (B -> A)
+
+
 defn deriv : (prop -> prop) -> (prop -> prop) -> prop
-   | deriv-sum  = deriv (\ x . A x + B x) (\ x . A' x + B' x)
+  >| deriv-one = deriv (\x . x ) (\ x . one)
+  >| deriv-const = deriv (\ x . R) (\ x . zero)
+
+  >| deriv-sum  = deriv (\ x . A x + B x) (\ x . A' x + B' x)
                <- deriv A A'
                <- deriv B B'
-   | deriv-prod = deriv (\ x . U x * V x) (\ x . U' x * V x + U x * V' x)
+  >| deriv-prod = deriv (\ x . U x * V x) (\ x . U' x * V x + U x * V' x)
                <- deriv V V'
                <- deriv U U'
 
-   | deriv-chain = deriv (\x . F (G x)) (\x . F' (G x) * G' x)
-                <- deriv F F'
-                <- deriv G G'
-   | deriv-const = deriv (\ x . R) (\ x . zero)
-		
-   | deriv-pow = deriv (\ x . x ^ (one + R) ) (\ x . (one + R) * x ^ R)
+  >| deriv-pow = deriv (\ x . U x ^ (one + R) ) (\ x . U' x * (one + R) * U x ^ R)
+              <- deriv U U' 
+
+   | deriv-eq  = deriv A B 
+               <- ([x] eq (A x) (A' x))
+               <- ([x] eq (B x) (B' x))
+               <- deriv A' B'
