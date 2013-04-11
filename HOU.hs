@@ -109,7 +109,7 @@ checkFinished [] = return ()
 checkFinished cval = throwTrace 0 $ "ambiguous constraint: " ++show cval
 
 unifySearch :: SCons -> CONT_T b Env UnifyResult
-unifySearch (a :@: b) return | b /= atom && b /= kind = rightSearch a b $ newReturn return
+unifySearch (a :@: b) return | b /= atom = rightSearch a b $ newReturn return
 unifySearch _ return = return Nothing
 
 newReturn return cons = return $ case cons of
@@ -490,7 +490,7 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
         Abs{} -> throwError "not properly typed"
         _ | m == tipe || m == atom -> ret $ Just []
         _ -> depth -- we should pretty much always use breadth first search here maybe, since this is type search
-          where srch r1 r2 = r1 $ F.asum $ r2 . Just . return . (m :=:) <$> [atom, tipe] -- for breadth first
+          where srch r1 r2 = r1 $ F.asum $ r2 . Just . return . (m :=:) <$> [tipe, atom] -- for breadth first
                 breadth = srch (ret =<<) return
                 depth = srch id (appendErr "" . ret)
     Spine nm _ -> do
@@ -670,7 +670,7 @@ withKind m = do
   k <- getNewWith "@k"
   addToEnv (∃) k tipe $ do
     r <- m $ var k
-    var k .@. tipe
+    var k .@. kind
     return r
 
 checkType :: Spine -> Type -> TypeChecker Spine
@@ -795,7 +795,6 @@ checkType sp ty = case sp of
 checkFullType :: Spine -> Type -> Env (Spine, Constraint)
 checkFullType val ty = typeCheckToEnv $ checkType val ty
 
-
 ---------------------------------
 --- Generalize Free Variables ---
 ---------------------------------
@@ -877,7 +876,6 @@ unsafeSubst s (Spine nm apps) = let apps' = unsafeSubst s <$> apps in case s ! n
   Just nm -> rebuildSpine nm apps'
   _ -> Spine nm apps'
 unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
-  
 
 ----------------------------
 --- the public interface ---
@@ -893,8 +891,10 @@ typePipe verbose lt (b,nm,ty,kind) = do
   (ty,kind,lt) <- mtrace verbose ("Elaborating: " ++nm) $ 
                   typeInfer lt (b,nm, ty,kind) -- elaborate
                   
---  (ty,kind,lt) <- mtrace verbose ("Checking: " ++nm) $ 
---                  typeInfer lt (b,nm, ty,kind) -- type check
+  (ty,kind,lt) <- mtrace verbose ("Checking: " ++nm) $ 
+                  typeInfer lt (b,nm, ty,kind) -- type check
+                  
+  checkUniverses nm (snd <$> lt) ty   -- perform universe checking once before elaboration  
   
   return (ty,kind,lt)
   
