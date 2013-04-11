@@ -605,7 +605,7 @@ universeCheck env sp = case sp of
     return $ tipe `apply` var v'
     
   Spine "#tycon#" [Spine nm [l]] -> universeCheck env l
-  
+  Spine ['\'',c,'\''] [] -> return $ var "char"
   Spine nm [] -> case env ! nm of
     Nothing -> throwError $ "not in the enviroment: "++show nm
     Just a  -> return a
@@ -649,12 +649,7 @@ checkUniverses nm env ty = do
 
       
       
-withKind m = do
-  k <- getNewWith "@k"
-  addToEnv (∃) k tipe $ do
-    r <- m $ var k
-    var k .@. tipe
-    return r
+withKind m = m tipe
 
 checkType :: Spine -> Type -> TypeChecker Spine
 checkType sp ty = case sp of
@@ -868,15 +863,14 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 typePipe verbose lt (b,nm,ty,kind) = do
   (ty,kind,lt) <- mtrace verbose ("Inferring: " ++nm) $ 
                   typeInfer lt (b,nm, ty,kind) -- type infer
-                  
-  checkUniverses nm (snd <$> lt) kind -- (ascribe ty kind)
-  checkUniverses nm (snd <$> lt) ty   -- perform universe checking once before elaboration
   
   (ty,kind,lt) <- mtrace verbose ("Elaborating: " ++nm) $ 
                   typeInfer lt (b,nm, ty,kind) -- elaborate
                   
---  (ty,kind,lt) <- mtrace verbose ("Checking: " ++nm) $ 
---                  typeInfer lt (b,nm, ty,kind) -- type check
+  (ty,kind,lt) <- mtrace verbose ("Checking: " ++nm) $ 
+                  typeInfer lt (b,nm, ty,kind) -- type check
+                  
+  checkUniverses nm (snd <$> lt) (ascribe ty kind)  
   
   return (ty,kind,lt)
   

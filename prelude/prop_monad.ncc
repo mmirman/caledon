@@ -1,23 +1,23 @@
 #include <logic.ncc>
 
-defn monad : [m : prop -> prop]
-           { return : {A : prop} A -> m A -> prop}
-           { bind : {A2 B : prop} m A2 -> (A2 -> m B -> prop) -> m B -> prop}
-           prop
-  | isMonad  = [M : prop -> prop]
-               [Return : {A : prop} A -> M A -> prop ]
-               [Bind : {A2 B : prop} M A2 -> (A2 -> M B -> prop) -> M B -> prop]
+defn monad : [m : type -> type]
+           { return : {A : type} A -> m A -> type}
+           { bind : {A2 B : type} m A2 -> (A2 -> m B -> type) -> m B -> type}
+           type
+  | isMonad  = [M : type -> type]
+               [Return : {A : type} A -> M A -> type ]
+               [Bind : {A2 B : type} M A2 -> (A2 -> M B -> type) -> M B -> type]
                monad M {return = Return} {bind = Bind}
 -- left identity
-              <- ( [A B][V][F : A -> M B -> prop][MA][MB][MB']
+              <- ( [A B][V][F : A -> M B -> type][MA][MB][MB']
                     Return V MA -> Bind MA F MB -> F V MB' -> MB =:= MB'
                  )
 -- right identity
               <- ( [A][MA MA' : M A] Bind MA Return MA' -> MA =:= MA'
 	      	 )
 -- associatiity
-              <- ( [A B C : prop][MA : M A][MB : M B][MC MC' : M C]
-                   [F : A -> M B -> prop][G : B -> M C -> prop]
+              <- ( [A B C : type][MA : M A][MB : M B][MC MC' : M C]
+                   [F : A -> M B -> type][G : B -> M C -> type]
                      Bind MA F MB -> Bind MB G MC
 		  -> Bind MA (\x . [MB] F x MB -> Bind MB G) MC'
                   -> MC =:= MC'

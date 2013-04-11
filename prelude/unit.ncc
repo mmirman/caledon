@@ -1,2 +1,2 @@
-defn unit : prop
+defn unit : type
    | one  = unit

@@ -3,7 +3,7 @@
 ---------------
 -- builtins ---
 ---------------
-defn char : prop
+defn char : type
 
-defn string : prop
+defn string : type
   as list char

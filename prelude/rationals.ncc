@@ -1,13 +1,13 @@
 #include "integers.ncc"
 
-defn rational : prop
+defn rational : type
    | a/b = integer -> integer -> rational
 
 
-defn r-add : rational -> rational -> rational -> prop
+defn r-add : rational -> rational -> rational -> type
 
 -- r-sub N M R is R = N - M
-defn r-sub   : rational -> rational -> rational -> prop
+defn r-sub   : rational -> rational -> rational -> type
   as \ N M R : rational . r-add M R N
 
 defn r-one : rational

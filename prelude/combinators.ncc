@@ -2,13 +2,13 @@
 --- useful combinators ---
 --------------------------
 fixity right 0 $
-defn $ : {AT BT : prop } (AT -> BT) -> AT -> BT
+defn $ : {AT BT : type } (AT -> BT) -> AT -> BT
   as ?\ AT BT . \ f . \a . f a
 
 
 fixity right 0 @
-defn @ : {AT BT CT:prop} (BT -> CT) -> (AT -> BT) -> AT -> CT
-  as ?\AT BT CT : prop . \f : BT -> CT . \ g : AT -> BT . \ a : AT . f (g a)
+defn @ : {AT BT CT:type} (BT -> CT) -> (AT -> BT) -> AT -> CT
+  as ?\AT BT CT : type . \f : BT -> CT . \ g : AT -> BT . \ a : AT . f (g a)
 
-defn flip : {AT BT CT : prop} (AT -> BT -> CT) -> BT -> AT -> CT
-  as ?\ AT BT CT : prop . \ foo . \ b . \ a . foo a b
+defn flip : {AT BT CT : type} (AT -> BT -> CT) -> BT -> AT -> CT
+  as ?\ AT BT CT : type . \ foo . \ b . \ a . foo a b

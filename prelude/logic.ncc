@@ -27,10 +27,10 @@ defn open : {N}{F : N -> type}{A : type} ( exists a : N . F a ) -> ([a : N] F a 
 ---------------
 -- searches ---
 ---------------
-defn any : {Search : type} (Search -> type) -> prop
+defn any : {Search : type} (Search -> type) -> type
    | is = [V : A][F : A -> type] F V -> any {Search = A} F
 
-defn openAny : [A][F : A -> type] any F -> [V : A] F V -> prop
+defn openAny : [A][F : A -> type] any F -> [V : A] F V -> type
    | openAnyDef = openAny A F (is V F FV) V FV
 
 fixity lambda free
@@ -41,16 +41,16 @@ defn free : [A : type] (A -> type) -> type
 --- Constraints ---
 -------------------
 fixity none 5 =:=
-defn =:= : Q -> Q -> prop
+defn =:= : Q -> Q -> type
   >| eq = (B : A) =:= B
 
 -- searching for these is SLOW
 fixity none 0 /\
-defn /\ : type -> type -> prop
+defn /\ : type -> type -> type
   >| and = A -> B -> A /\ B
 
 fixity none 0 \/
-defn \/ : type -> type -> prop
+defn \/ : type -> type -> type
    | or1 = A -> A \/ B
    | or2 = B -> A \/ B
 

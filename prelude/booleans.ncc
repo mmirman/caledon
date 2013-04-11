@@ -1,7 +1,7 @@
 ----------------
 --- Booleans ---
 ----------------
-defn bool : prop
+defn bool : type
    | true = bool
    | false = bool
 
@@ -9,21 +9,21 @@ defn if : bool -> bool
   as \b . b
 
 fixity none 1 |:|
-defn |:| : {t:prop} t -> t -> (t -> t -> t) -> t
-  as ?\t : prop . \a b : t. \f : t -> t -> t. f a b
+defn |:| : {t:type} t -> t -> (t -> t -> t) -> t
+  as ?\t : type . \a b : t. \f : t -> t -> t. f a b
 
 
 fixity none 0 ==>
-defn ==> : {A : prop} bool -> ((A -> A -> A) -> A) -> A -> prop
+defn ==> : {A : type} bool -> ((A -> A -> A) -> A) -> A -> type
   >| thentrue  = (true  ==> F) (F (\a1 a2 : A . a1) )
   >| thenfalse = (false ==> F) (F (\a1 a2 : B . a2))
 
-defn not : bool -> bool -> prop
+defn not : bool -> bool -> type
   as \zq . if zq ==> false |:| true
 
 
 #include <strings.ncc>
 
-defn string_bool : bool -> string -> prop
+defn string_bool : bool -> string -> type
   >| string_bool/true  = string_bool true "true"
   >| string_bool/false = string_bool false "false"

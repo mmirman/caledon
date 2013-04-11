@@ -6,37 +6,37 @@
 -- builtins ---
 ---------------
 
-defn putChar    :  char -> prop -- builtin
+defn putChar    :  char -> type -- builtin
    | putCharImp = [A] putChar A
 
 -- for sequencing io actions
 fixity left 1 ,
-defn io : prop
+defn io : type
    | do = io
-   | ,  = io -> prop -> io 
+   | ,  = io -> type -> io 
 
-defn run : io -> prop
+defn run : io -> type
    | runDo = run do
    | runSeq = run (Av , Bv) <- run Av
                             <- Bv
 
-defn readLine    : (string -> io) -> prop -- builtin 
+defn readLine    : (string -> io) -> type -- builtin 
    | readLineImp = [Foo : string -> io] [A : string] readLine Foo <- run (Foo A)
 
-defn readLineIn : string -> prop
+defn readLineIn : string -> type
   as \S . readLine $ \R . do , R =:= S
 
 ----------------
 --- printing ---
 ----------------
 
-defn putStr : string -> prop
+defn putStr : string -> type
    | putStr_Nil = putStr nil
    | putStr_Cons = putStr (cons V L)
                    <- putChar V
                    <- putStr L
 
-defn putStrLn : string -> prop
+defn putStrLn : string -> type
   as \S . run $ do 
               , putStr S
               , putChar '\n'

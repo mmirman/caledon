@@ -1,45 +1,45 @@
 -------------
 --- Lists ---
 -------------
-defn list : prop -> prop
+defn list : type -> type
    | nil  = list A
    | cons = A -> list A -> list A
 
-defn concatList : list A -> list A -> list A -> prop
+defn concatList : list A -> list A -> list A -> type
   >| concatListNil  = concatList {A = T} nil L L
   >| concatListCons = concatList (cons (V : T) A) B (cons V C) <- concatList A B C
 
 
-defn churchList : prop -> prop
-  as \A : prop . [lst : prop] lst -> (A -> lst -> lst) -> lst
+defn churchList : type -> type
+  as \A : type . [lst : type] lst -> (A -> lst -> lst) -> lst
 
-defn consCL : [B : prop] B -> churchList B -> churchList B
-  as \C : prop . 
+defn consCL : [B : type] B -> churchList B -> churchList B
+  as \C : type . 
      \V : C . 
      \cl : churchList C .
-     \lst : prop.
+     \lst : type.
      \nil : lst. 
      \cons : C -> lst -> lst . 
      cons V (cl lst nil cons)
 
-defn nilCL : [B : prop] churchList B
-  as \C : prop . 
-     \lst : prop.
+defn nilCL : [B : type] churchList B
+  as \C : type . 
+     \lst : type.
      \nil : lst. 
      \cons : C -> lst -> lst .
      nil
 
 defn mapCL : {A B} (A -> B) -> churchList A -> churchList B
-  as ?\A B : prop.
+  as ?\A B : type.
      \F : A -> B . 
      \cl : churchList A .
-     \lst : prop.
+     \lst : type.
      \nil : lst .
      \cons : B -> lst -> lst.
      cl lst nil (\v . cons (F v))
 
 defn foldrCL : {A B} (A -> B -> A) -> A -> churchList B -> A
-  as ?\A B : prop.
+  as ?\A B : type.
      \F : A -> B -> A. 
      \bc : A .
      \cl : churchList B .

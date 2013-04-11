@@ -5,14 +5,14 @@
 --- concat ---
 --------------
 
-defn concatable : [M : prop] (M -> M -> M -> prop) -> prop
+defn concatable : [M : type] (M -> M -> M -> type) -> type
   >| concatableNat = concatable natural add
   >| concatableList = concatable (list A) concatList
 
 -- it correctly infers 169, and M (but it eta expands Foo when it infers it) !!
 fixity right 3 ++
-defn ++ : {M}{Foo}{cm : concatable M Foo} M -> M -> M -> prop
-   | ppimp = [M][Foo : M -> M -> M -> prop][M1 M2 M3 : M] 
+defn ++ : {M}{Foo}{cm : concatable M Foo} M -> M -> M -> type
+   | ppimp = [M][Foo : M -> M -> M -> type][M1 M2 M3 : M] 
                (++) {Foo = Foo} M1 M2 M3 
             <- concatable M Foo 
             <- Foo M1 M2 M3 

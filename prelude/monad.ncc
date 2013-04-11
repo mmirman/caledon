@@ -1,46 +1,46 @@
 #include <logic.ncc>
 
-defn monad : [m : prop -> prop]
-           { return : {A : prop} A -> m A}
-           { bind : {A2 B : prop} m A2 -> (A2 -> m B) -> m B }
-           prop
-  | isMonad  = [M : prop -> prop]
-               [Return : {A : prop} A -> M A]
-               [Bind : {A2 B : prop} M A2 -> (A2 -> M B) -> M B]
+defn monad : [m : type -> type]
+           { return : {A : type} A -> m A}
+           { bind : {A2 B : type} m A2 -> (A2 -> m B) -> m B }
+           type
+  | isMonad  = [M : type -> type]
+               [Return : {A : type} A -> M A]
+               [Bind : {A2 B : type} M A2 -> (A2 -> M B) -> M B]
                monad M {return = Return} {bind = Bind}
 -- left identity
               <- ( [A B][V][F : A -> M B] Bind (Return V) F =:= F V )
 -- right identity
               <- ( [A][MA : M A] Bind MA Return =:= MA )
 -- associatiity
-              <- ( [A B C : prop][MA : M A][F : A -> M B][G : B -> M C] 
+              <- ( [A B C : type][MA : M A][F : A -> M B][G : B -> M C] 
                    Bind (Bind MA F) G =:= Bind MA (\x . Bind (F x) G))
 
-defn return  : {M      : prop -> prop                             }
-               {Return : {A : prop} A -> M A                      }
-               {Bind   : {A2 B : prop} M A2 -> (A2 -> M B) -> M B }
+defn return  : {M      : type -> type                             }
+               {Return : {A : type} A -> M A                      }
+               {Bind   : {A2 B : type} M A2 -> (A2 -> M B) -> M B }
                {mon    : monad M {return = Return}{ bind = Bind } } 
-               {Av     : prop                                     } 
+               {Av     : type                                     } 
                Av -> M Av
 
-  as ?\ M      : prop -> prop                             . 
-     ?\ Return : {A : prop} A -> M A                      . 
-     ?\ Bind   : {A2 B : prop} M A2 -> (A2 -> M B) -> M B . 
+  as ?\ M      : type -> type                             . 
+     ?\ Return : {A : type} A -> M A                      . 
+     ?\ Bind   : {A2 B : type} M A2 -> (A2 -> M B) -> M B . 
      ?\ mon    : monad M {return = Return}{ bind = Bind } .  
-     ?\ Av     : prop                                     .
+     ?\ Av     : type                                     .
      Return {A = Av}
 
 fixity right 0 >>=
 
-defn >>=     : {M      : prop -> prop                             }
-               {Return : {A : prop} A -> M A                      }
-               {Bind   : {A2 B : prop} M A2 -> (A2 -> M B) -> M B }
+defn >>=     : {M      : type -> type                             }
+               {Return : {A : type} A -> M A                      }
+               {Bind   : {A2 B : type} M A2 -> (A2 -> M B) -> M B }
                {mon    : monad M {return = Return}{ bind = Bind } } 
-               {Av Bv  : prop                                     } 
+               {Av Bv  : type                                     } 
                M Av -> (Av -> M Bv) -> M Bv
-  as ?\ M      : prop -> prop                             . 
-     ?\ Return : {A : prop} A -> M A                      . 
-     ?\ Bind   : {A2 B : prop} M A2 -> (A2 -> M B) -> M B . 
+  as ?\ M      : type -> type                             . 
+     ?\ Return : {A : type} A -> M A                      . 
+     ?\ Bind   : {A2 B : type} M A2 -> (A2 -> M B) -> M B . 
      ?\ mon    : monad M {return = Return}{ bind = Bind } .  
-     ?\ Av Bv  : prop                                     .
+     ?\ Av Bv  : type                                     .
      Bind {A2 = Av} {B = Bv}

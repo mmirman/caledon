@@ -2,34 +2,34 @@
 --- Unary Numbers ---
 ---------------------
 
-defn natural  : prop
+defn natural  : type
    | zero = natural
    | succ = natural -> natural
 
-defn add   : natural -> natural -> natural -> prop
+defn add   : natural -> natural -> natural -> type
   >| add_z = add zero N N
   >| add_s = add N M R -> add (succ N) M (succ R)
 
 -- sub N M R is N - M = R
-defn sub   : natural -> natural -> natural -> prop
+defn sub   : natural -> natural -> natural -> type
   as \N M R : natural . add M R N
 
 fixity none 3 =<
-defn =< : natural -> natural -> prop
+defn =< : natural -> natural -> type
   >| leqZero = {B} zero =< B
   >| leqSucc = {A B} (succ A) =< (succ B) <- A =< B
 
 fixity none 3 <
-defn < : natural -> natural -> prop
+defn < : natural -> natural -> type
   >| ltZero = zero < succ B
   >| ltSucc = succ A < succ B <- A < B
 
 
 
-defn odd : natural -> prop
+defn odd : natural -> type
   >| odd/one = odd (succ zero)
   >| odd/n   = even A -> odd (succ A)
 
-defn even : natural -> prop
+defn even : natural -> type
   >| even/zero = even zero
   >| even/succ = odd B -> even (succ B)
