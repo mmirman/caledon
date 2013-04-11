@@ -1,0 +1,4 @@
+
+-- type and prop can not be overloaded - this will throw an error!
+unsound type : type
+unsound prop : prop

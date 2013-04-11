@@ -1,0 +1,25 @@
+defn nat : prop 
+  as [a : prop] a -> (a -> a) -> a
+
+defn zero : nat
+  as \ a z s . z
+
+defn succ : nat -> nat
+  as \ n : nat . \ a z s . s (n a z s)
+
+defn succty : (nat -> prop) -> prop
+  as \ a : nat -> prop . [N : nat] a N -> a (succ N)
+
+defn nat_1 : nat -> prop 
+  as \ N : nat . [a : nat -> prop] a zero -> succty a -> a N
+
+defn zero_1 : nat_1 zero
+  as \ a : nat -> prop . \ z : a zero . \ s : succty a . z
+
+defn succ_1 : [N : nat] nat_1 N -> nat_1 (succ N)
+  as \ Nty : nat . 
+     \ Nval : nat_1 Nty .
+     \ a : nat -> prop . 
+     \ z : a zero . 
+     \ s : [N : nat] a N -> a (succ N) .
+       s Nty (Nval a z s)

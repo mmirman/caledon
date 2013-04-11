@@ -1,0 +1,90 @@
+fixity none 1 +
+fixity none 2 *
+fixity none 4 ^
+
+defn zero : prop 
+  as [A : prop] A
+
+defn fromZero : zero -> A
+  as ?\ A : prop . 
+      \ z : zero .
+        z A
+
+defn one : prop
+  as [A : prop] A -> A
+
+defn unit : one
+  as \ A : prop . 
+     \ x : A . x
+
+defn caseUnit : (one -> A) -> A
+  as ?\ A   : prop     .
+      \ foo : one -> A .
+        foo unit
+
+defn ^ : prop -> prop -> prop
+  as \ A B : prop . A -> B
+
+defn + : prop -> prop -> prop
+  as \ A B : prop . 
+      {C : prop} (A -> C) -> (B -> C) -> C
+
+defn case : At + Bt -> (At -> Ct) -> (Bt -> Ct) -> Ct
+  as ?\ At Bt Ct : prop   .
+      \ sum    : At + Bt  .
+      \ inl    : At -> Ct .
+      \ inr    : Bt -> Ct .
+        sum { C = Ct } inl inr
+
+defn inL : A -> A + B
+  as ?\ A B : prop   .
+      \ a   : A      .
+     ?\ C   : prop   .
+      \ inl : A -> C .
+      \ inr : B -> C .
+        inl a
+
+defn inR : {A B} B -> A + B
+  as ?\ A B : prop   .
+      \ b   : B      .
+     ?\ C   : prop   .
+      \ inl : A -> C .
+      \ inr : B -> C .
+        inr b
+
+defn * : prop -> prop -> prop
+  as \ A B : prop . 
+      [C : prop] (A -> B -> C) -> C
+
+defn pair : A -> B -> A * B
+  as ?\ A B : prop        .
+      \ a   : A           .
+      \ b   : B           .
+      \ C   : prop        .
+      \ pi  : A -> B -> C . 
+        pi a b
+
+defn piL : A * B -> A
+  as ?\ A B  : prop  .
+      \ prod : A * B . 
+        prod A (\a : A . \ b : B . a)
+
+defn piR : A * B -> B
+  as ?\ A B  : prop  .
+      \ prod : A * B . 
+        prod B (\a : A . \ b : B . b)
+
+defn deriv : (prop -> prop) -> (prop -> prop) -> prop
+   | deriv-sum  = deriv (\ x . A x + B x) (\ x . A' x + B' x)
+               <- deriv A A'
+               <- deriv B B'
+   | deriv-prod = deriv (\ x . U x * V x) (\ x . U' x * V x + U x * V' x)
+               <- deriv V V'
+               <- deriv U U'
+
+   | deriv-chain = deriv (\x . F (G x)) (\x . F' (G x) * G' x)
+                <- deriv F F'
+                <- deriv G G'
+   | deriv-const = deriv (\ x . R) (\ x . zero)
+		
+   | deriv-pow = deriv (\ x . x ^ (one + R) ) (\ x . (one + R) * x ^ R)

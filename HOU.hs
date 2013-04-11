@@ -107,7 +107,7 @@ checkFinished [] = return ()
 checkFinished cval = throwTrace 0 $ "ambiguous constraint: " ++show cval
 
 unifySearch :: SCons -> CONT_T b Env UnifyResult
-unifySearch (a :@: b) return | b /= atom = rightSearch a b $ newReturn return
+unifySearch (a :@: b) return | b /= atom && b /= kind = rightSearch a b $ newReturn return
 unifySearch _ return = return Nothing
 
 newReturn return cons = return $ case cons of
@@ -484,7 +484,7 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
       case m of
         Abs{} -> throwError "not properly typed"
         _ | m == tipe || m == atom -> ret $ Just []
-        _ -> breadth -- we should pretty much always use breadth first search here maybe, since this is type search
+        _ -> depth -- we should pretty much always use breadth first search here maybe, since this is type search
           where srch r1 r2 = r1 $ F.asum $ r2 . Just . return . (m :=:) <$> [atom , tipe] -- for breadth first
                 breadth = srch (ret =<<) return
                 depth = srch id (appendErr "" . ret)
@@ -705,6 +705,11 @@ checkFullType val ty = typeCheckToEnv $ checkType val ty
 ---------------------------------
 --- Generalize Free Variables ---
 ---------------------------------
+type Graph k = M.Map k (S.Set k)
+        
+isGen [] = False
+isGen (c:s) = elem c ['A'..'Z']
+getGenTys sp = S.filter isGen $ freeVariables sp
 
 {- 
 Employ the use order heuristic, where 
@@ -713,18 +718,19 @@ variables are ordered by use on the same level in terms.
 buildOrderGraph :: S.Set Name -- the list of variables to be generalized
                 -> S.Set Name -- the list of previously seen variables
                 -> Spine 
-                -> State (M.Map Name (S.Set Name)) (S.Set Name) -- an edge in the graph if a variable has occured before this one.
+                -> State (Graph Name) -- an edge in the graph if a variable has occured before this one.
+                         (S.Set Name) -- the generalizable variables that occured in said term.
 buildOrderGraph gen prev s = case s of
   Abs nm t v -> do
-    prev' <- buildOrderGraph gen prev t
-    prev'' <- buildOrderGraph (S.delete nm gen) prev v
-    return $ S.union prev' prev''
-  Spine "#tycon#" [Spine _ [l]] -> buildOrderGraph gen prev l  
-  Spine s [t, l] | elem s ["#exists#", "#forall#", "#imp_forall#", "#imp_abs#"] -> do
+    prev1 <- buildOrderGraph gen prev t
+    prev2 <- buildOrderGraph (S.delete nm gen) prev v
+    return $ S.union prev1 prev2
+  Spine s [t, l] | elem s [ "#imp_abs#"] -> do
     prev1 <- buildOrderGraph gen prev t
     prev2 <- buildOrderGraph gen prev l
-    return $ S.union prev1 prev2
-    
+    return $ S.union prev1 prev2    
+  Spine "#tycon#" [Spine _ [l]] -> buildOrderGraph gen prev l  
+
   Spine nm l -> do
     mp <- get
     prev' <- if S.member nm gen
@@ -741,17 +747,15 @@ buildOrderGraph gen prev s = case s of
       mp <- get
       let prevs = mp M.! nm
       put $ M.insert nm (S.union prev'' prevs) mp
-      return $ S.insert nm $ S.union prev prev'' 
-      else return prev''
-           
-getGenTys sp = S.filter isGen $ freeVariables sp
-  where isGen (c:s) = elem c ['A'..'Z']
+      return $ S.singleton nm
+      else return mempty
+
         
 generateBinding sp = foldr (\a b -> imp_forall a ty_hole b) sp orderedgens
   where genset = getGenTys sp
         genlst = S.toList genset
         (_,graph) = runState (buildOrderGraph genset mempty sp) (M.fromList $ map (,mempty) genlst)
-        orderedgens = topoSortComp (\a -> (a, graph M.! a)) genlst
+        orderedgens = vtrace 0 ("ARG_GRAPH: "++show graph) $ topoSortComp (\a -> (a, graph M.! a)) genlst
 
 ----------------------
 --- type inference ---

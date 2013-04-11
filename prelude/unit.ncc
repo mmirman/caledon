@@ -1,0 +1,2 @@
+defn unit : prop
+   | one  = unit

@@ -1,0 +1,19 @@
+#include "naturals.ncc"
+
+defn integer : prop
+   | pos = natural -> integer
+   | neg = natural -> integer
+
+defn i-add : integer -> integer -> integer -> prop
+   | i-add_ppp = i-add (pos N1) (pos N2) (pos N3) 
+            <- add N1 N2 N3
+   | i-add_nnn = i-add (neg N1) (neg N2) (neg N3) 
+            <- add N1 N2 N3
+   | i-add_npp = i-add (neg N1) (pos N2) (pos N3) 
+            <- sub N2 N1 N3
+   | i-add_npn = i-add (neg N1) (pos N2) (neg N3) 
+            <- sub N1 N2 N3
+   | i-add_pnp = i-add (pos N1) (neg N2) (pos N3) 
+            <- sub N1 N2 N3
+   | i-add_pnn = i-add (pos N1) (neg N2) (neg N3) 
+            <- sub N2 N1 N3

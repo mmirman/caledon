@@ -1,0 +1,21 @@
+#include "integers.ncc"
+
+defn rational : prop
+   | a/b = integer -> integer -> rational
+
+
+defn r-add : rational -> rational -> rational -> prop
+
+-- r-sub N M R is R = N - M
+defn r-sub   : rational -> rational -> rational -> prop
+  as \ N M R : rational . r-add M R N
+
+defn r-one : rational
+  as a/b (pos (succ zero)) (pos (succ zero))
+
+defn r-neg-one : rational
+  as a/b (neg (succ zero)) (pos (succ zero))
+
+
+defn r-zero : rational
+  as a/b (pos zero) (pos (succ zero))
