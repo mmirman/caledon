@@ -79,35 +79,35 @@ defn piR : A * B -> B
 
 
 
-defn eq : prop -> prop -> prop
-   | eq-sym = eq Av Av
+defn dEq : prop -> prop -> prop
+   | dEq-sym = dEq Av Av
    
-   | eq-add-ident = eq (Av + neg Av) zero
+   | dEq-add-ident = dEq (Av + neg Av) zero
 
-   | eq-zero-pow = eq (Av ^ zero ) one
-   | eq-one-pow = eq (Av ^ one ) Av
+   | dEq-zero-pow = dEq (Av ^ zero ) one
+   | dEq-one-pow = dEq (Av ^ one ) Av
 
-   | eq-zero-mult = eq (Av * zero) zero
-   | eq-one-mult = eq (Av * one) Av
+   | dEq-zero-mult = dEq (Av * zero) zero
+   | dEq-one-mult = dEq (Av * one) Av
 
-   | eq-zero-add = eq (Av + zero) Av
+   | dEq-zero-add = dEq (Av + zero) Av
 
-   | eq-exp = eq (Av ^ (Bv + Cv)) (Av ^ Bv * Av ^ Cv)
+   | dEq-exp = dEq (Av ^ (Bv + Cv)) (Av ^ Bv * Av ^ Cv)
 
-   | eq-sym-plus = eq (Av + Bv) (Bv + Av)
-   | eq-sym-times = eq (Av * Bv) (Bv * Av)
+   | dEq-sym-plus = dEq (Av + Bv) (Bv + Av)
+   | dEq-sym-times = dEq (Av * Bv) (Bv * Av)
 
-   | eq-plus-times-trans = eq (Av * (Bv + Cv)) (Av * Bv + Av * Cv)
-   | eq-plus-trans = eq (Av + (Bv + Cv)) ((Av + Bv) + Cv)
-   | eq-times-trans = eq (Av * (Bv * Cv)) ((Av * Bv) * Cv)
+   | dEq-plus-times-trans = dEq (Av * (Bv + Cv)) (Av * Bv + Av * Cv)
+   | dEq-plus-trans = dEq (Av + (Bv + Cv)) ((Av + Bv) + Cv)
+   | dEq-times-trans = dEq (Av * (Bv * Cv)) ((Av * Bv) * Cv)
  
-   | eq-plus = eq (Av + Bv) (Av' + Bv') <- eq Av Av' <- eq Bv Bv'
-   | eq-prod = eq (Av * Bv) (Av' * Bv') <- eq Av Av' <- eq Bv Bv'
-   | eq-pow  = eq (Av ^ Bv) (Av' ^ Bv') <- eq Av Av' <- eq Bv Bv'
+   | dEq-plus = dEq (Av + Bv) (Av' + Bv') <- dEq Av Av' <- dEq Bv Bv'
+   | dEq-prod = dEq (Av * Bv) (Av' * Bv') <- dEq Av Av' <- dEq Bv Bv'
+   | dEq-pow  = dEq (Av ^ Bv) (Av' ^ Bv') <- dEq Av Av' <- dEq Bv Bv'
    
-   | eq-refl = eq Av Bv <- eq Bv Av
+   | dEq-refl = dEq Av Bv <- dEq Bv Av
    
-   | eq-imp = eq A B 
+   | dEq-imp = dEq A B 
            <- (A -> B) 
            <- (B -> A)
 
@@ -126,7 +126,11 @@ defn deriv : (prop -> prop) -> (prop -> prop) -> prop
   >| deriv-pow = deriv (\ x . U x ^ (one + R) ) (\ x . U' x * (one + R) * U x ^ R)
               <- deriv U U' 
 
-   | deriv-eq  = deriv A B 
-               <- ([x] eq (A x) (A' x))
-               <- ([x] eq (B x) (B' x))
+   | deriv-dEq  = deriv A B 
+               <- ([x] dEq (A x) (A' x))
+               <- ([x] dEq (B x) (B' x))
                <- deriv A' B'
+
+#include "../prelude/logic.ncc"
+
+query whatDeriv = propPropAny (deriv (\ x : prop . x ^ (one + one) ))

@@ -27,15 +27,21 @@ defn open : {N}{F : N -> prop}{A : prop} ( exists a : N . F a ) -> ([a : N] F a 
 ---------------
 -- searches ---
 ---------------
-defn any : (A -> prop) -> prop
-   | is = [V : A][F : A -> prop] F V -> any F
+defn any : (Search -> prop) -> prop
+   | is = [V : A][F : A -> prop] F V -> any {Search = A } F
+
+defn propAny : (prop -> prop) -> prop
+   | is2 = [V : prop][F : prop -> prop] F V -> propAny F
+
+defn propPropAny : ((prop -> prop) -> prop) -> prop
+   | is3 = [V : prop -> prop][F : (prop -> prop) -> prop] F V -> propPropAny F
 
 defn openAny : [A][F : A -> prop] any F -> [V : A] F V -> prop
    | openAnyDef = openAny A F (is V F FV) V FV
 
 fixity lambda free
 defn free : [A : prop] (A -> prop) -> prop
-  as \a : prop . any { A = a }
+  as \a : prop . any { Search = a }
 
 -------------------
 --- Constraints ---
