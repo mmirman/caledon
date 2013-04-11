@@ -14,7 +14,7 @@ import Substitution
 import Context
 import TopoSortAxioms
 import Control.Monad.State (StateT, forM_,runStateT, modify, get,put, State, runState)
-import Control.Monad.RWS (RWST, runRWST, ask, tell)
+import Control.Monad.RWS (RWST, runRWST, ask, tell, listen)
 import Control.Monad.Error (throwError, MonadError)
 import Control.Monad (unless, forM, replicateM, void, (<=<), when)
 import Control.Monad.Trans (lift)
@@ -568,31 +568,35 @@ viewApp (Spine nm (viewLast -> (l,arg))) = (Spine nm l, arg)
 lessThan (Spine a [Spine nm []]) (Spine b [Spine nm' []]) | a == tipeName && b == tipeName = tell [(nm,nm')]
 lessThan a b = throwTrace 0 $ "Expecting type: "++show a ++ "  <  "++show b
 
-universeCheck env sp = case sp of
+universeCheck nm env sp = case sp of
   Abs nm ty a -> do
-    universeCheck env ty
+    universeCheck nm env ty
     let env' = M.insert nm ty env
-    tyR <- universeCheck env' a
-    universeCheck env' tyR
+    tyR <- universeCheck nm env' a
+    universeCheck nm env' tyR
     return $ forall nm ty tyR
+    
   Spine "#imp_abs#" [_, Abs nm ty a] -> do
-    universeCheck env ty
+    universeCheck nm env ty
     let env' = M.insert nm ty env
-    tyR <- universeCheck env' a
-    universeCheck env' tyR
+    tyR <- universeCheck nm env' a
+    universeCheck nm env' tyR
     return $ imp_forall nm ty tyR    
       
   Spine "#forall#" [_, Abs nm ty l] -> do  
-    k1 <- universeCheck env ty
-    k2 <- universeCheck (M.insert nm ty env) l
+    k1 <- universeCheck nm env ty
+    k2 <- universeCheck nm (M.insert nm ty env) l
     k3 <- (tipe `apply`) <$> var <$> getNewWith "@tv"
     
     lessThan k1 k3
     lessThan k2 k3
     return k3
+  Spine "#ascribe#" [ty,a] -> do
+    universeCheck nm env ty
+    universeCheck nm env a
   Spine "#imp_forall#" [_, Abs nm ty l] -> do  
-    k1 <- universeCheck env ty
-    k2 <- universeCheck (M.insert nm ty env) l
+    k1 <- universeCheck nm env ty
+    k2 <- universeCheck nm (M.insert nm ty env) l
 
     k3 <- (tipe `apply`) <$> var <$> getNewWith "@tv"
     lessThan k1 k3
@@ -604,19 +608,26 @@ universeCheck env sp = case sp of
     tell [(v,v')]
     return $ tipe `apply` var v'
     
-  Spine "#tycon#" [Spine nm [l]] -> universeCheck env l
+  Spine "#tycon#" [Spine nm [l]] -> universeCheck nm env l
   Spine ['\'',c,'\''] [] -> return $ var "char"
   Spine nm [] -> case env ! nm of
     Nothing -> throwError $ "not in the enviroment: "++show nm
     Just a  -> return a
 
   (viewApp -> (f,a)) -> do
-    fty <- universeCheck env f
-    aty <- universeCheck env a
-    return $ case fty of  
-      Spine "#imp_forall#" [ty, v] -> (Spine "#imp_abs#" [ty,v]) `apply` a
-      Spine "#forall#" [ty, v] -> v `apply` a
+    (fty,lst1) <- listen $ universeCheck nm env f
+    (aty,lst2) <- listen $ universeCheck nm env a
+    let lsts = lst1 ++ lst2
+    tell lsts    
+    checkU nm lsts -- LOCAL UNIVERSE CHECKING - socool!!!! 
 
+    let byob fty = case fty of
+          Spine "#imp_forall#" [ty, v] -> (Spine "#imp_abs#" [ty,v]) `apply` a
+          Spine "#forall#" [ty, v] -> v `apply` a
+          -- Do some local universe checking!
+          Spine "#ascribe#" (t:v:l) ->  byob $ rebuildSpine v l
+          
+    return $ byob fty 
 
 initTypes (Spine a []) | a == tipeName = do
   v <- getNewWith "@tipeLevel"
@@ -625,13 +636,8 @@ initTypes (Spine nm l) = Spine nm <$> T.mapM initTypes l
 initTypes (Abs nm ty a) = do
   ty <- initTypes ty
   Abs nm ty <$> initTypes a
-
-checkUniverses nm env ty = do
-  (_,_,lst) <- (\a -> runRWST a () emptyState) $ do
-    env <- T.mapM initTypes $ M.union constsMap env
-    ty <- initTypes ty
-    universeCheck env ty
-    
+  
+checkU nm lst = do
   let graph = foldr (\(nm,lt) gr -> case gr ! nm of 
                         Nothing -> M.insert nm (S.singleton lt) gr
                         Just r -> M.insert nm (S.insert lt r)   gr) mempty lst
@@ -640,6 +646,13 @@ checkUniverses nm env ty = do
     then return ()
     else throwError $ "Impredicative use of type in: "++nm
 
+checkUniverses :: String -> M.Map Name Type -> Type -> Choice ()
+checkUniverses nm env ty = do
+  (_,_,lst) <- (\a -> runRWST a () emptyState) $ do
+    env <- T.mapM initTypes $ M.union constsMap env
+    ty <- initTypes ty
+    universeCheck nm env ty
+  checkU nm lst
 -----------------------------
 --- constraint generation ---
 -----------------------------
@@ -651,8 +664,8 @@ checkUniverses nm env ty = do
       
 withKind m = m tipe
 
-checkType :: Spine -> Type -> TypeChecker Spine
-checkType sp ty = case sp of
+checkType :: Bool -> Spine -> Type -> TypeChecker Spine
+checkType b sp ty = case sp of
   Spine "#hole#" [] -> do
     x' <- getNewWith "@hole"
     
@@ -662,70 +675,72 @@ checkType sp ty = case sp of
   
   Spine "#ascribe#" (t:v:l) -> do
     (v'',mem) <- regenWithMem v
-    t   <- withKind $ checkType t
+    t   <- withKind $ checkType b t
     t'' <- regenAbsVars t
-    v'  <- checkType v'' t
+    v'  <- checkType b v'' t
     r   <- getNewWith "@r"
-    Spine _ l' <- addToEnv (∀) r t'' $ checkType (Spine r l) ty
+    Spine _ l' <- addToEnv (∀) r t'' $ checkType b (Spine r l) ty
     
-    return $ rebuildSpine (rebuildFromMem mem v') l'
-    
-  Spine "#dontcheck#" [v] -> do
-    return v
+    if b 
+      then return $ rebuildSpine (rebuildFromMem mem v') l'
+      else return $ rebuildSpine (ascribe (rebuildFromMem mem v') t) l'
     
   Spine "#infer#" [_, Abs x tyA tyB ] -> do
-    tyA <- withKind $ checkType tyA
+    tyA <- withKind $ checkType b tyA
     x' <- getNewWith "@inf"
     addToEnv (∃) x' tyA $ do
       var x' .@. tyA
-      checkType (subst (x |-> var x') tyB) ty
+      checkType b (subst (x |-> var x') tyB) ty
 
+  Spine "#dontcheck#" [v] -> do
+    return v
+           
   Spine "#imp_forall#" [_, Abs x tyA tyB] -> do
-    tyA <- withKind $ checkType tyA
-    tyB <- addToEnv (∀) x tyA $ checkType tyB ty
+    tyA <- withKind $ checkType b tyA
+    tyB <- addToEnv (∀) x tyA $ checkType b tyB ty
     return $ imp_forall x tyA tyB
     
   Spine "#forall#" [_, Abs x tyA tyB] -> do
-    tyA <- withKind $ checkType tyA
+    tyA <- withKind $ checkType b tyA
     forall x tyA <$> (addToEnv (∀) x tyA $ 
-      checkType tyB ty )
+      checkType b tyB ty )
 
   -- below are the only cases where bidirectional type checking is useful 
   Spine "#imp_abs#" [_, Abs x tyA sp] -> case ty of
     Spine "#imp_forall#" [_, Abs x' tyA' tyF'] | x == x' || "" == x' -> do
-      tyA <- withKind $ checkType tyA
+      tyA <- withKind $ checkType b tyA
       tyA ≐ tyA'
       addToEnv (∀) x tyA $ do
-        imp_abs x tyA <$> checkType sp tyF'
+        imp_abs x tyA <$> checkType b sp tyF'
     _ -> do
       -- here this acts like "infers" since we can always initialize a ?\ like an infers!
-      tyA <- withKind $ checkType tyA
+      tyA <- withKind $ checkType b tyA
       x' <- getNewWith "@inf"
       addToEnv (∃) x' tyA $ do
         var x' .@. tyA
-        checkType (subst (x |-> var x') sp) ty 
+        checkType b (subst (x |-> var x') sp) ty 
 {-
     _ -> do
       e <- getNewWith "@e"
-      tyA <- withKind $ checkType tyA
+      tyA <- withKind $ checkType b tyA
       withKind $ \k -> addToEnv (∃) e (forall x tyA k) $ do
         imp_forall x tyA (Spine e [var x]) ≐ ty
         sp <- addToEnv (∀) (check "impabs2" x) tyA $ 
-          checkType sp (Spine e [var x])
+          checkType b sp (Spine e [var x])
         return $ imp_abs x tyA sp
 -}
   Abs x tyA sp -> case ty of
     Spine "#forall#" [_, Abs x' tyA' tyF'] -> do
-      tyA <- withKind $ checkType tyA
+      tyA <- withKind $ checkType b tyA
       tyA ≐ tyA'
       addToEnv (∀) x tyA $ do
-        Abs x tyA <$> checkType sp (subst (x' |-> var x) tyF')
+        Abs x tyA <$> checkType b sp (subst (x' |-> var x) tyF')
     _ -> do
       e <- getNewWith "@e"
-      tyA <- withKind $ checkType tyA
+      tyA <- withKind $ checkType b tyA
       withKind $ \k -> addToEnv (∃) e (forall "" tyA k) $ do
         forall x tyA (Spine e [var x]) ≐ ty
-        Abs x tyA <$> (addToEnv (∀) x tyA $ checkType sp (Spine e [var x]))
+        Abs x tyA <$> (addToEnv (∀) x tyA $ checkType b sp (Spine e [var x]))
   Spine nm [] | isChar nm -> do
     ty ≐ Spine "char" []
     return sp
@@ -745,10 +760,10 @@ checkType sp ty = case sp of
                 (tycon nm (var x):) <$> chop (subst (nm |-> var x) tyv) lst
 
             Just (val,l) -> do
-              val <- checkType val ty'
+              val <- checkType b val ty'
               (tycon nm val:) <$> chop (subst (nm |-> val) tyv) l
           Spine "#forall#" [ty', c] -> do
-            a <- checkType a ty'
+            a <- checkType b a ty'
             (a:) <$> chop (c `apply` a) l
           _ -> withKind $ \k -> do  
             x <- getNewWith "@xin"
@@ -756,7 +771,7 @@ checkType sp ty = case sp of
             tybody <- getNewWith "@v"
             let tybodyty = forall z (var x) k
             withKind $ \k' -> addToEnv (∃) x k' $ addToEnv (∃) tybody tybodyty $ do 
-              a <- checkType a (var x)
+              a <- checkType b a (var x)
               v <- getNewWith "@v"
               forall v (var x) (Spine tybody [var v]) ≐ mty
               (a:) <$> chop (Spine tybody [a]) l
@@ -769,8 +784,8 @@ checkType sp ty = case sp of
                                      ++ "\n\t from "++ show ty
       Just ty' -> Spine head <$> chop (snd ty') args
 
-checkFullType :: Spine -> Type -> Env (Spine, Constraint)
-checkFullType val ty = typeCheckToEnv $ checkType val ty
+checkFullType :: Bool -> Spine -> Type -> Env (Spine, Constraint)
+checkFullType b val ty = typeCheckToEnv $ checkType b val ty
 
 
 ---------------------------------
@@ -831,15 +846,15 @@ generateBinding sp = foldr (\a b -> imp_forall a ty_hole b) sp orderedgens
 ----------------------
 --- type inference ---
 ----------------------
-typeInfer :: ContextMap -> ((Bool,Integer),Name,Term,Type) -> Choice (Term, Type, ContextMap)
-typeInfer env (seqi,nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
+typeInfer :: Bool -> ContextMap -> ((Bool,Integer),Name,Term,Type) -> Choice (Term, Type, ContextMap)
+typeInfer b env (seqi,nm,val,ty) = (\r -> (\(a,_,_) -> a) <$> runRWST r (M.union envConsts env) emptyState) $ do
   ty <- return $ alphaConvert mempty mempty ty
   val <- return $ alphaConvert mempty mempty val
   
   (ty,mem') <- regenWithMem ty
   (val,mem) <- vtrace 1 ("ALPHAD TO: "++show val) $ regenWithMem val
   
-  (val,constraint) <- vtrace 1 ("REGENED TO: "++show val) $ checkFullType val ty
+  (val,constraint) <- vtrace 1 ("REGENED TO: "++show val) $ checkFullType b val ty
   
   sub <- appendErr ("which became: "++show val ++ "\n\t :  " ++ show ty) $ 
          unify constraint
@@ -861,16 +876,18 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 ----------------------------
 
 typePipe verbose lt (b,nm,ty,kind) = do
-  (ty,kind,lt) <- mtrace verbose ("Inferring: " ++nm) $ 
-                  typeInfer lt (b,nm, ty,kind) -- type infer
-  
+  (ty,kind,lt) <- mtrace verbose ("Inferring:   " ++nm) $ 
+                  typeInfer False lt (b,nm, ty,kind) -- type infer
+                  
+  checkUniverses nm (snd <$> lt) (ascribe ty kind)
+
   (ty,kind,lt) <- mtrace verbose ("Elaborating: " ++nm) $ 
-                  typeInfer lt (b,nm, ty,kind) -- elaborate
+                  typeInfer True lt (b,nm, ty,kind) -- elaborate                  
                   
-  (ty,kind,lt) <- mtrace verbose ("Checking: " ++nm) $ 
-                  typeInfer lt (b,nm, ty,kind) -- type check
+  (ty,kind,lt) <- mtrace verbose ("Checking:    " ++nm) $ 
+                  typeInfer True lt (b,nm, ty,kind) -- type check
                   
-  checkUniverses nm (snd <$> lt) (ascribe ty kind)  
+
   
   return (ty,kind,lt)
   
@@ -917,7 +934,7 @@ typeCheckAxioms verbose lst = do
           Just (val,_,_) -> ((M.insert nm val lv, sub' <$> lt), (resp & predValue .~ Just val) :r , sub <$> toplst) 
             where sub' (b,a) = (b, sub a)
                   sub :: (Show a, Subst a) => a -> a
-                  sub = subst $ nm |-> ascribe val (dontcheck ty) 
+                  sub = subst $ nm |-> ascribe val (dontcheck ty)
           _ -> ((lv, lt), resp:r, toplst)
 
   (lst',(lv,lt)) <- inferAll ((mempty,tys), [], topoSortAxioms True lst)

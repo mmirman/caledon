@@ -43,4 +43,4 @@ defn foldrCL : {A B} (A -> B -> A) -> A -> churchList B -> A
      \F : A -> B -> A. 
      \bc : A .
      \cl : churchList B .
-     cl A bc (\v : B . \c : A . F c v)
+      cl A bc (\v : B . \c : A . F c v)
