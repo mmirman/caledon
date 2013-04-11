@@ -3,7 +3,8 @@
  PatternGuards,
  UnicodeSyntax,
  BangPatterns,
- TupleSections
+ TupleSections,
+ ViewPatterns
  #-}
 module HOU where
 
@@ -19,6 +20,7 @@ import Control.Monad (unless, forM, replicateM, void, (<=<), when)
 import Control.Monad.Trans (lift)
 import Control.Applicative
 import qualified Data.Foldable as F
+import qualified Data.Traversable as T
 import Data.Foldable (foldlM)
 import Data.List
 import Data.Maybe
@@ -563,6 +565,88 @@ search ty = do
   sub <- unify $ (∃) e ty $ SCons [var e :@: ty]
   return $ (sub, subst sub $ var e)
 
+
+----------------------------
+---  Universe Checking   ---
+----------------------------
+  
+viewLast (reverse -> (a:l)) = (reverse l,a)
+
+viewApp (Spine nm (viewLast -> (l,arg))) = (Spine nm l, arg)
+
+lessThan a _ | a == atom = return () -- atoms are impredicative
+lessThan (Spine a [Spine nm []]) (Spine b [Spine nm' []]) | a == tipeName && b == tipeName = tell [(nm,nm')]
+lessThan a b = throwTrace 0 $ "Expecting type: "++show a ++ "  <  "++show b
+
+universeCheck env sp = case sp of
+  Abs nm ty a -> do
+    k1 <- universeCheck env ty
+    let env' = M.insert nm ty env
+    tyR <- universeCheck env' a
+    k2  <- universeCheck env' tyR
+    lessThan k1 k2
+    return $ forall nm ty tyR
+  Spine "#imp_abs#" [_, Abs nm ty a] -> do
+    k1 <- universeCheck env ty
+    let env' = M.insert nm ty env
+    tyR <- universeCheck env' a
+    k2 <- universeCheck env' tyR
+    lessThan k1 k2
+    return $ imp_forall nm ty tyR    
+      
+  Spine "#forall#" [_, Abs nm ty l] -> do  
+    k1 <- universeCheck env ty
+    k2 <- universeCheck (M.insert nm ty env) l
+    lessThan k1 k2
+    return k2
+  Spine "#imp_forall#" [_, Abs nm ty l] -> do  
+    k <- universeCheck env ty
+    k2 <- universeCheck (M.insert nm ty env) l
+    lessThan k k2
+    return k2    
+  Spine a [] | a == atomName -> do 
+    v <- getNewWith "@tipeLevelRetA"
+    return $ tipe `apply` var v
+    
+  Spine a [Spine v []] | a == tipeName -> do 
+    v' <- getNewWith "@tipeLevelRetB"
+    tell [(v,v')]
+    return $ tipe `apply` var v'
+    
+  Spine nm [] -> case env ! nm of
+    Nothing -> throwError $ "not in the enviroment: "++show nm
+    Just a  -> return a
+
+  (viewApp -> (f,a)) -> do
+    fty <- universeCheck env f
+    aty <- universeCheck env a
+    return $ case fty of  
+      Spine "#imp_forall#" [ty, v] -> (Spine "#imp_abs#" [ty,v]) `apply` a
+      Spine "#forall#" [ty, v] -> v `apply` a
+
+
+initTypes (Spine a []) | a == tipeName = do
+  v <- getNewWith "@tipeLevel"
+  return $ Spine a [var v]
+initTypes (Spine nm l) = Spine nm <$> T.mapM initTypes l
+initTypes (Abs nm ty a) = do
+  ty <- initTypes ty
+  Abs nm ty <$> initTypes a
+
+checkUniverses nm env ty = do
+  (_,_,lst) <- (\a -> runRWST a () emptyState) $ do
+    env <- T.mapM initTypes $ M.union constsMap env
+    ty <- initTypes ty
+    universeCheck env ty
+    
+  let graph = foldr (\(nm,lt) gr -> case gr ! nm of 
+                        Nothing -> M.insert nm (S.singleton lt) gr
+                        Just r -> M.insert nm (S.insert lt r)   gr) mempty lst
+      
+  if hasNoCycles graph 
+    then return ()
+    else throwError $ "Impredicative use of type in: "++nm
+
 -----------------------------
 --- constraint generation ---
 -----------------------------
@@ -570,6 +654,8 @@ search ty = do
 (≐) a b = lift $ tell $ SCons [a :=: b]
 (.@.) a b = lift $ tell $ SCons [a :@: b]
 
+      
+      
 withKind m = do
   k <- getNewWith "@k"
   addToEnv (∃) k kind $ do
@@ -577,7 +663,6 @@ withKind m = do
     var k .@. kind    
     return r
 
-check v x = if x == "13@regm+f" then trace ("FOUND AT: "++ v) x else x
 
 checkType :: Spine -> Type -> TypeChecker Spine
 checkType sp ty | ty == kind = withKind $ checkType sp
@@ -611,12 +696,12 @@ checkType sp ty = case sp of
 
   Spine "#imp_forall#" [_, Abs x tyA tyB] -> do
     tyA <- withKind $ checkType tyA
-    tyB <- addToEnv (∀) (check "imp_forall" x) tyA $ checkType tyB ty
+    tyB <- addToEnv (∀) x tyA $ checkType tyB ty
     return $ imp_forall x tyA tyB
     
   Spine "#forall#" [_, Abs x tyA tyB] -> do
     tyA <- withKind $ checkType tyA
-    forall x tyA <$> (addToEnv (∀) (check "forall" x) tyA $ 
+    forall x tyA <$> (addToEnv (∀) x tyA $ 
       checkType tyB ty )
 
   -- below are the only cases where bidirectional type checking is useful 
@@ -624,7 +709,7 @@ checkType sp ty = case sp of
     Spine "#imp_forall#" [_, Abs x' tyA' tyF'] | x == x' || "" == x' -> do
       tyA <- withKind $ checkType tyA
       tyA ≐ tyA'
-      addToEnv (∀) (check "impabs1" x) tyA $ do
+      addToEnv (∀) x tyA $ do
         imp_abs x tyA <$> checkType sp tyF'
     _ -> do
       -- here this acts like "infers" since we can always initialize a ?\ like an infers!
@@ -647,14 +732,14 @@ checkType sp ty = case sp of
     Spine "#forall#" [_, Abs x' tyA' tyF'] -> do
       tyA <- withKind $ checkType tyA
       tyA ≐ tyA'
-      addToEnv (∀) (check "abs1" x) tyA $ do
+      addToEnv (∀) x tyA $ do
         Abs x tyA <$> checkType sp (subst (x' |-> var x) tyF')
     _ -> do
       e <- getNewWith "@e"
       tyA <- withKind $ checkType tyA
       withKind $ \k -> addToEnv (∃) e (forall "" tyA k) $ do
         forall x tyA (Spine e [var x]) ≐ ty
-        Abs x tyA <$> (addToEnv (∀) (check "abs2" x) tyA $ checkType sp (Spine e [var x]))
+        Abs x tyA <$> (addToEnv (∀) x tyA $ checkType sp (Spine e [var x]))
   Spine nm [] | isChar nm -> do
     ty ≐ Spine "char" []
     return sp
@@ -784,6 +869,7 @@ unsafeSubst s (Spine nm apps) = let apps' = unsafeSubst s <$> apps in case s ! n
   _ -> Spine nm apps'
 unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
   
+
 ----------------------------
 --- the public interface ---
 ----------------------------
@@ -795,6 +881,10 @@ typePipe verbose lt (b,nm,ty,kind) = do
                   typeInfer lt (b,nm, ty,kind) -- elaborate
   (ty,kind,lt) <- mtrace verbose ("Checking: " ++nm) $ 
                   typeInfer lt (b,nm, ty,kind) -- type check
+                  
+--  checkUniverses nm (snd <$> lt) kind -- (ascribe ty kind)
+  checkUniverses nm (snd <$> lt) ty 
+  
   return (ty,kind,lt)
   
 typeCheckAxioms :: Bool -> [FlatPred] -> Choice (Substitution, Substitution)
@@ -919,9 +1009,12 @@ typeCheckAll verbose preds = do
 toAxioms :: Bool -> [Decl] -> [FlatPred]
 toAxioms b = concat . zipWith toAxioms' [1..]
   where toAxioms' j (Predicate s nm ty cs) = 
-          (FlatPred (PredData (Just $ atomName) False j s) nm Nothing ty tipe)
-          :zipWith (\(sequ,(nm',ty')) i -> (FlatPred (PredData (Just nm) sequ i False) nm' Nothing ty' atom)) cs [0..]
-        toAxioms' j (Query nm val) = [(FlatPred (PredData Nothing False j False) nm Nothing val atom)]
+--          (FlatPred (PredData (Just $ atomName) False j s) nm Nothing ty tipe)
+--          :zipWith (\(sequ,(nm',ty')) i -> (FlatPred (PredData (Just nm) sequ i False) nm' Nothing ty' atom)) cs [0..]
+          (FlatPred (PredData (Just $ tipeName) False j s) nm Nothing ty tipe)
+          :zipWith (\(sequ,(nm',ty')) i -> (FlatPred (PredData (Just nm) sequ i False) nm' Nothing ty' tipe)) cs [0..]
+--        toAxioms' j (Query nm val) = [(FlatPred (PredData Nothing False j False) nm Nothing val atom)]
+        toAxioms' j (Query nm val) = [(FlatPred (PredData Nothing False j False) nm Nothing val tipe)]
         toAxioms' j (Define s nm val ty) = [ FlatPred (PredData Nothing False j s) nm (Just val) ty kind]
                                            
 

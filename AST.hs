@@ -264,7 +264,8 @@ toNCCstring s = foldr cons nil $ map toNCCchar s
         nil = Spine "nil" [ tycon "A" char]
         cons a l = Spine "cons" [tycon "A" char, a,l]
 
-envConsts = anonymous <$> M.fromList consts
+constsMap = M.fromList consts
+envConsts = anonymous <$> constsMap
 
 isChar  ['\'',_,'\''] = True
 isChar _ = False
