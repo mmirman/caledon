@@ -2,84 +2,84 @@ fixity left 1 +
 fixity left 2 *
 fixity left 4 ^
 
-defn zero : prop 
-  as [A : prop] A
+defn zero : type 
+  as [A : type] A
 
 defn fromZero : zero -> A
-  as ?\ A : prop . 
+  as ?\ A : type . 
       \ z : zero .
         z A
 
-defn one : prop
-  as [A : prop] A -> A
+defn one : type
+  as [A : type] A -> A
 
 defn unit : one
-  as \ A : prop . 
+  as \ A : type . 
      \ x : A . x
 
 defn caseUnit : (one -> A) -> A
-  as ?\ A   : prop     .
+  as ?\ A   : type     .
       \ foo : one -> A .
         foo unit
 
-defn neg : prop -> prop
-  as \ A : prop . [C : prop] A -> C
+defn neg : type -> type
+  as \ A : type . [C : type] A -> C
 
-defn ^ : prop -> prop -> prop
-  as \ A B : prop . A -> B
+defn ^ : type -> type -> type
+  as \ A B : type . A -> B
 
-defn + : prop -> prop -> prop
-  as \ A B : prop . 
-      {C : prop} (A -> C) -> (B -> C) -> C
+defn + : type -> type -> type
+  as \ A B : type . 
+      {C : type} (A -> C) -> (B -> C) -> C
 
 defn case : At + Bt -> (At -> Ct) -> (Bt -> Ct) -> Ct
-  as ?\ At Bt Ct : prop   .
+  as ?\ At Bt Ct : type   .
       \ sum    : At + Bt  .
       \ inl    : At -> Ct .
       \ inr    : Bt -> Ct .
         sum { C = Ct } inl inr
 
 defn inL : A -> A + B
-  as ?\ A B : prop   .
+  as ?\ A B : type   .
       \ a   : A      .
-     ?\ C   : prop   .
+     ?\ C   : type   .
       \ inl : A -> C .
       \ inr : B -> C .
         inl a
 
 defn inR : {A B} B -> A + B
-  as ?\ A B : prop   .
+  as ?\ A B : type   .
       \ b   : B      .
-     ?\ C   : prop   .
+     ?\ C   : type   .
       \ inl : A -> C .
       \ inr : B -> C .
         inr b
 
-defn * : prop -> prop -> prop
-  as \ A B : prop . 
-      [C : prop] (A -> B -> C) -> C
+defn * : type -> type -> type
+  as \ A B : type . 
+      [C : type] (A -> B -> C) -> C
 
 defn pair : A -> B -> A * B
-  as ?\ A B : prop        .
+  as ?\ A B : type        .
       \ a   : A           .
       \ b   : B           .
-      \ C   : prop        .
+      \ C   : type        .
       \ pi  : A -> B -> C . 
         pi a b
 
 defn piL : A * B -> A
-  as ?\ A B  : prop  .
+  as ?\ A B  : type  .
       \ prod : A * B . 
         prod A (\a : A . \ b : B . a)
 
 defn piR : A * B -> B
-  as ?\ A B  : prop  .
+  as ?\ A B  : type  .
       \ prod : A * B . 
         prod B (\a : A . \ b : B . b)
 
 
 
-defn dEq : prop -> prop -> prop
+defn dEq : type -> type -> prop
    | dEq-sym = dEq Av Av
    
    | dEq-add-ident = dEq (Av + neg Av) zero
@@ -108,11 +108,11 @@ defn dEq : prop -> prop -> prop
    | dEq-refl = dEq Av Bv <- dEq Bv Av
    
    | dEq-imp = dEq A B 
-           <- (A -> B) 
-           <- (B -> A)
+            <- (A -> B) 
+            <- (B -> A)
 
 
-defn deriv : (prop -> prop) -> (prop -> prop) -> prop
+defn deriv : (type -> type) -> (type -> type) -> prop
   >| deriv-one = deriv (\x . x ) (\ x . one)
   >| deriv-const = deriv (\ x . R) (\ x . zero)
 
@@ -126,11 +126,8 @@ defn deriv : (prop -> prop) -> (prop -> prop) -> prop
   >| deriv-pow = deriv (\ x . U x ^ (one + R) ) (\ x . U' x * (one + R) * U x ^ R)
               <- deriv U U' 
 
-   | deriv-dEq  = deriv A B 
-               <- ([x] dEq (A x) (A' x))
-               <- ([x] dEq (B x) (B' x))
+   | deriv-dEq  = [A B A' B' : _ -> _ ]
+                  deriv A B 
+               <- ([x : type] dEq (A x) (A' x))
+               <- ([x : type] dEq (B x) (B' x))
                <- deriv A' B'
-
-#include "../prelude/logic.ncc"
-
-query whatDeriv = propPropAny (deriv (\ x : prop . x ^ (one + one) ))

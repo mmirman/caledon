@@ -121,7 +121,6 @@ unifySearchAtom (a :@: b) return = rightSearch a b $ newReturn return
 unifySearchAtom _ return = return Nothing
 
 
-
 unifyOne :: SCons -> CONT_T b Env UnifyResult
 unifyOne (a :=: b) return = do
   c' <- isolateForFail $ unifyEq $ a :=: b 
@@ -137,6 +136,10 @@ impAbsPrefix (Spine "#imp_abs#" (ty:(Abs nm _ l):r)) = nm:impAbsPrefix l
 impAbsPrefix _ = []
 
 unifyEq cons@(a :=: b) = case (a,b) of 
+  
+  (a, b) | a == atom && b == tipe -> return $ Just (mempty,[], False)
+  (b, a) | a == atom && b == tipe -> return $ Just (mempty,[], False)
+  
   (Spine "#ascribe#" (ty:v:l), b) -> return $ Just (mempty, [rebuildSpine v l :=: b], False)
   (b,Spine "#ascribe#" (ty:v:l)) -> return $ Just (mempty, [b :=: rebuildSpine v l], False)
   
@@ -487,11 +490,9 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
         Abs{} -> throwError "not properly typed"
         _ | m == tipe || m == atom -> ret $ Just []
         _ -> depth -- we should pretty much always use breadth first search here maybe, since this is type search
-          where srch r1 r2 = r1 $ F.asum $ r2 . Just . return . (m :=:) <$> [atom , tipe] -- for breadth first
+          where srch r1 r2 = r1 $ F.asum $ r2 . Just . return . (m :=:) <$> [atom, tipe] -- for breadth first
                 breadth = srch (ret =<<) return
                 depth = srch id (appendErr "" . ret)
-    Spine nm [] | nm == tipeName -> 
-      ret $ Just [m :=: atom]
     Spine nm _ -> do
       constants <- getConstants
       foralls <- getForalls
@@ -580,30 +581,34 @@ lessThan a b = throwTrace 0 $ "Expecting type: "++show a ++ "  <  "++show b
 
 universeCheck env sp = case sp of
   Abs nm ty a -> do
-    k1 <- universeCheck env ty
+    universeCheck env ty
     let env' = M.insert nm ty env
     tyR <- universeCheck env' a
-    k2  <- universeCheck env' tyR
-    lessThan k1 k2
+    universeCheck env' tyR
     return $ forall nm ty tyR
   Spine "#imp_abs#" [_, Abs nm ty a] -> do
-    k1 <- universeCheck env ty
+    universeCheck env ty
     let env' = M.insert nm ty env
     tyR <- universeCheck env' a
-    k2 <- universeCheck env' tyR
-    lessThan k1 k2
+    universeCheck env' tyR
     return $ imp_forall nm ty tyR    
       
   Spine "#forall#" [_, Abs nm ty l] -> do  
     k1 <- universeCheck env ty
     k2 <- universeCheck (M.insert nm ty env) l
-    lessThan k1 k2
-    return k2
+    k3 <- (tipe `apply`) <$> var <$> getNewWith "@tv"
+    
+    lessThan k1 k3
+    lessThan k2 k3
+    return k3
   Spine "#imp_forall#" [_, Abs nm ty l] -> do  
-    k <- universeCheck env ty
+    k1 <- universeCheck env ty
     k2 <- universeCheck (M.insert nm ty env) l
-    lessThan k k2
-    return k2    
+
+    k3 <- (tipe `apply`) <$> var <$> getNewWith "@tv"
+    lessThan k1 k3
+    lessThan k2 k3
+    return k3
   Spine a [] | a == atomName -> do 
     v <- getNewWith "@tipeLevelRetA"
     return $ tipe `apply` var v
@@ -613,6 +618,8 @@ universeCheck env sp = case sp of
     tell [(v,v')]
     return $ tipe `apply` var v'
     
+  Spine "#tycon#" [Spine nm [l]] -> universeCheck env l
+  
   Spine nm [] -> case env ! nm of
     Nothing -> throwError $ "not in the enviroment: "++show nm
     Just a  -> return a
@@ -628,6 +635,9 @@ universeCheck env sp = case sp of
 initTypes (Spine a []) | a == tipeName = do
   v <- getNewWith "@tipeLevel"
   return $ Spine a [var v]
+--initTypes (Spine a []) | a == atomName = do
+--  v <- getNewWith "@prop"
+--  return $ Spine tipeName [var v]  
 initTypes (Spine nm l) = Spine nm <$> T.mapM initTypes l
 initTypes (Abs nm ty a) = do
   ty <- initTypes ty
@@ -643,7 +653,7 @@ checkUniverses nm env ty = do
                         Nothing -> M.insert nm (S.singleton lt) gr
                         Just r -> M.insert nm (S.insert lt r)   gr) mempty lst
       
-  if hasNoCycles graph 
+  if isUniverseGraph graph 
     then return ()
     else throwError $ "Impredicative use of type in: "++nm
 
@@ -658,11 +668,10 @@ checkUniverses nm env ty = do
       
 withKind m = do
   k <- getNewWith "@k"
-  addToEnv (∃) k kind $ do
+  addToEnv (∃) k tipe $ do
     r <- m $ var k
-    var k .@. kind    
+    var k .@. tipe
     return r
-
 
 checkType :: Spine -> Type -> TypeChecker Spine
 checkType sp ty | ty == kind = withKind $ checkType sp
@@ -775,7 +784,7 @@ checkType sp ty = case sp of
               forall v (var x) (Spine tybody [var v]) ≐ mty
               (a:) <$> chop (Spine tybody [a]) l
 
-    mty <- (M.lookup head) <$> lift getFullCtxt
+    mty <- (! head) <$> lift getFullCtxt
     
     case mty of 
       Nothing -> lift $ throwTrace 0 $ "variable: "++show head++" not found in the environment."
@@ -877,13 +886,15 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 typePipe verbose lt (b,nm,ty,kind) = do
   (ty,kind,lt) <- mtrace verbose ("Inferring: " ++nm) $ 
                   typeInfer lt (b,nm, ty,kind) -- type infer
+                  
+  checkUniverses nm (snd <$> lt) kind -- (ascribe ty kind)
+  checkUniverses nm (snd <$> lt) ty   -- perform universe checking once before elaboration
+  
   (ty,kind,lt) <- mtrace verbose ("Elaborating: " ++nm) $ 
                   typeInfer lt (b,nm, ty,kind) -- elaborate
-  (ty,kind,lt) <- mtrace verbose ("Checking: " ++nm) $ 
-                  typeInfer lt (b,nm, ty,kind) -- type check
                   
---  checkUniverses nm (snd <$> lt) kind -- (ascribe ty kind)
-  checkUniverses nm (snd <$> lt) ty 
+--  (ty,kind,lt) <- mtrace verbose ("Checking: " ++nm) $ 
+--                  typeInfer lt (b,nm, ty,kind) -- type check
   
   return (ty,kind,lt)
   
@@ -990,6 +1001,7 @@ getImpliedFamilies s = S.intersection fs $ gif s
         gif (Spine "#imp_forall#" [ty,a]) = (case getFamilyM ty of
           Nothing -> id
           Just f | f == atomName -> id
+          Just f | f == tipeName -> id
           Just f -> S.insert f) $ gif ty `S.union` gif a 
         gif (Spine a l) = mconcat $ gif <$> l
         gif (Abs _ ty l) = S.union (gif ty) (gif l)
@@ -1009,11 +1021,8 @@ typeCheckAll verbose preds = do
 toAxioms :: Bool -> [Decl] -> [FlatPred]
 toAxioms b = concat . zipWith toAxioms' [1..]
   where toAxioms' j (Predicate s nm ty cs) = 
---          (FlatPred (PredData (Just $ atomName) False j s) nm Nothing ty tipe)
---          :zipWith (\(sequ,(nm',ty')) i -> (FlatPred (PredData (Just nm) sequ i False) nm' Nothing ty' atom)) cs [0..]
-          (FlatPred (PredData (Just $ tipeName) False j s) nm Nothing ty tipe)
-          :zipWith (\(sequ,(nm',ty')) i -> (FlatPred (PredData (Just nm) sequ i False) nm' Nothing ty' tipe)) cs [0..]
---        toAxioms' j (Query nm val) = [(FlatPred (PredData Nothing False j False) nm Nothing val atom)]
+          (FlatPred (PredData (Just $ atomName) False j s) nm Nothing ty tipe)
+          :zipWith (\(sequ,(nm',ty')) i -> (FlatPred (PredData (Just nm) sequ i False) nm' Nothing ty' atom)) cs [0..]
         toAxioms' j (Query nm val) = [(FlatPred (PredData Nothing False j False) nm Nothing val tipe)]
         toAxioms' j (Define s nm val ty) = [ FlatPred (PredData Nothing False j s) nm (Just val) ty kind]
                                            

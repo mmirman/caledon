@@ -230,17 +230,17 @@ atom = var atomName
 ty_hole = var "#hole#"
 tipe = var tipeName
 kind = var kindName  -- can be either a type or an atom
-ascribe a t = Spine ("#ascribe#") [t, a]
-dontcheck t = Spine ("#dontcheck#") [t]
-forall x tyA v = Spine ("#forall#") [tyA, Abs x tyA v]
-infer x tyA v = Spine ("#infer#") [tyA, Abs x tyA v]
+ascribe a t = Spine "#ascribe#" [t, a]
+dontcheck t = Spine "#dontcheck#" [t]
+forall x tyA v = Spine "#forall#" [tyA, Abs x tyA v]
+infer x tyA v = Spine "#infer#" [tyA, Abs x tyA v]
 
 imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
 imp_abs x tyA v = Spine ("#imp_abs#") [tyA, Abs x tyA v]
 tycon nm val = Spine "#tycon#" [Spine nm [val]]
 
 consts = [ (atomName , tipe)
-         , (tipeName , kind)
+         , (tipeName , tipe)
          , (kindName , kind)
          -- atom : kind
            

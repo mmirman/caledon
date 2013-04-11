@@ -25,8 +25,9 @@ topoSortComp producer scons = finalizeList $ map ((\(a,_,_) -> a) . v2nkel) $ to
         (graph',v2nkel,_) = graphFromEdges res
         graph = transposeG graph'
 
-hasNoCycles graph = all isAcyc $ stronglyConnComp graph'
-  where graph' = (\(a,b) -> ((), a , b)) <$> M.toList (S.toList <$> graph)
-        
+isUniverseGraph graph = all isAcyc $ stronglyConnComp graph' 
+  where graph' = (\(a,b) -> (a, a , b)) <$> M.toList (S.toList <$> graph)
+                
         isAcyc (AcyclicSCC _) = True
         isAcyc _ = False
+        

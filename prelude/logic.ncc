@@ -2,24 +2,24 @@
 -- exists  --
 -------------
 fixity lambda exists
-defn exists : [N : tipe] ( N -> tipe) -> tipe
-  as \ N : tipe      . 
-     \ P : N -> tipe .
-     [ C : tipe ] ([a : N] P a -> C) -> C
+defn exists : [N : type] ( N -> type ) -> type
+  as \ N : type      . 
+     \ P : N -> type .
+     [ C : type ] ([a : N] P a -> C) -> C 
 
-defn pack : {N : tipe }[F : N -> tipe][V] F V -> ( exists a : N . F a )
-  as ?\ N  : tipe             .
-      \ F  : N -> tipe        . 
+defn pack : {N : type }[F : N -> type][V] F V -> ( exists a : N . F a )
+  as ?\ N  : type             .
+      \ F  : N -> type        . 
       \ V  : N                .
       \ FV : F V              .
-      \ C  : tipe             .
+      \ C  : type             .
       \ FA : [a : N] F a -> C .
         FA V FV
 
-defn open : {N}{F : N -> tipe}{A : tipe} ( exists a : N . F a ) -> ([a : N] F a -> A) -> A
-  as ?\ N  : tipe               .
-     ?\ F  : N -> tipe          .
-     ?\ A  : tipe               .
+defn open : {N}{F : N -> type}{A : type} ( exists a : N . F a ) -> ([a : N] F a -> A) -> A
+  as ?\ N  : type               .
+     ?\ F  : N -> type          .
+     ?\ A  : type               .
       \ EX : exists a : N . F a .
       \ Fo : [a : N] F a -> A   .
         EX A Fo
@@ -27,40 +27,34 @@ defn open : {N}{F : N -> tipe}{A : tipe} ( exists a : N . F a ) -> ([a : N] F a 
 ---------------
 -- searches ---
 ---------------
-defn any : (Search -> tipe) -> tipe
-   | is = [V : A][F : A -> tipe] F V -> any {Search = A } F
+defn any : {Search : type} (Search -> type) -> prop
+   | is = [V : A][F : A -> type] F V -> any {Search = A} F
 
-defn tipeAny : (tipe -> tipe) -> tipe
-   | is2 = [V : tipe][F : tipe -> tipe] F V -> tipeAny F
-
-defn tipeTipeAny : ((tipe -> tipe) -> tipe) -> tipe
-   | is3 = [V : tipe -> tipe][F : (tipe -> tipe) -> tipe] F V -> tipeTipeAny F
-
-defn openAny : [A][F : A -> tipe] any F -> [V : A] F V -> tipe
+defn openAny : [A][F : A -> type] any F -> [V : A] F V -> prop
    | openAnyDef = openAny A F (is V F FV) V FV
 
 fixity lambda free
-defn free : [A : tipe] (A -> tipe) -> tipe
-  as \a : tipe . any { Search = a }
+defn free : [A : type] (A -> type) -> type
+  as \a : type . any { Search = a }
 
 -------------------
 --- Constraints ---
 -------------------
 fixity none 5 =:=
-defn =:= : Q -> Q -> tipe
+defn =:= : Q -> Q -> prop
   >| eq = (B : A) =:= B
 
 -- searching for these is SLOW
 fixity none 0 /\
-defn /\ : tipe -> tipe -> tipe
+defn /\ : type -> type -> prop
   >| and = A -> B -> A /\ B
 
 fixity none 0 \/
-defn \/ : tipe -> tipe -> tipe
+defn \/ : type -> type -> prop
    | or1 = A -> A \/ B
    | or2 = B -> A \/ B
 
 fixity left 0 ==
 -- currently we can't do any inference inside of definitional signatures
-defn == : {q : tipe} (q -> tipe) -> q -> tipe 
-  as ?\q . \foo : q -> tipe . \v : q . foo v
+defn == : {q : type} (q -> type) -> q -> type 
+  as ?\q . \foo : q -> type . \v : q . foo v
