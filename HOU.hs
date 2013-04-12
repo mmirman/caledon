@@ -593,7 +593,8 @@ universeCheck nm env sp = case sp of
     return k3
   Spine "#ascribe#" [ty,a] -> do
     universeCheck nm env ty
-    universeCheck nm env a
+    --universeCheck nm env a
+    return ty
   Spine "#imp_forall#" [_, Abs nm ty l] -> do  
     k1 <- universeCheck nm env ty
     k2 <- universeCheck nm (M.insert nm ty env) l

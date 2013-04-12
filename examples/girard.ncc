@@ -1,0 +1,16 @@
+
+defn omega : ([A : type] A -> type) -> type
+  as \ x : [A : type] A -> type . x ([A : type] A -> type) x
+
+defn myid : [a : type] a -> a
+  as \ a x . x
+
+-- because of early-instantiation, 
+-- many things are well typed in this language 
+-- that aren't in idris
+
+-- still, no computation is performed until the local universe heirarchy is checked.
+-- this prevents girards paradox.
+
+defn idid : [a : type] a -> a
+  as myid _ myid
