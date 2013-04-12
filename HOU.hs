@@ -681,7 +681,6 @@ checkType b sp ty = case sp of
     v'  <- checkType b v'' t
     r   <- getNewWith "@r"
     Spine _ l' <- addToEnv (∀) r t'' $ checkType b (Spine r l) ty
-    
     if b 
       then return $ rebuildSpine (rebuildFromMem mem v') l'
       else return $ rebuildSpine (ascribe (rebuildFromMem mem v') t) l'
@@ -720,16 +719,7 @@ checkType b sp ty = case sp of
       addToEnv (∃) x' tyA $ do
         var x' .@. tyA
         checkType b (subst (x |-> var x') sp) ty 
-{-
-    _ -> do
-      e <- getNewWith "@e"
-      tyA <- withKind $ checkType b tyA
-      withKind $ \k -> addToEnv (∃) e (forall x tyA k) $ do
-        imp_forall x tyA (Spine e [var x]) ≐ ty
-        sp <- addToEnv (∀) (check "impabs2" x) tyA $ 
-          checkType b sp (Spine e [var x])
-        return $ imp_abs x tyA sp
--}
+
   Abs x tyA sp -> case ty of
     Spine "#forall#" [_, Abs x' tyA' tyF'] -> do
       tyA <- withKind $ checkType b tyA
@@ -751,7 +741,8 @@ checkType b sp ty = case sp of
           return []
           
         chop mty lst@(a:l) = case mty of 
-          
+          -- typechecking/inference is not guaranteed to be decidable!
+          Spine "#ascribe#" (ty:v:l) -> chop (rebuildSpine v l) lst
           Spine "#imp_forall#" [ty', Abs nm _ tyv] -> case findTyconInPrefix nm lst of
             Nothing -> do
               x <- getNewWith "@xin"
