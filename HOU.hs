@@ -70,6 +70,7 @@ flatten (SCons l) = return l
 
 type UnifyResult = Maybe (Substitution, [SCons], Bool)
 
+
 unify :: Constraint -> Env Substitution
 unify cons =  do
   cons <- vtrace 5 ("CONSTRAINTS1: "++show cons) $ regenAbsVars cons
@@ -592,9 +593,9 @@ universeCheck nm env sp = case sp of
     lessThan k2 k3
     return k3
   Spine "#ascribe#" [ty,a] -> do
-    universeCheck nm env ty
-    --universeCheck nm env a
-    return ty
+    --universeCheck nm env ty
+    universeCheck nm env a
+    --return ty
   Spine "#imp_forall#" [_, Abs nm ty l] -> do  
     k1 <- universeCheck nm env ty
     k2 <- universeCheck nm (M.insert nm ty env) l
@@ -623,8 +624,10 @@ universeCheck nm env sp = case sp of
     checkU nm lsts -- LOCAL UNIVERSE CHECKING - socool!!!! 
 
     let byob fty = case fty of
-          Spine "#imp_forall#" [ty, v] -> (Spine "#imp_abs#" [ty,v]) `apply` a
-          Spine "#forall#" [ty, v] -> v `apply` a
+          Spine "#imp_forall#" [ty, v] -> 
+            (Spine "#imp_abs#" [ty,v]) `apply` a
+          Spine "#forall#" [ty, val] -> 
+            val `apply` a
           -- Do some local universe checking!
           Spine "#ascribe#" (t:v:l) ->  byob $ rebuildSpine v l
           
@@ -653,17 +656,13 @@ checkUniverses nm env ty = do
     env <- T.mapM initTypes $ M.union constsMap env
     ty <- initTypes ty
     universeCheck nm env ty
-  checkU nm lst
+  vtrace 0 (show lst) $ checkU nm lst
 -----------------------------
 --- constraint generation ---
 -----------------------------
 
 (≐) a b = lift $ tell $ SCons [a :=: b]
 (.@.) a b = lift $ tell $ SCons [a :@: b]
-
-      
-      
-withKind m = m tipe
 
 checkType :: Bool -> Spine -> Type -> TypeChecker Spine
 checkType b sp ty = case sp of
@@ -676,7 +675,7 @@ checkType b sp ty = case sp of
   
   Spine "#ascribe#" (t:v:l) -> do
     (v'',mem) <- regenWithMem v
-    t   <- withKind $ checkType b t
+    t   <- checkType b t tipe
     t'' <- regenAbsVars t
     v'  <- checkType b v'' t
     r   <- getNewWith "@r"
@@ -686,7 +685,7 @@ checkType b sp ty = case sp of
       else return $ rebuildSpine (ascribe (rebuildFromMem mem v') t) l'
     
   Spine "#infer#" [_, Abs x tyA tyB ] -> do
-    tyA <- withKind $ checkType b tyA
+    tyA <- checkType b tyA tipe
     x' <- getNewWith "@inf"
     addToEnv (∃) x' tyA $ do
       var x' .@. tyA
@@ -696,25 +695,25 @@ checkType b sp ty = case sp of
     return v
            
   Spine "#imp_forall#" [_, Abs x tyA tyB] -> do
-    tyA <- withKind $ checkType b tyA
+    tyA <- checkType b tyA tipe
     tyB <- addToEnv (∀) x tyA $ checkType b tyB ty
     return $ imp_forall x tyA tyB
     
   Spine "#forall#" [_, Abs x tyA tyB] -> do
-    tyA <- withKind $ checkType b tyA
+    tyA <- checkType b tyA tipe
     forall x tyA <$> (addToEnv (∀) x tyA $ 
       checkType b tyB ty )
 
   -- below are the only cases where bidirectional type checking is useful 
   Spine "#imp_abs#" [_, Abs x tyA sp] -> case ty of
     Spine "#imp_forall#" [_, Abs x' tyA' tyF'] | x == x' || "" == x' -> do
-      tyA <- withKind $ checkType b tyA
+      tyA <- checkType b tyA tipe
       tyA ≐ tyA'
       addToEnv (∀) x tyA $ do
         imp_abs x tyA <$> checkType b sp tyF'
     _ -> do
       -- here this acts like "infers" since we can always initialize a ?\ like an infers!
-      tyA <- withKind $ checkType b tyA
+      tyA <- checkType b tyA tipe
       x' <- getNewWith "@inf"
       addToEnv (∃) x' tyA $ do
         var x' .@. tyA
@@ -722,14 +721,14 @@ checkType b sp ty = case sp of
 
   Abs x tyA sp -> case ty of
     Spine "#forall#" [_, Abs x' tyA' tyF'] -> do
-      tyA <- withKind $ checkType b tyA
+      tyA <- checkType b tyA tipe
       tyA ≐ tyA'
       addToEnv (∀) x tyA $ do
         Abs x tyA <$> checkType b sp (subst (x' |-> var x) tyF')
     _ -> do
       e <- getNewWith "@e"
-      tyA <- withKind $ checkType b tyA
-      withKind $ \k -> addToEnv (∃) e (forall "" tyA k) $ do
+      tyA <- checkType b tyA tipe
+      addToEnv (∃) e (forall "" tyA tipe) $ do
         forall x tyA (Spine e [var x]) ≐ ty
         Abs x tyA <$> (addToEnv (∀) x tyA $ checkType b sp (Spine e [var x]))
   Spine nm [] | isChar nm -> do
@@ -757,12 +756,12 @@ checkType b sp ty = case sp of
           Spine "#forall#" [ty', c] -> do
             a <- checkType b a ty'
             (a:) <$> chop (c `apply` a) l
-          _ -> withKind $ \k -> do  
+          _ -> do  
             x <- getNewWith "@xin"
             z <- getNewWith "@zin"
             tybody <- getNewWith "@v"
-            let tybodyty = forall z (var x) k
-            withKind $ \k' -> addToEnv (∃) x k' $ addToEnv (∃) tybody tybodyty $ do 
+            let tybodyty = forall z (var x) tipe
+            addToEnv (∃) x tipe $ addToEnv (∃) tybody tybodyty $ do 
               a <- checkType b a (var x)
               v <- getNewWith "@v"
               forall v (var x) (Spine tybody [var v]) ≐ mty
@@ -988,7 +987,6 @@ getImpliedFamilies s = S.intersection fs $ gif s
           Just f -> S.insert f) $ gif ty `S.union` gif a 
         gif (Spine a l) = mconcat $ gif <$> l
         gif (Abs _ ty l) = S.union (gif ty) (gif l)
-
 
 typeCheckAll :: Bool -> [Decl] -> Choice [Decl]
 typeCheckAll verbose preds = do

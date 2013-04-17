@@ -92,17 +92,20 @@ infixr 1 :&:
 -- we can make this data structure mostly strict since the only time we don't 
 -- traverse it is when we fail, and in order to fail, we always have to traverse
 -- the lhs!
-data SCons = !Term :@: !Type
-           | !Spine :=: !Spine
+data SCons = Term :@: Type
+           | Spine :=: Spine
            deriving (Eq)
 data Constraint = SCons [SCons]
                   -- we don't necessarily have to traverse the rhs of a combination
                   -- so we can make it lazy
-                | !Constraint :&: Constraint 
-                | Bind !Quant !Name !Type !Constraint
+                | Constraint :&: Constraint 
+                | Bind Quant Name Type Constraint
                 deriving (Eq)
 
-
+data Cons = In Term Type
+          | Eq Term Term
+          | And Cons Cons
+          | CBind Quant Name Type Cons
 -------------------------
 ---  Pretty Printing  ---
 -------------------------
