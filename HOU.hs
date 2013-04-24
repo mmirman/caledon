@@ -624,7 +624,9 @@ universeCheck nm env sp = case sp of
     return k3
     
   Spine a [Spine v []] | a == tipeName -> do 
-    return $ tipe `apply` var v
+    v' <- getNewWith "@tv"
+    tell [(v,v')]
+    return $ tipe `apply` var v'
 
     
   Spine "#tycon#" [Spine nm [l]] -> universeCheck nm env l

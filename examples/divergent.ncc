@@ -1,10 +1,10 @@
-defn unit : prop
+defn unit : type
   >| u1 = unit
 
-defn divergent : unit -> prop
+defn divergent : unit -> type
    | divergentImp = divergent u1 -> divergent S
 
 
-defn moop : prop
+defn moop : type
    | moopimp = moop <- divergent T
 query main = moop
