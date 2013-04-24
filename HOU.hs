@@ -631,6 +631,8 @@ universeCheck env sp = case sp of
     subOf k1 k3
     subOf k2 k3
     return k3
+  Spine ['\'',c,'\''] [] -> return $ var "char"
+  
   Spine a [] | a == atomName -> do 
     return $ atom
     
@@ -913,17 +915,14 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 typePipe verbose lt (b,nm,ty,kind) = do
   (ty,kind,lt) <- mtrace verbose ("Inferring: " ++nm) $ 
                   typeInfer lt (b,nm, ty,kind) -- type infer
-                  
-  checkUniverses nm (snd <$> lt) kind -- (ascribe ty kind)
-  checkUniverses nm (snd <$> lt) ty   -- perform universe checking once before elaboration
-  
+    
   (ty,kind,lt) <- mtrace verbose ("Elaborating: " ++nm) $ 
                   typeInfer lt (b,nm, ty,kind) -- elaborate
-                  
+    
   (ty,kind,lt) <- mtrace verbose ("Checking: " ++nm) $ 
                   typeInfer lt (b,nm, ty,kind) -- type check
                   
-  checkUniverses nm (snd <$> lt) ty   -- perform universe checking once before elaboration  
+  checkUniverses nm (snd <$> lt) ty   -- perform universe checking once before elaboration                    
   
   return (ty,kind,lt)
   

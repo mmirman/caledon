@@ -2,19 +2,19 @@ fixity left 1 +
 fixity left 2 *
 fixity left 4 ^
 
-defn zero : type 
-  as [A : type] A
+defn zero : prop
+  as [A : prop] A
 
 defn fromZero : zero -> A
-  as ?\ A : type . 
+  as ?\ A : prop . 
       \ z : zero .
         z A
 
-defn one : type
-  as [A : type] A -> A
+defn one : prop
+  as [A : prop] A -> A
 
 defn unit : one
-  as \ A : type . 
+  as \ A : prop . 
      \ x : A . x
 
 defn caseUnit : (one -> A) -> A
@@ -22,14 +22,14 @@ defn caseUnit : (one -> A) -> A
       \ foo : one -> A .
         foo unit
 
-defn neg : type -> type
-  as \ A : type . [C : type] A -> C
+defn neg : prop -> prop
+  as \ A : prop . [C : prop] A -> C
 
-defn ^ : type -> type -> type
-  as \ A B : type . A -> B
+defn ^ : prop -> prop -> prop
+  as \ A B : prop . A -> B
 
-defn + : type -> type -> type
-  as \ A B : type . 
+defn + : prop -> prop -> prop
+  as \ A B : prop . 
       {C : type} (A -> C) -> (B -> C) -> C
 
 defn case : At + Bt -> (At -> Ct) -> (Bt -> Ct) -> Ct
@@ -55,31 +55,31 @@ defn inR : {A B} B -> A + B
       \ inr : B -> C .
         inr b
 
-defn * : type -> type -> type
-  as \ A B : type . 
+defn * : prop -> prop -> prop
+  as \ A B : prop . 
       [C : type] (A -> B -> C) -> C
 
 defn pair : A -> B -> A * B
-  as ?\ A B : type        .
+  as ?\ A B : prop        .
       \ a   : A           .
       \ b   : B           .
-      \ C   : type        .
+      \ C   : prop        .
       \ pi  : A -> B -> C . 
         pi a b
 
 defn piL : A * B -> A
-  as ?\ A B  : type  .
+  as ?\ A B  : prop  .
       \ prod : A * B . 
         prod A (\a : A . \ b : B . a)
 
 defn piR : A * B -> B
-  as ?\ A B  : type  .
+  as ?\ A B  : prop  .
       \ prod : A * B . 
         prod B (\a : A . \ b : B . b)
 
+{-
 
-
-defn dEq : type -> type -> prop
+defn dEq : prop -> prop -> prop
    | dEq-sym = dEq Av Av
    
    | dEq-add-ident = dEq (Av + neg Av) zero
@@ -112,8 +112,8 @@ defn dEq : type -> type -> prop
             <- (B -> A)
 
 
-defn deriv : (type -> type) -> (type -> type) -> prop
-  >| deriv-one = deriv (\x . x ) (\ x . one)
+defn deriv : (prop -> prop) -> (prop -> prop) -> prop
+  >| deriv-one = deriv (\x : prop . x ) (\ x : prop . [A : prop] A -> A)
   >| deriv-const = deriv (\ x . R) (\ x . zero)
 
   >| deriv-sum  = deriv (\ x . A x + B x) (\ x . A' x + B' x)
@@ -128,6 +128,7 @@ defn deriv : (type -> type) -> (type -> type) -> prop
 
    | deriv-dEq  = [A B A' B' : _ -> _ ]
                   deriv A B 
-               <- ([x : type] dEq (A x) (A' x))
-               <- ([x : type] dEq (B x) (B' x))
+               <- ([x : prop] dEq (A x) (A' x))
+               <- ([x : prop] dEq (B x) (B' x))
                <- deriv A' B'
+-}
