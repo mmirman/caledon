@@ -14,7 +14,6 @@ query findSat2 = succ zero =< succ (succ zero) /\ zero =< succ (succ zero)
 
 query findSat0 = free A : natural . A =:= zero
 
-
 defn ismain : type 
   as run $ do 
          , putStr "hey!\n"

@@ -15,7 +15,7 @@ import Data.Maybe
 import Data.Monoid
 import Data.List
 
-import Control.Lens
+import Control.Lens (makeLenses, (^.))
 
 
 type Name = String

@@ -136,8 +136,9 @@ substN ctxt na (Abs b n) = Abs (substN ctxt na b) $ substN (putTy ctxt b) (liftT
 substP :: Context c => c -> (Term,Type, Variable) -> P -> (Either P N, Type)
 substP ctxt (n, a, Exi i nm _) (Var (Exi i' nm' _)) | nm == nm' && i == i' = (Right n, a)
 substP ctxt (n, a, x') (Var x) | x == x' = (Right n, a)
-substP ctxt na (y@(Var v@(Con _))) = (Left y, substN ctxt na $ getTy ctxt v)
-substP ctxt na (y@(Var (Exi i nm ty))) = (Left $ Var $ Exi i nm $ substN ctxt na ty, substN ctxt na $ ty)
+substP ctxt na (y@(Var v@(Con _))) = (Left y, getTy ctxt v)
+substP ctxt na (y@(Var (Exi i nm ty))) = (Left $ Var $ Exi i nm ty', ty')
+  where ty' = substN ctxt na ty
 substP ctxt na (p :+: n) = hered ctxt (substP ctxt na p) (substN ctxt na n)
 
 

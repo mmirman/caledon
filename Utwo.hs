@@ -12,6 +12,9 @@ import Data.Functor
 import qualified Data.Traversable as T
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Debug.Trace
+
+vtrace l a = trace (l++": "++show a)
 
 type Name = String
 -- This unification algorithm isn't the best for existential name recovery!
@@ -48,31 +51,35 @@ data Variable = DeBr Int | Con Name deriving Eq
 
 data P = P :+: N
        | Var Variable
-       deriving Eq
+       deriving (Eq)
                 
 data N = Abs Type N 
        | Pat P 
-       deriving Eq
+       deriving (Eq)
     
 
 instance Show Variable where
   show (DeBr i) = show i
   show (Con n) = n
+
 instance Show P where
-  show (a :+: b) = show a ++" "++ show b
+  show (viewForallP -> Just (ty,p)) = "( "++show ty ++" ) ~> ( "++ show p++" )"
+  show (a :+: b) = show a ++" ( "++ show b++" ) "
   show (Var a) = show a
 instance Show N where
   show (Abs ty a) = "λ:"++show ty ++" . ("++ show a++")"
-  show (viewForall -> Just (ty,p)) = "( "++show ty ++" ) ~> ( "++ show p++" )"
   show (Pat p) = show p
 
 type Term = N
 type Type = N
 
-viewForall (Pat (Var (Con "#forall#") :+: _ :+: Abs ty n )) = Just (ty,n)
-viewForall _ = Nothing
+viewForallP (Var (Con "#forall#") :+: _ :+: Abs ty n ) = Just (ty,n)
+viewForallP _ = Nothing
 
-viewN (viewForall -> Just (ty,n)) = (ty:l,h)
+viewForallN (Pat p) = viewForallP p
+viewForallN _ = Nothing
+
+viewN (viewForallN -> Just (ty,n)) = (ty:l,h)
   where (l,h) = viewN n
 viewN (Pat p) = ([],p)
 
@@ -157,50 +164,50 @@ liftV v = addAt (v,0)
 liftThree i (a,b,c) = (liftV i a, liftV i b, i + c)
 
 etaExpand :: Type -> P -> N
-etaExpand (viewForall -> Just (a,b)) m = Abs a $ Pat $ liftV 1 m :+: etaExpand (liftV 1 a) (vvar 0)
+etaExpand (viewForallN -> Just (a,b)) m = Abs a $ Pat $ liftV 1 m :+: etaExpand (liftV 1 a) (vvar 0)
 etaExpand _ m = Pat m
 
-substN :: Context c => c -> (Term,Type, Int) -> N -> N
-substN ctxt na (Pat p) = case substP ctxt na p of
+substN :: Context c => Bool -> c -> (Term,Type, Int) -> N -> N
+substN t ctxt na (Pat p) = case substP t ctxt na p of
   (Right m,p) -> m
-  (Left m, p) -> etaExpand p m
-substN ctxt na (Abs b n) = Abs (substN ctxt na b) $ substN (putTy ctxt b) (liftThree 1 na) n
+  (Left m, p) -> if t then etaExpand p m else Pat m
+substN t ctxt na (Abs b n) = Abs (substN t ctxt na b) $ substN t (putTy ctxt b) (liftThree 1 na) n
 
-substP :: Context c => c -> (Term,Type,Int) -> P -> (Either P N, Type)
-substP ctxt (n,a,x') (Var (DeBr x)) | x == x' = (Right n, a)
-substP ctxt (n,a,x) (y@(Var v)) = (Left y, substP ctxt (n,a,x) $ getTy ctxt v)
-substP ctxt na (p :+: n) = hered ctxt (substP ctxt na p) (substN ctxt na n)
+substP :: Context c => Bool -> c -> (Term,Type,Int) -> P -> (Either P N, Type)
+substP t ctxt (n,ty,x') (Var (DeBr x)) | x == x' = (Right n, ty)
+substP t ctxt na (y@(Var v)) = (Left y, getTy ctxt v)
+substP t ctxt na (p :+: n) = hered t ctxt (substP t ctxt na p) (substN t ctxt na n)
 
-hered  :: Context c => c -> (Either P N, Type) -> N -> (Either P N, Type)
-hered ctxt (Right (Abs a1 n), viewForall -> Just (a1',a2)) nv = 
-  ( Right $ substN ctxt (nv,a1,-1) $ addAt (-1,0) n
-  , substN ctxt (nv, a1',-1) $ addAt (-1,0) a2
+hered  :: Context c => Bool -> c -> (Either P N, Type) -> N -> (Either P N, Type)
+hered t ctxt (Right (Abs a1 n), ~(viewForallN -> ~(Just ~(a1',a2)))) nv = 
+  ( Right $ substN t ctxt (nv,a1,-1) $ addAt (-1,0) n
+  , substN False ctxt (nv, a1',-1) $ addAt (-1,0) a2
   )
-hered ctxt (Right (Pat p1), viewForall -> Just (a1',a2)) nv = 
-  ( Right $ Pat (p1 :+: nv)
-  , substN ctxt (nv, a1',-1) $ addAt (-1,0) a2
+hered t ctxt (Right (Pat p1), ~(viewForallN -> ~(Just ~(a1',a2)))) nv = 
+  ( Right $ Pat $ p1 :+: nv
+  , substN False ctxt (nv, a1',-1) $ addAt (-1,0) a2
   )
-hered ctxt (Left p1, viewForall -> Just (a1',a2)) nv = 
+hered t ctxt (Left p1, ~(viewForallN -> ~(Just ~(a1',a2)))) nv = 
   ( Left $ p1 :+: nv
-  , substN ctxt (nv, a1',-1) $ addAt (-1,0) a2
+  , substN False ctxt (nv, a1',-1) $ addAt (-1,0) a2
   )
 
+      
 substF :: Context c => c -> (Term,Type,Int) -> Form -> Form  
 substF _ _ Done = Done
-substF ctxt sub (a :=: b) = substN ctxt sub a :=: substN ctxt sub b
+substF ctxt sub (a :=: b) = substN True ctxt sub a :=: substN True ctxt sub b
 substF ctxt sub (a :&: b) = substF ctxt sub a :&: substF ctxt sub b
 substF ctxt sub (Bind q ty f) = 
-  Bind q (substN ctxt sub ty) $ substF (putTy ctxt ty) (liftThree 1 sub) f
+  Bind q (substN True ctxt sub ty) $ substF (putTy ctxt ty) (liftThree 1 sub) f
 
 app  :: Context c => c -> Either P N -> N -> Either P N
-app ctxt (Right (Abs a1 n)) nv = Right $ substN ctxt (nv,a1,-1) $ addAt (-1,0) n
+app ctxt (Right (Abs a1 n)) nv = Right $ substN True ctxt (nv,a1,-1) $ addAt (-1,0) n
 app ctxt (Right (Pat p1)) nv = Right $ Pat (p1 :+: nv)
 app ctxt (Left p1) nv = Left $ p1 :+: nv
 
 appN c p n = case app c (Right p) n of
   Right n -> n
   Left p -> Pat p
-
 
 
 data Ctxt = Top 
@@ -425,12 +432,15 @@ unify ctxt (a :=: b) = ueq (a,b) <|> ueq (b,a)
   B'_i  = (A_1...A_n)^i . F_i (ctxt_i,(A_1...A_n)^i) (L_i (B_i^{n+i,i}))
 -}
 test3 :: Form
-test3 = Bind Exists (tipe ~> tipe ~> tipe ~> tipe) -- 3
-      $ Bind Forall tipe -- 2
-      $ Bind Forall tipe -- 1 
+test3 = Bind Exists ((tipe ~> tipe) ~> tipe ~> (tipe ~> tipe) ~> tipe) -- 3
+      $ Bind Forall (tipe ~> tipe)-- 2
+      $ Bind Forall (tipe ~> tipe) -- 1 
       $ Bind Forall tipe -- 0 
-      $ Pat (vvar 3 :+: var 1 :+: var 0 :+: var 2) :=: Pat (vvar 3 :+: var 2 :+: var 0 :+: var 1)
-      :&: var 0 :=: var 3 -- to view the result!
+--      $ Pat (vvar 3 :+: (Abs tipe $ Pat $ vvar 2 :+: var 0) :+: var 0 :+: (Abs tipe $ Pat $ vvar 3 :+: var 0)) 
+--         :=: Pat (vvar 3 :+: (Abs tipe $ Pat $ vvar 3 :+: var 0) :+: var 0 :+: (Abs tipe $ Pat $ vvar 2 :+: var 0))
+      $ Pat (vvar 3 :+: var 1 :+: var 0 :+: var 2)
+         :=: Pat (vvar 3 :+: var 2 :+: var 0 :+: var 1)
+     :&: var 0 :=: var 3 -- to view the result!
 
 test2 :: Form
 test2 = Bind Forall (tipe ~> tipe ~> tipe) -- 4

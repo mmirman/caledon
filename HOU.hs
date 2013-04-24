@@ -566,8 +566,29 @@ viewLast (reverse -> (a:l)) = (reverse l,a)
 
 viewApp (Spine nm (viewLast -> (l,arg))) = (Spine nm l, arg)
 
-lessThan (Spine a [Spine nm []]) (Spine b [Spine nm' []]) | a == tipeName && b == tipeName = tell [(nm,nm')]
-lessThan a b = throwTrace 0 $ "Expecting type: "++show a ++ "  <  "++show b
+equiv (Abs x ty l) (Abs x' ty' l') = do
+  equiv ty ty'
+  v <- getNewWith "@v"
+  equiv (subst (x |-> var v) l) (subst (x' |-> var v) l')  
+equiv (Spine a l) (Spine b l') | a == b = do
+  mapM_ (uncurry equiv) $ zip l l'
+equiv a b = throwTrace 0 $ "Expecting type: "++show a ++ "  <  "++show b  
+
+subOf (Spine "#ascribe#" (t:v:l)) ty = subOf (rebuildSpine v l) ty
+subOf ty (Spine "#ascribe#" (t:v:l)) = subOf ty (rebuildSpine v l)
+subOf (Spine "#forall#" [t, Abs x _ l])  (Spine "#forall#" [t', Abs x' _ l']) = do
+  subOf t t'
+  subOf t' t
+  v <- getNewWith "@v"
+  subOf (subst (x |-> var v) l) (subst (x' |-> var v) l')
+subOf (Spine "#imp-forall#" [t, Abs x _ l])  (Spine "#imp-forall#" [t', Abs x' _ l']) = do
+  subOf t t'
+  subOf t' t
+  v <- getNewWith "@v"
+  subOf (subst (x |-> var v) l) (subst (x' |-> var v) l')  
+subOf (Spine a [Spine nm []]) (Spine b [Spine nm' []]) | a == tipeName && b == tipeName = tell [(nm,nm')]  
+subOf a b = do 
+  equiv (etaReduce a) (etaReduce b)
 
 universeCheck nm env sp = case sp of
   Abs nm ty a -> do
@@ -587,28 +608,24 @@ universeCheck nm env sp = case sp of
   Spine "#forall#" [_, Abs nm ty l] -> do  
     k1 <- universeCheck nm env ty
     k2 <- universeCheck nm (M.insert nm ty env) l
-    k3 <- (tipe `apply`) <$> var <$> getNewWith "@tv"
     
-    lessThan k1 k3
-    lessThan k2 k3
+    k3 <- (tipe `apply`) <$> var <$> getNewWith "@tv"
+    subOf k1 k3
+    subOf k2 k3
     return k3
   Spine "#ascribe#" [ty,a] -> do
-    --universeCheck nm env ty
     universeCheck nm env a
-    --return ty
   Spine "#imp_forall#" [_, Abs nm ty l] -> do  
     k1 <- universeCheck nm env ty
     k2 <- universeCheck nm (M.insert nm ty env) l
-
     k3 <- (tipe `apply`) <$> var <$> getNewWith "@tv"
-    lessThan k1 k3
-    lessThan k2 k3
+    subOf k1 k3
+    subOf k2 k3
     return k3
     
   Spine a [Spine v []] | a == tipeName -> do 
-    v' <- getNewWith "@tipeLevelRetB"
-    tell [(v,v')]
-    return $ tipe `apply` var v'
+    return $ tipe `apply` var v
+
     
   Spine "#tycon#" [Spine nm [l]] -> universeCheck nm env l
   Spine ['\'',c,'\''] [] -> return $ var "char"
@@ -622,16 +639,20 @@ universeCheck nm env sp = case sp of
     let lsts = lst1 ++ lst2
     tell lsts    
     checkU nm lsts -- LOCAL UNIVERSE CHECKING - socool!!!! 
-
+    
     let byob fty = case fty of
-          Spine "#imp_forall#" [ty, v] -> 
-            (Spine "#imp_abs#" [ty,v]) `apply` a
-          Spine "#forall#" [ty, val] -> 
-            val `apply` a
+          Spine "#imp_forall#" [ty, v] -> do
+            subOf aty ty
+            return $ (Spine "#imp_abs#" [ty,v]) `apply` a
+          Spine "#forall#" [ty, val] -> do
+            subOf aty ty
+            return $ val `apply` a
           -- Do some local universe checking!
           Spine "#ascribe#" (t:v:l) ->  byob $ rebuildSpine v l
           
-    return $ byob fty 
+    byob fty 
+
+
 
 initTypes (Spine a []) | a == tipeName = do
   v <- getNewWith "@tipeLevel"
@@ -656,7 +677,7 @@ checkUniverses nm env ty = do
     env <- T.mapM initTypes $ M.union constsMap env
     ty <- initTypes ty
     universeCheck nm env ty
-  vtrace 0 (show lst) $ checkU nm lst
+  checkU nm lst
 -----------------------------
 --- constraint generation ---
 -----------------------------
@@ -869,12 +890,12 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 typePipe verbose lt (b,nm,ty,kind) = do
   (ty,kind,lt) <- mtrace verbose ("Inferring:   " ++nm) $ 
                   typeInfer False lt (b,nm, ty,kind) -- type infer
-                  
-  checkUniverses nm (snd <$> lt) (ascribe ty kind)
 
   (ty,kind,lt) <- mtrace verbose ("Elaborating: " ++nm) $ 
                   typeInfer True lt (b,nm, ty,kind) -- elaborate                  
                   
+  checkUniverses nm (snd <$> lt) (ascribe ty kind)                  
+  
   (ty,kind,lt) <- mtrace verbose ("Checking:    " ++nm) $ 
                   typeInfer True lt (b,nm, ty,kind) -- type check
                   

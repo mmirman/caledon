@@ -98,6 +98,7 @@ subst s a = substFree s mempty a
 
 class Subst a where
   substFree :: Substitution -> S.Set Name -> a -> a
+  etaReduce :: a -> a  
   
 class Alpha a where
   alphaConvert :: S.Set Name -> Map Name Name -> a -> a
@@ -125,6 +126,7 @@ rebuildSpine (Abs nm _ rst) (a:apps') = let sp = subst (nm |-> a) rst
                                            
 instance Subst a => Subst [a] where
   substFree s f t = substFree s f <$> t
+  etaReduce = (etaReduce <$>)
 
 instance Alpha a => Alpha [a] where  
   alphaConvert s m l = alphaConvert s m <$> l
@@ -132,10 +134,9 @@ instance Alpha a => Alpha [a] where
   
 instance (Subst a, Subst b) => Subst (a,b) where
   substFree s f ~(a,b) = (substFree s f a , substFree s f b)
+  etaReduce ~(a,b) = (etaReduce a , etaReduce b)
   
 instance Subst Spine where
-  
-  
   substFree s f sp@(Spine "#imp_forall#" [_, Abs nm tp rst]) =
        imp_forall nm (substFree s f tp) $ substFree (M.delete nm s) (S.insert nm f) rst            
 
@@ -155,6 +156,22 @@ instance Subst Spine where
             ++ "\n\tbound by: "++show f
       _ -> Spine nm apps'
       
+
+  etaReduce (Abs nm ty i) = case etaReduce i of
+    -- TODO: this could be WAY optimized
+    i@(Spine h l') -> let l = etaReduce l' in case reverse l of
+      last:r | last == var nm && not (S.member nm $ freeVariables $ Spine h $ reverse r) -> Spine h $ reverse r
+      _ -> Abs nm ty (Spine h l)
+    i -> Abs nm ty i  
+  etaReduce (Spine "#forall#" [t, Abs nm _ rst]) = forall nm t' rst'
+    where t' = etaReduce t
+          rst' = etaReduce rst  
+  etaReduce (Spine "#imp_forall#" [t, Abs nm _ rst]) = imp_forall nm t' rst'
+    where t' = etaReduce t
+          rst' = etaReduce rst
+  etaReduce (Spine h l) = Spine h (etaReduce l)          
+  
+
 instance Alpha Spine where
   alphaConvert s m (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a ty $ alphaConvert (S.insert a s) (M.delete a m) r
   alphaConvert s m (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a ty $ alphaConvert (S.insert a s) (M.delete a m) r
@@ -175,14 +192,21 @@ instance Subst Decl where
   substFree sub f (Query nm ty) = Query nm (substFree sub f ty)
   substFree sub f (Define s nm val ty) = Define s nm (substFree sub f val) (substFree sub f ty)
 
+  etaReduce (Predicate s nm ty cons) = Predicate s nm (etaReduce ty) ((\(b,(nm,t)) -> (b,(nm,etaReduce t))) <$> cons)
+  etaReduce (Query nm ty) = Query nm (etaReduce ty)
+  etaReduce (Define s nm val ty) = Define s nm (etaReduce val) (etaReduce ty)  
 instance Subst a => Subst (Maybe a) where
   substFree sub f p = substFree sub f <$> p
+  etaReduce p = etaReduce <$> p
   
 instance Subst FlatPred where
   substFree sub f p = p & predType %~ substFree sub f
                         & predKind %~ substFree sub f
                         & predValue %~ substFree sub f
-  
+  etaReduce p = p & predType %~ etaReduce
+                  & predKind %~ etaReduce
+                  & predValue %~ etaReduce
+                                        
 -------------------------
 ---  Constraint types ---
 -------------------------
@@ -191,7 +215,10 @@ instance Subst SCons where
   substFree s f c = case c of
     s1 :@: s2 -> subq s f (:@:) s1 s2
     s1 :=: s2 -> subq s f (:=:) s1 s2
-    
+ 
+  etaReduce c = case c of               
+    s1 :@: s2 -> etaReduce s1 :@: etaReduce s2 
+    s1 :=: s2 -> etaReduce s1 :=: etaReduce s2 
 instance Subst Constraint where
   substFree s f c = case c of
     SCons l -> SCons $ map (substFree s f) l
@@ -199,6 +226,11 @@ instance Subst Constraint where
     Bind q nm t c -> Bind q nm' (substFree s f t) $ substFree s' f' c
       where (nm',s',f') = newName nm s f
 
+  etaReduce c = case c of
+    SCons l -> SCons $ etaReduce l
+    s1 :&: s2 -> etaReduce s1 :&: etaReduce s2 
+    Bind q nm t c -> Bind q nm (etaReduce t) (etaReduce c)
+    
 subq s f e c1 c2 = e (substFree s f c1) (substFree s f c2)
 
 (∃) = Bind Exists
@@ -313,3 +345,5 @@ eta_expandAll mp (Abs a ty l) = let ty' = eta_expandAll mp ty
 eta_expandAll mp (Spine s l) = case mp ! s of
   Nothing -> Spine s (eta_expandAll mp <$> l)
   Just t  -> rebuildSpine (eta_expand t s) (eta_expandAll mp <$> l)
+  
+  
