@@ -575,10 +575,32 @@ viewLast (reverse -> (a:l)) = (reverse l,a)
 
 viewApp (Spine nm (viewLast -> (l,arg))) = (Spine nm l, arg)
 
-lessThan a _ | a == atom = return () -- atoms are impredicative
-lessThan (Spine a [Spine nm []]) (Spine b [Spine nm' []]) | a == tipeName && b == tipeName = tell [(nm,nm')]
-lessThan a b = throwTrace 0 $ "Expecting type: "++show a ++ "  <  "++show b
 
+equiv (Abs x ty l) (Abs x' ty' l') = do
+  equiv ty ty'
+  v <- getNewWith "@v"
+  equiv (subst (x |-> var v) l) (subst (x' |-> var v) l')  
+equiv (Spine a l) (Spine b l') | a == b = do
+  mapM_ (uncurry equiv) $ zip l l'
+equiv a b = throwTrace 0 $ "Expecting type: "++show a ++ "  <  "++show b  
+
+subOf (Spine "#ascribe#" (t:v:l)) ty = subOf (rebuildSpine v l) ty
+subOf ty (Spine "#ascribe#" (t:v:l)) = subOf ty (rebuildSpine v l)
+subOf (Spine "#forall#" [t, Abs x _ l])  (Spine "#forall#" [t', Abs x' _ l']) = do
+  subOf t t'
+  subOf t' t
+  v <- getNewWith "@v"
+  subOf (subst (x |-> var v) l) (subst (x' |-> var v) l')
+subOf (Spine "#imp-forall#" [t, Abs x _ l])  (Spine "#imp-forall#" [t', Abs x' _ l']) = do
+  subOf t t'
+  subOf t' t
+  v <- getNewWith "@v"
+  subOf (subst (x |-> var v) l) (subst (x' |-> var v) l')  
+subOf (Spine a [Spine nm []]) (Spine b [Spine nm' []]) | a == tipeName && b == tipeName = tell [(nm,nm')]  
+subOf (Spine a []) (Spine b [Spine nm' []]) | a == atomName && b == tipeName = return ()
+subOf a b = do 
+  equiv (etaReduce a) (etaReduce b)
+  
 universeCheck env sp = case sp of
   Abs nm ty a -> do
     universeCheck env ty
@@ -598,16 +620,16 @@ universeCheck env sp = case sp of
     k2 <- universeCheck (M.insert nm ty env) l
     k3 <- (tipe `apply`) <$> var <$> getNewWith "@tv"
     
-    lessThan k1 k3
-    lessThan k2 k3
+    subOf k1 k3
+    subOf k2 k3
     return k3
   Spine "#imp_forall#" [_, Abs nm ty l] -> do  
     k1 <- universeCheck env ty
     k2 <- universeCheck (M.insert nm ty env) l
 
     k3 <- (tipe `apply`) <$> var <$> getNewWith "@tv"
-    lessThan k1 k3
-    lessThan k2 k3
+    subOf k1 k3
+    subOf k2 k3
     return k3
   Spine a [] | a == atomName -> do 
     v <- getNewWith "@tipeLevelRetA"
@@ -627,10 +649,18 @@ universeCheck env sp = case sp of
   (viewApp -> (f,a)) -> do
     fty <- universeCheck env f
     aty <- universeCheck env a
-    return $ case fty of  
-      Spine "#imp_forall#" [ty, v] -> (Spine "#imp_abs#" [ty,v]) `apply` a
-      Spine "#forall#" [ty, v] -> v `apply` a
-
+    let byob fty = case fty of    
+          Spine "#imp_forall#" [ty, v] -> do
+            subOf aty ty
+            return $ (Spine "#imp_abs#" [ty,v]) `apply` a
+          Spine "#forall#" [ty, val] -> do
+            subOf aty ty
+            return $ val `apply` a
+          -- Do some local universe checking!
+          Spine "#ascribe#" (t:v:l) ->  byob $ rebuildSpine v l
+          
+    byob fty 
+    
 
 initTypes (Spine a []) | a == tipeName = do
   v <- getNewWith "@tipeLevel"

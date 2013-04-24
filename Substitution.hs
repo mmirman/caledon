@@ -103,6 +103,19 @@ class Alpha a where
   alphaConvert :: S.Set Name -> Map Name Name -> a -> a
   rebuildFromMem :: Map Name Name -> a -> a  
 
+etaReduce (Abs nm ty i) = case etaReduce i of
+    -- TODO: this could be WAY optimized
+    i@(Spine h l') -> let l = etaReduce <$> l' in case reverse l of
+      last:r | last == var nm && not (S.member nm $ freeVariables $ Spine h $ reverse r) -> Spine h $ reverse r
+      _ -> Abs nm ty (Spine h l)
+    i -> Abs nm ty i  
+etaReduce (Spine "#forall#" [t, Abs nm _ rst]) = forall nm t' rst'
+    where t' = etaReduce t
+          rst' = etaReduce rst  
+etaReduce (Spine "#imp_forall#" [t, Abs nm _ rst]) = imp_forall nm t' rst'
+    where t' = etaReduce t
+          rst' = etaReduce rst
+etaReduce (Spine h l) = Spine h (etaReduce <$> l)          
 
 rebuildSpine :: Spine -> [Spine] -> Spine
 rebuildSpine s [] = s
