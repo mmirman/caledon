@@ -572,21 +572,20 @@ equiv (Abs x ty l) (Abs x' ty' l') = do
   equiv (subst (x |-> var v) l) (subst (x' |-> var v) l')  
 equiv (Spine a l) (Spine b l') | a == b = do
   mapM_ (uncurry equiv) $ zip l l'
-equiv a b = throwTrace 0 $ "Expecting type: "++show a ++ "  <  "++show b  
+equiv a b = throwTrace 0 $ "Expecting type: "++show a ++ "  ==  "++show b  
 
 subOf (Spine "#ascribe#" (t:v:l)) ty = subOf (rebuildSpine v l) ty
 subOf ty (Spine "#ascribe#" (t:v:l)) = subOf ty (rebuildSpine v l)
 subOf (Spine "#forall#" [t, Abs x _ l])  (Spine "#forall#" [t', Abs x' _ l']) = do
-  subOf t t'
-  subOf t' t
+  equiv t t'
   v <- getNewWith "@v"
   subOf (subst (x |-> var v) l) (subst (x' |-> var v) l')
 subOf (Spine "#imp-forall#" [t, Abs x _ l])  (Spine "#imp-forall#" [t', Abs x' _ l']) = do
-  subOf t t'
-  subOf t' t
+  equiv t t'
   v <- getNewWith "@v"
   subOf (subst (x |-> var v) l) (subst (x' |-> var v) l')  
-subOf (Spine a [Spine nm []]) (Spine b [Spine nm' []]) | a == tipeName && b == tipeName = tell [(nm,nm')]  
+subOf (Spine a [Spine nm []]) (Spine b [Spine nm' []]) | a == tipeName && b == tipeName = 
+  tell [(nm,nm')]  
 subOf a b = do 
   equiv (etaReduce a) (etaReduce b)
 
@@ -622,18 +621,19 @@ universeCheck nm env sp = case sp of
     subOf k1 k3
     subOf k2 k3
     return k3
-    
+  Spine a [] | a == tipeName -> do
+    v' <- getNewWith "@tv"
+    return $ tipe `apply` var v'
   Spine a [Spine v []] | a == tipeName -> do 
     v' <- getNewWith "@tv"
     tell [(v,v')]
     return $ tipe `apply` var v'
-
     
   Spine "#tycon#" [Spine nm [l]] -> universeCheck nm env l
   Spine ['\'',c,'\''] [] -> return $ var "char"
   Spine nm [] -> case env ! nm of
     Nothing -> throwError $ "not in the enviroment: "++show nm
-    Just a  -> return a
+    Just a  -> return a  
 
   (viewApp -> (f,a)) -> do
     (fty,lst1) <- listen $ universeCheck nm env f
@@ -651,14 +651,20 @@ universeCheck nm env sp = case sp of
             return $ val `apply` a
           -- Do some local universe checking!
           Spine "#ascribe#" (t:v:l) ->  byob $ rebuildSpine v l
-          
     byob fty 
-
-
 
 initTypes (Spine a []) | a == tipeName = do
   v <- getNewWith "@tipeLevel"
   return $ Spine a [var v]
+initTypes (Spine "#forall#" [ty,Abs x _ l]) = do 
+  ty <- initTypes ty
+  forall x ty <$> initTypes l
+initTypes (Spine "#imp-forall#" [ty,Abs x _ l]) = do 
+  ty <- initTypes ty
+  imp_forall x ty <$> initTypes l
+initTypes (Spine "#imp-abs#" [ty,Abs x _ l]) = do 
+  ty <- initTypes ty
+  imp_abs x ty <$> initTypes l
 initTypes (Spine nm l) = Spine nm <$> T.mapM initTypes l
 initTypes (Abs nm ty a) = do
   ty <- initTypes ty
@@ -676,10 +682,10 @@ checkU nm lst = do
 checkUniverses :: String -> M.Map Name Type -> Type -> Choice ()
 checkUniverses nm env ty = do
   (_,_,lst) <- (\a -> runRWST a () emptyState) $ do
-    env <- T.mapM initTypes $ M.union constsMap env
+    env <- M.union constsMap <$> T.mapM initTypes env
     ty <- initTypes ty
     universeCheck nm env ty
-  checkU nm lst
+  vtrace 1 ("UNIVERSES: "++show lst) $ checkU nm lst
 -----------------------------
 --- constraint generation ---
 -----------------------------
