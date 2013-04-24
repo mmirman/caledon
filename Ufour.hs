@@ -44,7 +44,8 @@ repeate n f = f . repeate (n-1) f
 -------------
 --- Terms ---
 -------------
-data Variable = DeBr Int | Con Name deriving Eq
+data Variable = DeBr Int (Maybe Name)
+              | Con Name deriving Eq
 
 data P = P :+: N
        | Var Variable
@@ -56,7 +57,8 @@ data N = Abs Type N
     
 
 instance Show Variable where
-  show (DeBr i) = show i
+  show (DeBr i (Just n)) = n
+  show (DeBr i Nothing)  = show i
   show (Con n) = n
 instance Show P where
   show (a :+: b) = show a ++" "++ show b
@@ -79,8 +81,10 @@ viewN (Pat p) = ([],p)
 viewHead (p :+: n) = viewHead p
 viewHead (Var v) = v
 
-vvar = Var . DeBr
+vvar a = Var $ DeBr a Nothing
+evvar a n = Var $ DeBr a (Just n)
 var = Pat . vvar
+evar a n = Pat $ evvar a n
 
 vcon = Var . Con
 con = Pat . vcon
@@ -103,7 +107,7 @@ constants = M.fromList [ (tipeName, tipe)
 --- Formula ---
 ---------------
 data Quant = Forall 
-           | Exists
+           | Exists Name
            deriving (Eq, Show)
 
 infix 2 :&:
@@ -119,7 +123,7 @@ instance Show Form where
   show (t1 :=: t2) = show t1 ++ " ≐ "++ show t2
   show (t1 :&: t2) = " ( "++show t1 ++ " ) ∧ ( "++ show t2++" )"
   show (Bind Forall t1 t2) = " ∀: "++ show t1 ++ " . "++show t2
-  show (Bind Exists t1 t2) = " ∃:"++ show t1 ++ " . "++show t2
+  show (Bind (Exists n) t1 t2) = " ∃ "++show n++" "++show t1++" . "++show t2
   show Done = " ⊤ "
   
 
@@ -127,7 +131,7 @@ class Show a => Context a where
   getTy :: a -> Variable -> Type
   putTy :: a -> Type -> a
 instance Context [Type] where
-  getTy v (DeBr a) = liftV (-a) $ v !! a
+  getTy v (DeBr a _) = v !! a
   getTy v (Con a) = constants M.! a
   
   putTy c t = t:c
@@ -137,7 +141,7 @@ class TERM n where
 
   
 instance TERM P where  
-  addAt (amount,thresh) (Var (DeBr a)) = Var $ DeBr $ if a < thresh then a else amount+a
+  addAt (amount,thresh) (Var (DeBr a n)) = Var $ DeBr (if a < thresh then a else amount+a) n
   addAt _ (Var a) = Var a
   addAt i (p :+: n) = addAt i p :+: addAt i n
             
@@ -167,8 +171,8 @@ substN ctxt na (Pat p) = case substP ctxt na p of
 substN ctxt na (Abs b n) = Abs (substN ctxt na b) $ substN (putTy ctxt b) (liftThree 1 na) n
 
 substP :: Context c => c -> (Term,Type,Int) -> P -> (Either P N, Type)
-substP ctxt (n,a,x') (Var (DeBr x)) | x == x' = (Right n, a)
-substP ctxt (n,a,x) (y@(Var v)) = (Left y, substP ctxt (n,a,x) $ getTy ctxt v)
+substP ctxt (n,a,x') (Var (DeBr x _)) | x == x' = (Right n, a)
+substP ctxt (n,a,x) (y@(Var v)) = (Left y, getTy ctxt v)
 substP ctxt na (p :+: n) = hered ctxt (substP ctxt na p) (substN ctxt na n)
 
 hered  :: Context c => c -> (Either P N, Type) -> N -> (Either P N, Type)
@@ -244,7 +248,7 @@ upDone i (a,b) = upDone' i (upWithZero a b)
 
 instance Context Ctxt where
   getTy c (Con i) = constants M.! i
-  getTy c (DeBr i) = case repeate i up $ upZero c of
+  getTy c (DeBr i _) = case repeate i up $ upZero c of
     B _ _ ty -> ty
     Top -> error $ "\nI: "++show i++"\nCTXT: "++show c
   putTy c ty = B c Forall ty
@@ -264,7 +268,7 @@ getPP :: P -> Maybe (Variable, [Int])
 getPP p = case bpp p of
   Just (h,pp) -> Just (h, pp)
   Nothing -> Nothing
-  where bpp (p :+: Pat (Var (DeBr v1))) = case bpp p of
+  where bpp (p :+: Pat (Var (DeBr v1 _))) = case bpp p of
           Just (h, pp) -> Just (h, v1:pp)
           Nothing -> Nothing
         bpp (Var h) = Just (h, [])
@@ -277,18 +281,18 @@ viewPat p = (h, ml)
         vp (Var h) = (h,[])
 
 gvarTy :: Ctxt -> Variable -> Maybe (Int,Type)
-gvarTy ctxt (DeBr i) = case repeate i up $ upZero ctxt of
-  B _ Exists ty -> Just (i,ty)
+gvarTy ctxt (DeBr i _) = case repeate i up $ upZero ctxt of
+  B _ (Exists n) ty -> Just (i,ty)
   _ -> Nothing
 gvarTy _ _ = Nothing  
 
 uvarTy :: Ctxt -> Variable -> Maybe Type
 uvarTy ctxt (Con c) = M.lookup c constants
-uvarTy ctxt (DeBr i) = case repeate i up $ upZero ctxt of
+uvarTy ctxt (DeBr i _) = case repeate i up $ upZero ctxt of
   B _ Forall ty -> Just ty
   _ -> Nothing  
 
-isForall ctxt c = case uvarTy ctxt (DeBr c) of
+isForall ctxt c = case uvarTy ctxt (DeBr c Nothing) of
   Just a  -> True
   Nothing -> False
 
@@ -337,63 +341,64 @@ unify ctxt (a :=: b) = ueq (a,b) <|> ueq (b,a)
         gvar_gvar_same (hA,tyA,ppA) (hB,tyB,ppB) = do
           onlyIf $ hA == hB 
                 && length ppA == length ppB
-          let (tyLst,tyBase) = viewN tyA
-                  
-              -- could be made way more efficient
-              tyX' = getTyLst tyLst (zip ppA ppB)
-                where getTyLst [] [] = Pat $ tyBase
-                      getTyLst (ty:c) ((a,b):lst) | a == b = forall ty $ getTyLst c lst
-                      getTyLst (ty:c) (_:lst) = liftV (-1) $ getTyLst c lst
-              (tyLst',tyBase') = viewN tyX'
-              
-              base = foldl (:+:) (vvar $ length tyLst) [ var i | ((a,b),i) <- zip (zip ppA ppB) [0..], a == b ]
-              l  = foldr Abs (Pat base) tyLst
+          unless (tyA == tyB  ) $ error "gvar_gvar_same: TYA!=TYB"
           -- could make this even more efficient by only performing the 
           -- "upDone step once along side the search for tyA', but why bother?"    
           case upDone hA (ctxt,Done) of 
             -- in this case, we don't actually care about the result since it isn't in an exists.            
             Nothing -> return $ rebuild ctxt Done
-            Just (ctxt,Bind Exists tyA' form) -> do
-              unless (tyA == tyB  ) $ error "gvar_gvar_same: TYA!=TYB"
+            Just (ctxt,Bind (Exists x) tyA' form) -> do
               unless (tyA == tyA' ) $ error "gvar_gvar_same: TYA!=TYA' - implying repeate off"
-
-              return $ rebuild ctxt $ Bind Exists tyX' $ substF (putTy ctxt tyX') (l, tyA,0) form
+              let (tyLst,tyBase) = viewN tyA
+                  
+                  -- could be made way more efficient
+                  tyX' = getTyLst tyLst (zip ppA ppB)
+                    where getTyLst [] [] = Pat $ tyBase
+                          getTyLst (ty:c) ((a,b):lst) | a == b = forall ty $ getTyLst c lst
+                          getTyLst (ty:c) (_:lst) = liftV (-1) $ getTyLst c lst
+                  (tyLst',tyBase') = viewN tyX'
+              
+                  base = foldl (:+:) (evvar (length tyLst) $ "'@"++x) [ var i | ((a,b),i) <- zip (zip ppA ppB) [0..], a == b ]
+                  l  = foldr Abs (Pat base) tyLst
+              return $ rebuild ctxt $ Bind (Exists $ "'@"++x) tyX' $ substF (putTy ctxt tyX') (l, tyA,0) form
         
         gvar_uvar_outside (hA,tyA,ppA) (hB,tyB,mB) = do
           onlyIf $ case hB of
             Con _ -> True
-            DeBr hBj -> hA < hBj 
+            DeBr hBj _ -> hA < hBj 
           
-          let (tyLstA,tyBaseA) = viewN tyA
-              (tyLstB,tyBaseB) = viewN tyB
-              
-              lun = length tyLstA
-              n = lun - 1                          
-              
-              un_lst = var <$> [0..n]
-              
-              xs = ((lun +) . fst) <$> zip [0..] tyLstB
-              xMlst = map (\x -> Pat $ foldl (:+:) (vvar x) un_lst) xs
-              base = Pat $ foldl (:+:) (Var hB) $ xMlst
 
-              l = foldr Abs base $ zipWith liftV [0..] tyLstA
                       
           -- could make this even more efficient by only performing the 
           -- "upDone step once, but why bother?"
           case upDone hA (ctxt,Done) of 
             Nothing -> return $ rebuild ctxt Done
               -- in this case, we don't actually care about the result since it isn't in an exists.
-            Just (ctxt,Bind Exists tyA' form) -> do
+            Just (ctxt,Bind (Exists xnm) tyA' form) -> do
               
               unless (tyA == tyA' ) $ error "gvar_uvar_outside: TYA!=TYA' - implying repeate off"
-              let foralls i v = foldr forall v $ forallsA i
+              let (tyLstA,tyBaseA) = viewN tyA
+                  (tyLstB,tyBaseB) = viewN tyB
+              
+                  lun = length tyLstA
+                  n = lun - 1                          
+              
+                  un_lst = var <$> [0..n]
+              
+                  xs = (\(i,_) -> (lun + i, show i++"@"++xnm )) <$> zip [0..] tyLstB
+                  xMlst = map (\x -> Pat $ foldl (:+:) (uncurry evvar x) un_lst) xs
+                  base = Pat $ foldl (:+:) (Var hB) $ xMlst
+
+                  l = foldr Abs base $ zipWith liftV [0..] tyLstA
+                
+                  foralls i v = foldr forall v $ forallsA i
                           
                   forallsA i = fst $ viewN $ liftV i $ foldr forall tipe tyLstA
 
                   build []         i b'lst _      _   _    = reverse $ b'lst
                   build (b_i:blst) i b'lst ctxt_p f_p l_p  = build blst (i+1) (b'_i:b'lst) ctxt_i f_i l_i
                     where b'_p = head b'lst
-                          f_i c b = appN c (f_p c b) $! Pat $! foldl (:+:) (vvar $ n + i - 1 ) un_lst
+                          f_i c b = appN c (f_p c b) $! Pat $! foldl (:+:) (evvar (n + i - 1) $ show i ++ "@"++xnm ) un_lst
                           l_i = Abs b_i . l_p
                                   
                           ctxt_i = putTy ctxt_p b'_p
@@ -404,9 +409,9 @@ unify ctxt (a :=: b) = ueq (a,b) <|> ueq (b,a)
                   bNlst = build tyLstB 0 [] ctxt (\ctxt -> id) id                
                   
               return $ rebuild ctxt 
-                $ foldr (\xN -> Bind Exists xN) 
+                $ foldr (\(i,xN) -> Bind (Exists $ show i++"@"++xnm) xN) 
                         (substF (foldr (flip putTy) ctxt bNlst) (l, tyA , 0) $ addAt (length bNlst - 1, 1) form)
-                $ bNlst
+                $ zip [0..] bNlst
               
         gvar_uvar_inside  (hA,tyA,ppA) (hB,tyB,mB)  = Nothing
         
@@ -425,18 +430,18 @@ unify ctxt (a :=: b) = ueq (a,b) <|> ueq (b,a)
   B'_i  = (A_1...A_n)^i . F_i (ctxt_i,(A_1...A_n)^i) (L_i (B_i^{n+i,i}))
 -}
 test3 :: Form
-test3 = Bind Exists (tipe ~> tipe ~> tipe ~> tipe) -- 3
+test3 = Bind (Exists "a") (tipe ~> tipe ~> tipe ~> tipe) -- 3
       $ Bind Forall tipe -- 2
       $ Bind Forall tipe -- 1 
       $ Bind Forall tipe -- 0 
-      $ Pat (vvar 3 :+: var 1 :+: var 0 :+: var 2) :=: Pat (vvar 3 :+: var 2 :+: var 0 :+: var 1)
-      :&: var 0 :=: var 3 -- to view the result!
+      $ Pat (evvar 3 "a" :+: var 1 :+: var 0 :+: var 2) :=: Pat (vvar 3 :+: var 2 :+: var 0 :+: var 1)
+      :&: var 0 :=: evar 3 "a" -- to view the result!
 
 test2 :: Form
 test2 = Bind Forall (tipe ~> tipe ~> tipe) -- 4
       $ Bind Forall (tipe ~> tipe) -- 3
-      $ Bind Exists (tipe ~> tipe ~> tipe) -- 2
+      $ Bind (Exists "b") (tipe ~> tipe ~> tipe) -- 2
       $ Bind Forall tipe -- 1
       $ Bind Forall tipe -- 0 
-      $ Pat (vvar 2 :+: var 1 :+: var 0) :=: Pat (vvar 3 :+: var 0)
-     :&: var 2 :=: var 4 -- to view the result!
+      $ Pat (evvar 2 "b" :+: var 1 :+: var 0) :=: Pat (vvar 3 :+: var 0)
+     :&: evar 2 "b" :=: var 4 -- to view the result!
