@@ -632,8 +632,7 @@ universeCheck env sp = case sp of
     subOf k2 k3
     return k3
   Spine a [] | a == atomName -> do 
-    v <- getNewWith "@tipeLevelRetA"
-    return $ tipe `apply` var v
+    return $ atom
     
   Spine a [Spine v []] | a == tipeName -> do 
     v' <- getNewWith "@tipeLevelRetB"
