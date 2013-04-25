@@ -56,5 +56,5 @@ defn \/ : type -> type -> prop
 
 fixity left 0 ==
 -- currently we can't do any inference inside of definitional signatures
-defn == : {q : type} (q -> type) -> q -> type 
-  as ?\q . \foo : q -> type . \v : q . foo v
+defn == : {q : type} (q -> prop) -> q -> prop
+  as ?\q . \foo : q -> prop . \v : q . foo v

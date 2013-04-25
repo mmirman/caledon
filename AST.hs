@@ -244,11 +244,11 @@ consts = [ (atomName , tipe)
          , (kindName , kind)
          -- atom : kind
            
-         , ("#ascribe#", forall "a" atom $ (var "a") ~> (var "a"))
+         , ("#ascribe#", forall "a" tipe $ (var "a") ~> (var "a"))
          
-         , ("#forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
+         , ("#forall#", forall "a" tipe $ (var "a" ~> tipe) ~> atom)
            
-         , ("#imp_forall#", forall "a" atom $ (var "a" ~> atom) ~> atom)
+         , ("#imp_forall#", forall "a" tipe $ (var "a" ~> tipe) ~> atom)
            
          , ("#imp_abs#", forall "a" atom $ forall "foo" (var "a" ~> atom) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))
          ]

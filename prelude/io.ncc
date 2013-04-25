@@ -13,7 +13,7 @@ defn putChar    :  char -> prop -- builtin
 fixity left 1 ,
 defn io : prop
    | do = io
-   | ,  = io -> prop -> io 
+   | ,  = io -> type -> io 
 
 defn run : io -> prop
    | runDo = run do

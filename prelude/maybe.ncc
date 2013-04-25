@@ -1,3 +1,3 @@
-defn maybe : prop -> prop
+defn maybe : type -> prop
    | nothing = maybe A
    | just = A -> maybe A

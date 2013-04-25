@@ -576,6 +576,7 @@ viewLast (reverse -> (a:l)) = (reverse l,a)
 viewApp (Spine nm (viewLast -> (l,arg))) = (Spine nm l, arg)
 
 
+
 equiv (Abs x ty l) (Abs x' ty' l') = do
   equiv ty ty'
   v <- getNewWith "@v"
@@ -596,7 +597,9 @@ subOf (Spine "#imp-forall#" [t, Abs x _ l])  (Spine "#imp-forall#" [t', Abs x' _
   subOf t' t
   v <- getNewWith "@v"
   subOf (subst (x |-> var v) l) (subst (x' |-> var v) l')  
-subOf (Spine a [Spine nm []]) (Spine b [Spine nm' []]) | a == tipeName && b == tipeName = tell [(nm,nm')]  
+subOf (Spine a [Spine nm []]) (Spine b [Spine nm' []]) | a == tipeName && b == tipeName = 
+  -- this is a greater than or equal to relationship, not a strictly greater than relationship!
+  tell [nm :<=: nm'] -- tell
 subOf (Spine a []) (Spine b [Spine nm' []]) | a == atomName && b == tipeName = return ()
 subOf a b = do 
   equiv (etaReduce a) (etaReduce b)
@@ -618,27 +621,32 @@ universeCheck env sp = case sp of
   Spine "#forall#" [_, Abs nm ty l] -> do  
     k1 <- universeCheck env ty
     k2 <- universeCheck (M.insert nm ty env) l
-    k3 <- (tipe `apply`) <$> var <$> getNewWith "@tv"
-    
-    subOf k1 k3
-    subOf k2 k3
-    return k3
+    case k2 == atom of
+      True -> return atom
+      False -> do
+        k3 <- (tipe `apply`) <$> var <$> getNewWith "@tv"
+        subOf k1 k3
+        subOf k2 k3
+        return k3
   Spine "#imp_forall#" [_, Abs nm ty l] -> do  
     k1 <- universeCheck env ty
     k2 <- universeCheck (M.insert nm ty env) l
-
-    k3 <- (tipe `apply`) <$> var <$> getNewWith "@tv"
-    subOf k1 k3
-    subOf k2 k3
-    return k3
+    case k2 == atom of
+      True -> return atom
+      False -> do
+        k3 <- (tipe `apply`) <$> var <$> getNewWith "@tv"
+        subOf k1 k3
+        subOf k2 k3
+        return k3
   Spine ['\'',c,'\''] [] -> return $ var "char"
   
   Spine a [] | a == atomName -> do 
-    return $ atom
+    v <- getNewWith "@tipeLevelRetB"
+    return $ tipe `apply` var v --    return $ atom
     
   Spine a [Spine v []] | a == tipeName -> do 
     v' <- getNewWith "@tipeLevelRetB"
-    tell [(v,v')]
+    tell [v :<: v']
     return $ tipe `apply` var v'
     
   Spine "#tycon#" [Spine nm [l]] -> universeCheck env l
@@ -680,11 +688,7 @@ checkUniverses nm env ty = do
     ty <- initTypes ty
     universeCheck env ty
     
-  let graph = foldr (\(nm,lt) gr -> case gr ! nm of 
-                        Nothing -> M.insert nm (S.singleton lt) gr
-                        Just r -> M.insert nm (S.insert lt r)   gr) mempty lst
-      
-  if isUniverseGraph graph 
+  if isUniverseGraph lst
     then return ()
     else throwError $ "Impredicative use of type in: "++nm
 
@@ -697,12 +701,12 @@ checkUniverses nm env ty = do
 
       
       
-withKind m = do
+withKind m = m tipe {- do
   k <- getNewWith "@k"
   addToEnv (∃) k tipe $ do
     r <- m $ var k
     var k .@. kind
-    return r
+    return r -}
 
 checkType :: Spine -> Type -> TypeChecker Spine
 checkType sp ty | ty == kind = withKind $ checkType sp
@@ -722,7 +726,8 @@ checkType sp ty = case sp of
     r   <- getNewWith "@r"
     Spine _ l' <- addToEnv (∀) r t'' $ checkType (Spine r l) ty
     
-    return $ rebuildSpine (rebuildFromMem mem v') l'
+    return $ Spine "#ascribe#" (t'':v':l')
+--    return $ rebuildSpine (rebuildFromMem mem v') l'
     
   Spine "#dontcheck#" [v] -> do
     return v
@@ -745,7 +750,7 @@ checkType sp ty = case sp of
       checkType tyB ty )
 
   -- below are the only cases where bidirectional type checking is useful 
-  Spine "#imp_abs#" [_, Abs x tyA sp] -> case ty of
+  Spine "#imp_abs#" [_, Abs x tyA sp] -> case execute ty of
     Spine "#imp_forall#" [_, Abs x' tyA' tyF'] | x == x' || "" == x' -> do
       tyA <- withKind $ checkType tyA
       tyA ≐ tyA'
@@ -768,7 +773,7 @@ checkType sp ty = case sp of
           checkType sp (Spine e [var x])
         return $ imp_abs x tyA sp
 -}
-  Abs x tyA sp -> case ty of
+  Abs x tyA sp -> case execute ty of
     Spine "#forall#" [_, Abs x' tyA' tyF'] -> do
       tyA <- withKind $ checkType tyA
       tyA ≐ tyA'
@@ -788,7 +793,7 @@ checkType sp ty = case sp of
           ty ≐ mty
           return []
           
-        chop mty lst@(a:l) = case mty of 
+        chop mty lst@(a:l) = case execute mty of 
           
           Spine "#imp_forall#" [ty', Abs nm _ tyv] -> case findTyconInPrefix nm lst of
             Nothing -> do
@@ -908,6 +913,10 @@ unsafeSubst s (Spine nm apps) = let apps' = unsafeSubst s <$> apps in case s ! n
   _ -> Spine nm apps'
 unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 
+execute (Spine "#ascribe#" (t:v:l)) = execute $ rebuildSpine v l
+execute (Spine a l) = Spine a $ execute <$> l
+execute (Abs x a l) = Abs x (execute a) $ execute l
+
 ----------------------------
 --- the public interface ---
 ----------------------------
@@ -915,16 +924,16 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 typePipe verbose lt (b,nm,ty,kind) = do
   (ty,kind,lt) <- mtrace verbose ("Inferring: " ++nm) $ 
                   typeInfer lt (b,nm, ty,kind) -- type infer
-    
+
   (ty,kind,lt) <- mtrace verbose ("Elaborating: " ++nm) $ 
                   typeInfer lt (b,nm, ty,kind) -- elaborate
     
   (ty,kind,lt) <- mtrace verbose ("Checking: " ++nm) $ 
                   typeInfer lt (b,nm, ty,kind) -- type check
                   
-  checkUniverses nm (snd <$> lt) ty   -- perform universe checking once before elaboration                    
-  
-  return (ty,kind,lt)
+  checkUniverses nm (snd <$> lt) ty   -- perform universe checking once before elaboration
+    
+  return (execute ty,kind,lt)
   
 typeCheckAxioms :: Bool -> [FlatPred] -> Choice (Substitution, Substitution)
 typeCheckAxioms verbose lst = do

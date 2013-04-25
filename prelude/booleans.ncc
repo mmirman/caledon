@@ -9,12 +9,12 @@ defn if : bool -> bool
   as \b . b
 
 fixity none 1 |:|
-defn |:| : {t:prop} t -> t -> (t -> t -> t) -> t
+defn |:| : {t:type} t -> t -> (t -> t -> t) -> t
   as ?\t : prop . \a b : t. \f : t -> t -> t. f a b
 
 
 fixity none 0 ==>
-defn ==> : {A : prop} bool -> ((A -> A -> A) -> A) -> A -> prop
+defn ==> : {A : type} bool -> ((A -> A -> A) -> A) -> A -> prop
   >| thentrue  = (true  ==> F) (F (\a1 a2 : A . a1) )
   >| thenfalse = (false ==> F) (F (\a1 a2 : B . a2))
 

@@ -1,7 +1,7 @@
 -------------
 --- Lists ---
 -------------
-defn list : prop -> prop
+defn list : type -> prop
    | nil  = list A
    | cons = A -> list A -> list A
 

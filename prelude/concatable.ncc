@@ -5,7 +5,7 @@
 --- concat ---
 --------------
 
-defn concatable : [M : prop] (M -> M -> M -> prop) -> prop
+defn concatable : [M : type] (M -> M -> M -> prop) -> prop
   >| concatableNat = concatable natural add
   >| concatableList = concatable (list A) concatList
 
