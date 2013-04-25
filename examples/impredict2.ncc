@@ -1,0 +1,5 @@
+defn myid : [A : type] A -> A
+  as \a : type . \v : a . v
+
+defn idid : [A : type] A -> A
+  as myid ([A : type] A -> A) myid

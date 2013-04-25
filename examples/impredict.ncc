@@ -1,0 +1,6 @@
+defn self : [A : type] A -> prop
+   | omega = self ([A : type] A -> prop) self
+
+
+
+
