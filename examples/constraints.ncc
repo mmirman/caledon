@@ -1,0 +1,6 @@
+defn poo : [A : type j] A -> type i : type (i+j)
+   
+defn use : type
+  as poo 
+     ([A : type i] A -> type j : type (i + j)) 
+     poo

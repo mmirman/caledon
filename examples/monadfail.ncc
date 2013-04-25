@@ -1,0 +1,31 @@
+fixity none 5 =:=
+defn =:= : Qty -> Qty -> prop
+  >| eq = (Bval : Qty) =:= Bval
+
+defn monad : [m : prop -> prop]
+           { return : {A : prop} A -> m A}
+           { bind : {A2 B : prop} m A2 -> (A2 -> m B) -> m B }
+           prop
+  | isMonad  = [m : prop -> prop]
+               [Return : {A : prop} A -> m A]
+               [Bind :   {A2 B : prop} m A2 -> (A2 -> m B) -> m B]
+               monad m {return = Return}  {bind = Bind}
+-- left identity
+--              <- ( [A B][V][F : A -> m B] Bind (Return V) F =:= F V )
+-- right identity
+--              <- ( [A][MA : m A] Bind MA Return =:= MA )                          
+-- associatiity
+--              <- ( [MA] Bind (Bind MA F) G =:= Bind MA (\x . Bind (F x) G) )
+
+defn returnV : {M : prop -> prop}
+               {Return : {A : prop} A -> M A}
+               {Bind : {A2 B: prop} M A2 -> (A2 -> M B) -> M B}
+               {mon : monad M {return = Return}{ bind = Bind } } 
+               {Av} Av -> M Av
+  as ?\ M : prop -> prop. 
+     ?\ Return : {A} A -> M A. 
+     ?\ Bind : {A2 B} M A2 -> (A2 -> M B) -> M B.
+     ?\ mon : monad M {return = Return}{bind = Bind}. 
+     ?\ Av : prop .
+     \ V : Av . 
+     Return {A = Av} V

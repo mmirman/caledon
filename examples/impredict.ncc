@@ -1,0 +1,12 @@
+defn self : [A : type] A -> type
+   | omega = self ([A : type] A -> type) self
+
+
+{-
+
+G |- A : ||x:T.C  G|- B : T'   G|- T' < T
+-----------------------------------------
+    G |- A B : [B/x]C
+
+-}
+

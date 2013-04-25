@@ -1,0 +1,24 @@
+fixity lambda exists
+
+defn exists : ∀ N : type . (N → type) → type
+  as λ N : type      .  
+     λ P : N → type . 
+      ∀ C : type . (∀ a : N . (P a) → C) → C
+        
+defn pack : {N}[F][V] F V → ( exists a : N . F a )
+  as ?λ N  : type      .
+      λ F  : N  → type .
+      λ V  : N         .
+      λ FV : F V       .
+      λ C  : type      .
+      λ Fall : ∀ a : N . (F a) → C.
+        Fall V FV
+
+defn open : {N}{F : N → type}{A : type} (exists a : N . F a) -> (∀ a : N . F a → A) → A
+  as ?λ N : type                .
+     ?λ F : N → type            .
+     ?λ A : type                .
+      λ ex : exists a : N . F a .
+      λ foo : ∀ a : N . F a → A .
+      ex A foo
+

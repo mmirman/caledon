@@ -1,0 +1,10 @@
+#include "exists.ncc"
+#include "nat1.ncc"
+
+
+defn lift : [N : nat ] nat_1 N
+  as pack {N = nat} 
+      ((\ n : nat .  ) : nat -> prop ) 
+      (                : nat )
+      ( 
+

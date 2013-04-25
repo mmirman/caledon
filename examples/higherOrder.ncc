@@ -1,0 +1,59 @@
+defn a : type
+defn b : type
+
+defn isA : type -> type
+   | isAdef = isA a 
+
+defn isB : type -> type
+   | isBdef = isB b
+
+defn isFamily : (type -> type) -> type 
+   | isAf = isFamily isA
+   | isBf = isFamily isB
+
+defn search : (type -> type) -> type
+   | doThatSearch = search F <- F a <- isFamily F
+
+
+
+#include "../prelude/logic.ncc"
+
+query whatNow1 = free F . F a /\ isFamily F
+
+query whatNow2 = any search
+
+
+{- 
+
+-- this falls into the category of empty searches!  
+-- type is inhabited by quite a few things, so we can't just blindly search for type!
+-- wouldn't it be nice to have unique identifiers for types?  Like type(A)
+-- 
+-- or ! would could at the very least 
+-- ensure that the search space is over
+-- already defined values.
+
+
+family is = type
+
+
+is : type n
+
+
+  then is : type (n + 1)
+  but type (n-1) !: is
+
+ie, is has no initial inhabitants, but is does not break the 
+universe predicitivity, as it is an alias for type.
+
+defn isA : type -> is
+   | isAdef = isA a : is
+
+defn isB : type -> is
+   | isBdef = isB b : is
+
+defn search : (type -> is) -> type
+   | doThatSearch = search F 
+                 <- F a 
+
+-}

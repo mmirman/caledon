@@ -1,0 +1,9 @@
+defn dick : type
+
+defn bloop : (type -> type) -> type 
+   | bloop-one = bloop (\x : type . dick)
+
+{-
+defn bloop : (type i -> type j : type (i+j)) -> type k : type (i+j+k)
+   | bloop-one = bloop ((\x : type i . x : type i) : (type i -> type i) )
+-}

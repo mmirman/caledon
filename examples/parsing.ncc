@@ -1,0 +1,7 @@
+defn noun    : prop
+defn verb    : noun -> prop
+defn pronoun : ([N] verb N) -> prop
+defn conjunction : prop -> prop -> prop
+
+
+

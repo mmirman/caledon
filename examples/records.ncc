@@ -1,0 +1,29 @@
+defn sigma : [A : prop] (A -> prop) -> prop
+  as \ At : prop . 
+     \ Bt : At -> prop.
+     [Res : prop]
+     [Foo : [Av : At][Bv : [a] Bt a ] Res ]
+     Res
+
+defn pair : [At][Bt : At -> prop]
+            [Av : At] [ Bv : [a] Bt a]
+            sigma At Bt
+  as \ At : prop . 
+     \ Bt : At -> prop.
+     \ Av : At .
+     \ Bv : [a] Bt a.
+     \ Res : prop.
+     \ Foo : [Av : At] ([a] Bt a) -> Res.
+       Foo Av Bv
+
+defn fst : [At][Bt : At -> prop] sigma At Bt -> At
+  as \ At : prop .
+     \ Bt : At -> prop .
+     \ sig : sigma At Bt .
+       sig At (\a : At . \ b : [a] Bt a . a)
+
+defn snd  : [At][Bt : At -> prop][sig : sigma At Bt] Bt (fst At Bt sig)
+  as \ At : prop .
+     \ Bt : At -> prop .
+     \ sig : sigma At Bt .
+       sig ([a] Bt a) (\a : At . \ b : [a] Bt a . b) (fst At Bt sig)
