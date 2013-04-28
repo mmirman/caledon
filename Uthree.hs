@@ -13,6 +13,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.List
 
+import Debug.Trace
 import Control.DeepSeq
 import Control.Spoon
 
@@ -58,7 +59,7 @@ data N = Abs Type N
     
 instance Show Variable where
   show (DeBr i) = show i
-  show (Exi i n ty) = n -- "("++n++"<"++show i++">:"++show ty++")"
+  show (Exi i n ty) = n++"<"++show i++">" -- "("++n++"<"++show i++">:"++show ty++")"
   show (Con n) = n
 
 instance Show P where
@@ -108,7 +109,7 @@ constants = M.fromList [ (tipeName, tipe)
 ---------------
 --- Formula ---
 ---------------
-infix 2 :&:
+infixr 2 :&:
 infix 3 :=:
 
 data Form = Term :=: Term
@@ -348,13 +349,13 @@ unify ctxt (Bind ty f) = unify (putTy ctxt ty) f
 unify (cons,len,ctx) Done = Just $ rebuild ctx Done
 unify ctxt@(cons,len,ctx) constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
   where ueq (a,b) = case (a,b) of
-          (Abs ty n1, n2) -> Just $ Bind ty $ n1 :=: appN ctxt (liftV 1 n2) (var 0)
+          (Abs ty n1, n2) -> Just $ rebuild ctx $ Bind ty $ n1 :=: appN (putTy ctxt ty) (liftV 1 n2) (var 0)
           (Pat a, Pat b) -> identity a b <|> do
             (hAO,ppA) <- getPP a
             hA <- gvarTy ctxt hAO
             let a' = (hA,ppA)
             onlyIf $ partialPerm hAO $ DeBr <$> ppA                                
-            gvar_uvar a' b <|> gvar_gvar a' b  
+            gvar_uvar a' b <|> gvar_gvar a' b <|> occurs a' b
           _ -> Nothing
           
         partialPerm hA ppA = all (hA >) ppA && all (isForall ctxt) ppA && inj ppA        
@@ -385,10 +386,20 @@ unify ctxt@(cons,len,ctx) constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
           let b' = (hB,ppB)
           onlyIf $ partialPerm hBO $ DeBr <$> ppB              
           gvar_gvar_same a b' <|> gvar_gvar_diff a b'
-
-        gvar_gvar_same (hA,ppA) (hB@(dist,xNm,tyB),ppB) = do
-          onlyIf $ hA == hB
-                && length ppA == length ppB
+        
+        rigidP x (var :+: p) = rigidP x var || rigid x p
+        rigidP x (Var v) = v == x
+        
+        rigid x (Abs ty m) = rigid x ty || rigid (liftV 1 x) m
+        rigid x (Pat p) = rigidP x p
+        
+        occurs (hA@(dist',xNm',tyB'), ppA) b = do
+          if rigidP (Exi dist' xNm' tyB') b
+            then error $ "occurs check"
+            else Nothing
+        
+        gvar_gvar_same (hA@(dist',xNm',tyB'),ppA) (hB@(dist,xNm,tyB),ppB) = do
+          onlyIf $ hA == hB && length ppA == length ppB 
           
           let xNm' = xNm++"@'"
               
@@ -408,18 +419,17 @@ unify ctxt@(cons,len,ctx) constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
               l = foldr Abs (Pat vlstBase) tyLst
               xVal = len - dist - 1
               -- we need to up the context by the dist!
-          case upDone xVal (ctx,Done) of
+          case upDone (xVal - 1)  (ctx,Done) of
             Nothing -> return $ rebuild ctx Done
             Just (ctxt, form) -> do
-              let tyB_top = liftV (-xVal) tyB -- this is safe since we are at "dist"
+              let tyB_top = liftV (1 - xVal) tyB -- this is safe since we are at "dist"
               return $ rebuild ctxt $ subst (cons, dist, ctxt) (l,tyB_top, Exi dist xNm tyB_top) $ form
 
-
         gvar_fixed (xVal, hA@(dist,xNm,tyA'),ppA) (hB,tyB',mB) = do
-
               
           let tyA = liftV (1 - xVal) tyA'
               tyB = liftV (1 - xVal) tyB'
+              
               
               (tyLstA,tyBaseA) = viewN tyA
               tyLstB = viewB tyB
@@ -455,18 +465,19 @@ unify ctxt@(cons,len,ctx) constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
             DeBr yVal -> yVal > xVal
           gvar_fixed (xVal, hA, ppA) (liftV (length ppA - xVal) hB, tyB', mB)         
 
-        gvar_uvar_inside  (hA@(dist,xNm,tyA'),ppA) (DeBr yVal,tyB',mB)  = do
+        gvar_uvar_inside (hA@(dist,xNm,tyA'),ppA) (DeBr yVal,tyB',mB) = do
           let xVal = len - dist - 1
-          hB <- elemIndex yVal ppA 
-          gvar_fixed (xVal, hA, ppA) (DeBr hB, tyB', mB)
+          case elemIndex yVal ppA of
+            Just hB -> gvar_fixed (xVal, hA, ppA) (DeBr hB, tyB', mB)
+            Nothing -> error "GVAR-UVAR-DEPENDS"
         gvar_uvar_inside _ _ = Nothing
-        
+                  
         raise 0 v = v
         raise i (Exi dist xNm tyA, (cons,len,ctxt'), form) = 
           case upDone 1 (ctxt',form) of
             Just (ctxt'',form') -> let ty = getTy (cons,len,ctxt') (DeBr 0)
                                        newExi = Exi (dist - 1) (xNm++"@") (forall ty tyA)
-                                   in  raise (i-1) (newExi, (cons,len - 1, ctxt''), subst (cons,len - 1, ctxt'') (Pat $ Var newExi :+: var 0 ,tyA, Exi dist xNm tyA) form')
+                                   in  raise (i-1) (newExi, (cons,len - 1, ctxt''), liftV (-1) $ subst (cons,len, ctxt') (Pat $ (liftV 1 $ Var newExi) :+: var 0 ,liftV 1 $ tyA, Exi dist xNm tyA) form')
             Nothing -> error $ "can't go this high! "++show i
             
         gvar_gvar_diff (hA@(dist,xNm,tyA),ppA) (hB@(dist',xNm',tyA'),ppB) | dist < dist' =
@@ -474,12 +485,38 @@ unify ctxt@(cons,len,ctx) constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
             Just (ctxt,form) -> case raise (dist' - dist) (Exi dist' xNm' tyA', (cons,dist',ctxt), form) of
               (_,(_,_,ctxt),form) -> return $ rebuild ctxt form
         gvar_gvar_diff (hA@(dist,_,_),_) (hB@(dist',_,_),_) | dist > dist' = Nothing
-        gvar_gvar_diff (hA@(dist,xNm,tyA),ppA) (hB@(dist',xNm',tyA'),ppB) | dist == dist' = do
+        gvar_gvar_diff (hA@(dist,xNm,tyA),ppA) (hB@(dist',xNm',tyB),ppB) | dist == dist' = do
           let xx'Val = len - dist - 1
-          case upDone (xx'Val - 1) (ctx, constraint) of
-            Nothing -> error $ "can't go this high! "++show i
+          case upDone (xx'Val) (ctx, constraint) of
+            Nothing -> error $ "can't go this high! "++show xx'Val
             Just (ctxt, form) -> do
-              undefined
+              let xNm'' = xNm++"+"++xNm'++"@"
+                  xVal = len - dist - 1              
+                  
+                  
+                  sames = [ (var i, var j) | (a,i) <- zip ppA [0..], (b,j) <- zip ppB [0..], a == b ]
+                  
+                  (samesA,samesB) = unzip sames
+                                    
+                            
+                  getTyLst tb [] [] = Pat $ tb
+                  getTyLst tb (ty:c) (a:lst) | elem a ppB = forall ty $ getTyLst tb c lst
+                  getTyLst tb (ty:c) (_:lst) = liftV (-1) $ getTyLst tb c lst                  
+                  
+                  (tyLstA,tyBaseA) = viewN tyA
+                  (tyLstB,_) = viewN tyB
+                  
+                  tyX' = getTyLst tyBaseA tyLstA ppA
+              
+                  vlstBaseA = foldl (:+:) (Var $ Exi dist xNm'' tyX') samesA
+                  vlstBaseB = foldl (:+:) (Var $ Exi dist xNm'' tyX') samesB
+                  
+                  lA = foldr Abs (Pat vlstBaseA) tyLstA
+                  lB = foldr Abs (Pat vlstBaseB) tyLstB
+
+              return $ rebuild ctxt $ 
+                subst (cons, dist, ctxt) (lA, tyA, Exi dist xNm tyA) $ 
+                subst (cons, dist, ctxt) (lB,tyB, Exi dist xNm' tyA) $ form
 
 type Reconstruction = M.Map Name (Int {- depth -} , Term {- reconstruction -}) 
 -- modify all the time, since the only time we mention an existential 
@@ -501,7 +538,7 @@ test3 = Bind tipe -- 2
       $ Bind tipe -- 1 
       $ Bind tipe -- 0 
       $ Pat (evvar 0 "a" tttt :+: var 1 :+: var 0 :+: var 2) :=: Pat (evvar 0 "a" tttt :+: var 2 :+: var 0 :+: var 1)
-     :&: var 0 :=: evar 0 "a" tttt -- to view the result!
+     :&: evar 1 "n" tttt :=: evar 0 "a" tttt -- to view the result!
 
 test2 :: Form
 test2 = Bind ttt  -- 3
@@ -509,12 +546,35 @@ test2 = Bind ttt  -- 3
       $ Bind tipe -- 1
       $ Bind tipe -- 0 
       $ Pat (evvar 2 "a" ttt :+: var 1 :+: var 0) :=: Pat (vvar 2 :+: var 0)
-     :&: var 3 :=: evar 2 "a" ttt -- to view the result!
+     :&: evar 3 "g" ttt :=: evar 2 "a" ttt -- to view the result!
 
 test1 :: Form
-test1 = Bind ttt  -- 3
-      $ Bind tt   -- 2
+test1 = Bind tt   -- 2
       $ Bind tipe -- 1
       $ Bind tipe -- 0 
       $ Pat (evvar 2 "a" ttt :+: var 1 :+: var 0) :=: var 1
-     :&: var 3 :=: evar 2 "a" ttt -- to view the result!
+     :&: evar 3 "z" ttt :=: evar 2 "a" ttt -- to view the result!
+
+testN :: Form
+testN = Bind tipe
+      $ Bind tipe
+      $ Pat (evvar 0 "z" ttt :+: var 1 :+: var 0) :=: Pat (evvar 1 "x" tt :+: var 0)
+      
+testN1 :: Form
+testN1 = Bind tipe
+       $ Bind tipe
+       $ Pat (evvar 0 "z" ttt :+: var 1 :+: var 0) :=: Pat (evvar 0 "x@" ttt :+: var 1 :+: var 0)      
+      :&: evar 0 "x@" ttt :=: evar 0 "x@" ttt
+       
+testN1p :: Form
+testN1p = Bind tipe
+        $ Bind tipe
+        $ Pat (evvar 0 "z" ttt :+: var 1 :+: var 0) :=: Pat (evvar 0 "x@" tt :+: var 0)      
+       :&: evar 0 "z" ttt :=: evar 1 "arg" ttt
+       :&: evar 1 "zola" tt :=: evar 0 "x@" tt
+        
+unifyAll Done = return ()
+unifyAll unf = case unify emptyCon unf of
+  Nothing -> error $ "can not unify "++show unf
+  Just unf -> unifyAll unf
+  
