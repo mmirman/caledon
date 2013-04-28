@@ -577,15 +577,18 @@ equiv a b = throwTrace 0 $ "Expecting type: "++show a ++ "  ==  "++show b
 subOf (Spine "#ascribe#" (t:v:l)) ty = subOf (rebuildSpine v l) ty
 subOf ty (Spine "#ascribe#" (t:v:l)) = subOf ty (rebuildSpine v l)
 subOf (Spine "#forall#" [t, Abs x _ l])  (Spine "#forall#" [t', Abs x' _ l']) = do
-  equiv t t'
+  subOf t t'
+  subOf t' t
   v <- getNewWith "@v"
   subOf (subst (x |-> var v) l) (subst (x' |-> var v) l')
 subOf (Spine "#imp-forall#" [t, Abs x _ l])  (Spine "#imp-forall#" [t', Abs x' _ l']) = do
-  equiv t t'
+  subOf t t'
+  subOf t' t
+  
   v <- getNewWith "@v"
   subOf (subst (x |-> var v) l) (subst (x' |-> var v) l')  
 subOf (Spine a [Spine nm []]) (Spine b [Spine nm' []]) | a == tipeName && b == tipeName = 
-  tell [(nm,nm')]  
+  tell [nm :<=: nm']  
 subOf a b = do 
   equiv (etaReduce a) (etaReduce b)
 
@@ -626,7 +629,7 @@ universeCheck nm env sp = case sp of
     return $ tipe `apply` var v'
   Spine a [Spine v []] | a == tipeName -> do 
     v' <- getNewWith "@tv"
-    tell [(v,v')]
+    tell [ v :<: v']
     return $ tipe `apply` var v'
     
   Spine "#tycon#" [Spine nm [l]] -> universeCheck nm env l
@@ -671,11 +674,7 @@ initTypes (Abs nm ty a) = do
   Abs nm ty <$> initTypes a
   
 checkU nm lst = do
-  let graph = foldr (\(nm,lt) gr -> case gr ! nm of 
-                        Nothing -> M.insert nm (S.singleton lt) gr
-                        Just r -> M.insert nm (S.insert lt r)   gr) mempty lst
-      
-  if isUniverseGraph graph 
+  if isUniverseGraph lst
     then return ()
     else throwError $ "Impredicative use of type in: "++nm
 

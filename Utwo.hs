@@ -134,7 +134,7 @@ class Show a => Context a where
   getTy :: a -> Variable -> Type
   putTy :: a -> Type -> a
 instance Context [Type] where
-  getTy v (DeBr a) = liftV (-a) $ v !! a
+  getTy v (DeBr a) = liftV a $ v !! a
   getTy v (Con a) = constants M.! a
   
   putTy c t = t:c
@@ -169,8 +169,8 @@ etaExpand _ m = Pat m
 
 substN :: Context c => Bool -> c -> (Term,Type, Int) -> N -> N
 substN t ctxt na (Pat p) = case substP t ctxt na p of
-  (Right m,p) -> m
-  (Left m, p) -> if t then etaExpand p m else Pat m
+  (Right m,_) -> m
+  (Left m ,ty) -> if t then etaExpand ty m else Pat m
 substN t ctxt na (Abs b n) = Abs (substN t ctxt na b) $ substN t (putTy ctxt b) (liftThree 1 na) n
 
 substP :: Context c => Bool -> c -> (Term,Type,Int) -> P -> (Either P N, Type)
@@ -180,16 +180,16 @@ substP t ctxt na (p :+: n) = hered t ctxt (substP t ctxt na p) (substN t ctxt na
 
 hered  :: Context c => Bool -> c -> (Either P N, Type) -> N -> (Either P N, Type)
 hered t ctxt (Right (Abs a1 n), ~(viewForallN -> ~(Just ~(a1',a2)))) nv = 
-  ( Right $ substN t ctxt (nv,a1,-1) $ addAt (-1,0) n
-  , substN False ctxt (nv, a1',-1) $ addAt (-1,0) a2
+  ( Right $ liftV (-1) $ substN t (putTy ctxt a1) (liftV 1 nv,liftV 1 a1,0) n
+  , liftV (-1) $ substN False (putTy ctxt a1') (liftV 1 nv, liftV 1 a1',0) a2
   )
 hered t ctxt (Right (Pat p1), ~(viewForallN -> ~(Just ~(a1',a2)))) nv = 
   ( Right $ Pat $ p1 :+: nv
-  , substN False ctxt (nv, a1',-1) $ addAt (-1,0) a2
+  , liftV (-1) $ substN False (putTy ctxt a1') (liftV 1 nv, liftV 1 a1',0) a2
   )
 hered t ctxt (Left p1, ~(viewForallN -> ~(Just ~(a1',a2)))) nv = 
   ( Left $ p1 :+: nv
-  , substN False ctxt (nv, a1',-1) $ addAt (-1,0) a2
+  , liftV (-1) $ substN False (putTy ctxt a1') (liftV 1 nv, liftV 1 a1',0) a2
   )
 
       
@@ -198,10 +198,10 @@ substF _ _ Done = Done
 substF ctxt sub (a :=: b) = substN True ctxt sub a :=: substN True ctxt sub b
 substF ctxt sub (a :&: b) = substF ctxt sub a :&: substF ctxt sub b
 substF ctxt sub (Bind q ty f) = 
-  Bind q (substN True ctxt sub ty) $ substF (putTy ctxt ty) (liftThree 1 sub) f
+  Bind q (substN False ctxt sub ty) $ substF (putTy ctxt ty) (liftThree 1 sub) f
 
 app  :: Context c => c -> Either P N -> N -> Either P N
-app ctxt (Right (Abs a1 n)) nv = Right $ substN True ctxt (nv,a1,-1) $ addAt (-1,0) n
+app ctxt (Right (Abs a1 n)) nv = Right $ liftV (-1) $ substN True (putTy ctxt a1) (liftV 1 nv,liftV 1 a1,0) n
 app ctxt (Right (Pat p1)) nv = Right $ Pat (p1 :+: nv)
 app ctxt (Left p1) nv = Left $ p1 :+: nv
 
@@ -252,7 +252,7 @@ upDone i (a,b) = upDone' i (upWithZero a b)
 instance Context Ctxt where
   getTy c (Con i) = constants M.! i
   getTy c (DeBr i) = case repeate i up $ upZero c of
-    B _ _ ty -> ty
+    B _ _ ty -> liftV i $ ty
     Top -> error $ "\nI: "++show i++"\nCTXT: "++show c
   putTy c ty = B c Forall ty
   
@@ -293,7 +293,7 @@ uvarTy :: Ctxt -> Variable -> Maybe Type
 uvarTy ctxt (Con c) = M.lookup c constants
 uvarTy ctxt (DeBr i) = case repeate i up $ upZero ctxt of
   B _ Forall ty -> Just ty
-  _ -> Nothing  
+  _ -> Nothing
 
 isForall ctxt c = case uvarTy ctxt (DeBr c) of
   Just a  -> True
@@ -311,7 +311,7 @@ unify ctxt (a :&: b) = case  unify (L ctxt b) a of
   Just a  -> Just a
 unify ctxt (Bind quant ty f) = unify (B ctxt quant ty) f
 unify ctxt Done = Just $ rebuild ctxt Done
-unify ctxt (a :=: b) = ueq (a,b) <|> ueq (b,a)
+unify ctxt constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
   where ueq (a,b) = case (a,b) of
           (Abs ty n1, n2) -> Just $ rebuild ctxt $ Bind Forall ty $ n1 :=: appN ctxt (liftV 1 n2) (var 0)
           (Pat a, Pat b) -> identity a b <|> do
@@ -387,7 +387,7 @@ unify ctxt (a :=: b) = ueq (a,b) <|> ueq (b,a)
                       
           -- could make this even more efficient by only performing the 
           -- "upDone step once, but why bother?"
-          case upDone hA (ctxt,Done) of 
+          case upDone hA (ctxt,constraint) of 
             Nothing -> return $ rebuild ctxt Done
               -- in this case, we don't actually care about the result since it isn't in an exists.
             Just (ctxt,Bind Exists tyA' form) -> do
@@ -432,7 +432,16 @@ unify ctxt (a :=: b) = ueq (a,b) <|> ueq (b,a)
   B'_i  = (A_1...A_n)^i . F_i (ctxt_i,(A_1...A_n)^i) (L_i (B_i^{n+i,i}))
 -}
 test3 :: Form
-test3 = Bind Exists ((tipe ~> tipe) ~> tipe ~> (tipe ~> tipe) ~> tipe) -- 3
+test3 = Bind Exists (tipe ~> tipe ~> tipe ~> tipe) -- 3
+      $ Bind Forall tipe -- 2
+      $ Bind Forall tipe -- 1 
+      $ Bind Forall tipe -- 0 
+      $ Pat (vvar 3 :+: var 1 :+: var 0 :+: var 2)
+         :=: Pat (vvar 3 :+: var 2 :+: var 0 :+: var 1)
+     :&: var 0 :=: var 3 -- to view the result!
+
+test4 :: Form
+test4 = Bind Exists ((tipe ~> tipe) ~> tipe ~> (tipe ~> tipe) ~> tipe) -- 3
       $ Bind Forall (tipe ~> tipe)-- 2
       $ Bind Forall (tipe ~> tipe) -- 1 
       $ Bind Forall tipe -- 0 
@@ -450,3 +459,23 @@ test2 = Bind Forall (tipe ~> tipe ~> tipe) -- 4
       $ Bind Forall tipe -- 0 
       $ Pat (vvar 2 :+: var 1 :+: var 0) :=: Pat (vvar 3 :+: var 0)
      :&: var 2 :=: var 4 -- to view the result!
+
+
+{-
+
+Just  ∀: ( type ) ~> ( ( type ) ~> ( type ) ) .  ∀: ( type ) ~> ( type ) .  ∃:( type ) ~> ( ( type ) ~> ( type ) ) .  ∀: type .  ∀: type .  ( 3 ( 2 ( 1 )  ( 1 )  )  ≐ 3 ( 0 )  ) ∧ ( λ:type . (λ:type . (5 ( 4 ( 0 )  ( 1 )  ) )) ≐ λ:type . (5 ( 0 ) ) )
+
+
+Just  
+∀: ( type ) ~> ( ( type ) ~> ( type ) ) 
+∀: ( type ) ~> ( type ) .  
+∀: type .  
+∀: type .  
+  ( 2 ( a' ( 1 )  ( 1 )  )  ≐ 2 ( 0 )  ) 
+∧ ( λ:type . (λ:type . (4 ( a' ( 0 )  ( 1 )  ) )) ≐ λ:type . (4 ( 0 ) ) )
+
+it should be
+  ( 2 ( a' ( 0 ) ( 1 )  )  ≐ 2 ( 0 )  ) 
+
+
+-}

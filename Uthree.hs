@@ -11,6 +11,10 @@ import Data.Monoid
 import qualified Data.Traversable as T
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Data.List
+
+import Control.DeepSeq
+import Control.Spoon
 
 type Name = String
 
@@ -42,23 +46,40 @@ repeate n f = f . repeate (n-1) f
 data Variable = DeBr Int 
               | Con Name 
               | Exi Int Name Type -- distance from the top, and type!
-              deriving (Eq, Show, Ord)
+              deriving (Eq,Ord)
 
 data P = P :+: N
        | Var Variable
-       deriving (Eq, Show, Ord)
+       deriving (Eq, Ord)
                 
 data N = Abs Type N 
        | Pat P 
-       deriving (Eq, Show, Ord)
+       deriving (Eq, Ord)
     
+instance Show Variable where
+  show (DeBr i) = show i
+  show (Exi i n ty) = n -- "("++n++"<"++show i++">:"++show ty++")"
+  show (Con n) = n
+
+instance Show P where
+  show (viewForallP -> Just (ty,p)) = "( "++show ty ++" ) ~> ( "++ show p++" )"
+  show (a :+: b) = show a ++" ( "++ show b++" ) "
+  show (Var a) = show a
+instance Show N where
+  show (Abs ty a) = "λ:"++show ty ++" . ("++ show a++")"
+  show (Pat p) = show p
+
+
 type Term = N
 type Type = N
 
-viewForall (Pat (Var (Con "#forall#") :+: _ :+: Abs ty n )) = Just (ty,n)
-viewForall _ = Nothing
+viewForallN (Pat p) = viewForallP p
+viewForallN _ = Nothing
 
-viewN (viewForall -> Just (ty,n)) = (ty:l,h)
+viewForallP (Var (Con "#forall#") :+: _ :+: Abs ty n ) = Just (ty,n)
+viewForallP _ = Nothing
+
+viewN (viewForallN -> Just (ty,n)) = (ty:l,h)
   where (l,h) = viewN n
 viewN (Pat p) = ([],p)
 
@@ -94,7 +115,16 @@ data Form = Term :=: Term
           | Form :&: Form
           | Done
           | Bind Type Form
-          deriving (Eq, Show)
+          deriving Eq
+
+instance Show Form where
+  show (t1 :=: t2) = show t1 ++ " ≐ "++ show t2
+  show (t1 :&: t2) = " ( "++show t1 ++ " ) ∧ ( "++ show t2++" )"
+  show (Bind t1 t2) = " ∀: "++ show t1 ++ " . "++show t2
+  show Done = " ⊤ "
+
+instance NFData Form where
+  rnf a = rnf $ show a
 
 class Context a where
   getTy :: a -> Variable -> Type
@@ -107,67 +137,91 @@ type Foralls = [Type]
 class TERM n where
   -- addAt (amount,thresh) r increases all variables referencing above the threshold down by amount
   addAt :: (Int,Int) -> n -> n
+  
+instance TERM Variable where  
+  addAt (amount,thresh) (DeBr a) = DeBr $ if a <= thresh then a else amount+a
+  addAt i (Exi j nm ty) = Exi j nm $ addAt i ty
+  addAt _ a = a
+  
 instance TERM P where  
-  addAt (amount,thresh) (Var (DeBr a)) = Var $ DeBr $ if a <= thresh then a else amount+a
-  addAt i (Var (Exi j nm ty)) = Var $ Exi j nm $ addAt i ty
-  addAt _ (Var a) = Var a
+  addAt i (Var a) = Var $ addAt i a
   addAt i (p :+: n) = addAt i p :+: addAt i n
 instance TERM N where  
   addAt v@(amount,thresh) (Abs ty n) = Abs (addAt v ty) $ addAt (amount, thresh+1) n
   addAt i (Pat p) = Pat $ addAt i p
 
 liftV :: TERM n => Int -> n -> n
-liftV v = addAt (v,0) 
+liftV v = addAt (v,-1) 
 
 liftThree i (a,b,DeBr c) = (liftV i a, liftV i b, DeBr $ i + c)
 liftThree i (a,b,Exi j n t) = (liftV i a, liftV i b, Exi j n $ liftV i t)
 liftThree i (a,b,c) = (liftV i a, liftV i b, c)
 
 etaExpand :: Type -> P -> N
-etaExpand (viewForall -> Just (a,b)) m = Abs a $ Pat $ liftV 1 m :+: etaExpand (liftV 1 a) (vvar 0)
+etaExpand (viewForallN -> Just (a,b)) m = 
+  -- only eta expand heads and not arguments since we need arguments in eta reduced form for type checking!
+  Abs a $ Pat $ (liftV 1 m) :+: var 0 -- etaExpand (liftV 1 a) (vvar 0)
 etaExpand _ m = Pat m
 
-substN :: Context c => c -> (Term,Type, Variable) -> N -> N
-substN ctxt na (Pat p) = case substP ctxt na p of
+substN :: Context c => Bool -> c -> (Term,Type, Variable) -> N -> N
+substN t ctxt na (Pat p) = case substP t ctxt na p of
   (Right m,p) -> m
-  (Left  m,p) -> etaExpand p m
-substN ctxt na (Abs b n) = Abs (substN ctxt na b) $ substN (putTy ctxt b) (liftThree 1 na) n
+  (Left  m,p) -> if t then etaExpand p m else Pat m
+substN t ctxt na (Abs b n) = 
+  -- don't bother eta-expanding types, just patterns
+  Abs (substN False ctxt na b) $ substN t (putTy ctxt b) (liftThree 1 na) n
 
-substP :: Context c => c -> (Term,Type, Variable) -> P -> (Either P N, Type)
-substP ctxt (n, a, Exi i nm _) (Var (Exi i' nm' _)) | nm == nm' && i == i' = (Right n, a)
-substP ctxt (n, a, x') (Var x) | x == x' = (Right n, a)
-substP ctxt na (y@(Var v@(Con _))) = (Left y, getTy ctxt v)
-substP ctxt na (y@(Var (Exi i nm ty))) = (Left $ Var $ Exi i nm ty', ty')
-  where ty' = substN ctxt na ty
-substP ctxt na (p :+: n) = hered ctxt (substP ctxt na p) (substN ctxt na n)
+substP :: Context c => Bool -> c -> (Term,Type, Variable) -> P -> (Either P N, Type)
+substP t ctxt sub@(n, a, Exi i nm _) targ@(Var (Exi i' nm' _)) | nm == nm' = 
+  if i == i' 
+  then (Right n, a) 
+  else error $ "these should be the same depth! ["++show sub++"] "++show targ
+substP t ctxt (n, a, x') (Var x) | x == x' = (Right n, a)
+substP t ctxt na (y@(Var (Exi i nm ty))) = (Left $ Var $ Exi i nm ty', ty')
+  where ty' = substN False ctxt na ty
+substP t ctxt na (y@(Var v)) = (Left y, getTy ctxt v)
+substP t ctxt na (p :+: n) = 
+  -- only eta expand heads and not arguments!
+  hered t ctxt (substP t ctxt na p) (substN False ctxt na n)
 
-
-
-hered :: Context c => c -> (Either P N, Type) -> N -> (Either P N, Type)
-hered ctxt (Right (Abs a1 n), viewForall -> Just (a1',a2)) nv = 
-  ( Right $ substN ctxt (nv,a1,DeBr $ -1) $ addAt (-1,0) n
-  , substN ctxt (nv, a1',DeBr $ -1) $ addAt (-1,0) a2
+hered :: Context c => Bool -> c -> (Either P N, Type) -> N -> (Either P N, Type)
+hered t ctxt (Right p1@(Abs a1 n), l) nv = 
+  ( Right $ liftV (-1) $ substN t (putTy ctxt a1) (liftV 1 nv,liftV 1 a1,DeBr 0) n
+  , case viewForallN l of 
+    Just ~(a1',a2) -> liftV (-1) $ substN False (putTy ctxt a1') (liftV 1 nv,liftV 1 a1',DeBr 0) a2
+    Nothing -> error $ show p1++" r: "++show l
   )
-hered ctxt (Right (Pat p1), viewForall -> Just (a1',a2)) nv = 
-  ( Right $ Pat (p1 :+: nv)
-  , substN ctxt (nv, a1',DeBr $ -1) $ addAt (-1,0) a2
+hered t ctxt (Right (Pat p1), l) nv = 
+  ( Right $ Pat $ p1 :+: nv
+  , case viewForallN l of
+     Just ~(a1',a2) -> liftV (-1) $ substN False (putTy ctxt a1') (liftV 1 nv, liftV 1 a1',DeBr 0) a2
+     Nothing -> error $ show p1++" r: "++show l
   )
-hered ctxt (Left p1, viewForall -> Just (a1',a2)) nv = 
+hered t ctxt (Left p1, l) nv = 
   ( Left $ p1 :+: nv
-  , substN ctxt (nv, a1',DeBr $ -1) $ addAt (-1,0) a2
+  , case viewForallN l of
+    Just ~(a1',a2) -> liftV (-1) $ substN False (putTy ctxt a1') (liftV 1 nv, liftV 1 a1',DeBr 0) a2
+    Nothing -> error $ show p1++" l: "++show l
   )
+
 
 substF :: Context c => c -> (Term,Type,Variable) -> Form -> Form  
 substF _ _ Done = Done
-substF ctxt sub (a :=: b) = substN ctxt sub a :=: substN ctxt sub b
+substF ctxt sub (a :=: b) = substN True ctxt sub a :=: substN True ctxt sub b
 substF ctxt sub (a :&: b) = substF ctxt sub a :&: substF ctxt sub b
-substF ctxt sub (Bind ty f) = Bind (substN ctxt sub ty) $ substF (putTy ctxt ty) (liftThree 1 sub) f
+substF ctxt sub (Bind ty f) = Bind (substN True ctxt sub ty) $ substF (putTy ctxt ty) (liftThree 1 sub) f
+
+subst c s f = case spoon (substF c s f) of
+  Nothing -> error $ "SUBST: ["++show s++" ] " ++ show f ++ "\nCTXT: "++show c
+  Just a  -> a
+
 
 app  :: Context c => c -> Either P N -> N -> Either P N
-app ctxt (Right (Abs a1 n)) nv = Right $ substN ctxt (nv,a1,DeBr $ -1) $ addAt (-1,0) n
+app ctxt (Right (Abs a1 n)) nv = Right $ liftV (-1) $ substN True (putTy ctxt a1) (liftV 1 nv,liftV 1 a1,DeBr 0) n
 app ctxt (Right (Pat p1)) nv = Right $ Pat (p1 :+: nv)
 app ctxt (Left p1) nv = Left $ p1 :+: nv
 
+appN :: Context c => c -> N -> N -> N
 appN c p n = case app c (Right p) n of
   Right n -> n
   Left p -> Pat p
@@ -182,7 +236,7 @@ data Ctxt = Top
           | L Ctxt Form 
           | R Form Ctxt 
           | B Ctxt Type
-            
+          deriving (Show)
 
 
 type ContCon = (Constants,Int,Ctxt)
@@ -227,8 +281,11 @@ upDone i (a,b) = upDone' i (upWithZero a b)
 
 instance Context ContCon where
   getTy (cons,len, _) (Con n) = cons M.! n
-  getTy (a,len,c) (DeBr i) = case repeate i up c of
-    B _ ty -> ty
+  getTy (cons,len, _) (Exi i nm ty) = ty
+  getTy (a,len,c) (DeBr i) = case repeate i up $ upZero c of
+    B _ ty -> liftV i $ ty
+    Top -> error $ "WHAT? "++show i++"\nIN: "++show c
+    
   putTy (a,i,c) ty = (a,i+1, B c ty)
   
   height (_,i,_) = i
@@ -254,7 +311,7 @@ getPP p = case bpp p of
         bpp (Var h) = Just (h, [])
         bpp (p :+: _) = Nothing
 
-viewPat p = (h, ml)
+viewPat p = Just (h, ml)
   where ~(h,ml) = vp p
         vp (p :+: m) = (h,m:ml)
           where ~(h,ml) = vp p
@@ -262,6 +319,7 @@ viewPat p = (h, ml)
         
 uvarTy :: ContCon -> Variable -> Maybe Type
 uvarTy ctxt (hB@(DeBr _) ) = return $ getTy ctxt hB
+uvarTy (cons,_,_) (Con c) = M.lookup c cons
 uvarTy _ _ = Nothing
 
 gvarTy :: ContCon -> Variable -> Maybe (Int,Name, Type)
@@ -288,7 +346,7 @@ unify ctxt (a :&: b) = case unify (lft ctxt b) a of
   Just a  -> Just a
 unify ctxt (Bind ty f) = unify (putTy ctxt ty) f
 unify (cons,len,ctx) Done = Just $ rebuild ctx Done
-unify ctxt@(cons,len,ctx) (a :=: b) = ueq (a,b) <|> ueq (b,a)
+unify ctxt@(cons,len,ctx) constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
   where ueq (a,b) = case (a,b) of
           (Abs ty n1, n2) -> Just $ Bind ty $ n1 :=: appN ctxt (liftV 1 n2) (var 0)
           (Pat a, Pat b) -> identity a b <|> do
@@ -301,11 +359,22 @@ unify ctxt@(cons,len,ctx) (a :=: b) = ueq (a,b) <|> ueq (b,a)
           
         partialPerm hA ppA = all (hA >) ppA && all (isForall ctxt) ppA && inj ppA        
         
-        identity h1 h2 | h1 == h2 = return Done
-        identity _  _ = Nothing
-
+        identity h1 h2 | h1 == h2 = return $ rebuild ctx Done
+        identity a b = do
+          (hAO, ppA) <- viewPat a
+          (hBO, ppB) <- viewPat b
+          hA <- uvarTy ctxt hAO
+          hB <- uvarTy ctxt hBO
+          onlyIf $ hA == hB
+          if length ppA /= length ppB 
+            then error $ "universal quantifiers have different numbers of arguments: "++show constraint 
+            else return ()
+          return $ rebuild ctx $ case zipWith (:=:) ppA ppB of
+            [] -> Done
+            lst -> foldr1 (:&:) lst
+        
         gvar_uvar a b = do
-          let (hB,mB) = viewPat b
+          (hB,mB) <- viewPat b
           tyB <- uvarTy ctxt hB
           let b' = (hB, tyB, mB)
           gvar_uvar_outside a b' <|> gvar_uvar_inside a b'
@@ -317,41 +386,104 @@ unify ctxt@(cons,len,ctx) (a :=: b) = ueq (a,b) <|> ueq (b,a)
           onlyIf $ partialPerm hBO $ DeBr <$> ppB              
           gvar_gvar_same a b' <|> gvar_gvar_diff a b'
 
-        gvar_gvar_same (hA,ppA) (hB@(dist,nm,tyB),ppB) = do
+        gvar_gvar_same (hA,ppA) (hB@(dist,xNm,tyB),ppB) = do
           onlyIf $ hA == hB
                 && length ppA == length ppB
-                
-          let (tyLst,tyBase) = viewN tyB
+          
+          let xNm' = xNm++"@'"
               
-              sames = [ i | ((a,b),i) <- zip (zip ppA ppB) [0..], a == b ]
+              (tyLst,tyBase) = viewN tyB
               
-              mapping = M.fromList $ zip sames [0..]
-              
-              vLst = [ var $ fromMaybe 0 $ M.lookup i mapping | (_,i) <- zip ppA [0..] ]
-              
+              sames = [ var i | ((a,b),i) <- zip (zip ppA ppB) [0..], a == b ]
+                            
               tyB' = getTyLst tyLst (zip ppA ppB)
                 where getTyLst [] [] = Pat $ tyBase
                       getTyLst (ty:c) ((a,b):lst) | a == b = forall ty $ getTyLst c lst
                       getTyLst (ty:c) (_:lst) = liftV (-1) $ getTyLst c lst
               
-              vlstBase = foldl (:+:) (Var $ Exi dist nm tyB') vLst
+              (tyLst',tyBase') = viewN tyB'
+              
+              vlstBase = foldl (:+:) (Var $ Exi dist xNm' tyB') sames
               
               l = foldr Abs (Pat vlstBase) tyLst
-              upMove = height ctxt - dist
+              xVal = len - dist - 1
               -- we need to up the context by the dist!
-          case upDone upMove (ctx,Done) of
+          case upDone xVal (ctx,Done) of
             Nothing -> return $ rebuild ctx Done
             Just (ctxt, form) -> do
-              let tyB_top = liftV (-upMove) tyB -- this is safe since we are at "dist"
-              return $ rebuild ctxt $ substF (cons, dist, ctxt) (l,tyB_top, Exi dist nm tyB_top) $ form
-        
-        gvar_uvar_inside  (hA,ppA) (hB,tyB,mB)  = undefined
-        
-        gvar_uvar_outside (hA,ppA) (hB,tyB,mB)  = undefined        
-        
-        gvar_gvar_diff    (hA,ppA) (hB,ppB) = undefined
+              let tyB_top = liftV (-xVal) tyB -- this is safe since we are at "dist"
+              return $ rebuild ctxt $ subst (cons, dist, ctxt) (l,tyB_top, Exi dist xNm tyB_top) $ form
 
 
+        gvar_fixed (xVal, hA@(dist,xNm,tyA'),ppA) (hB,tyB',mB) = do
+
+              
+          let tyA = liftV (1 - xVal) tyA'
+              tyB = liftV (1 - xVal) tyB'
+              
+              (tyLstA,tyBaseA) = viewN tyA
+              tyLstB = viewB tyB
+                where viewB (viewForallN -> Just (ty,n)) = ty:map (Abs ty) (viewB n)
+                      viewB (Pat p) = []
+              
+              lenTyLstA = length tyLstA
+              uVars = var <$> [0..(lenTyLstA - 1)]
+              
+              appUVars c = Pat $ foldl (:+:) c uVars
+              
+              foralls base = foldr forall (liftV (lenTyLstA - 1) base) tyLstA
+              
+              xNms  = [ (xNm++"@"++show i,ty) | (i,ty) <- zip [0..] tyLstB ]
+              
+          case upDone (xVal - 1) (ctx,constraint) of
+            Nothing -> error $ "we still have a constraint to unify "++show constraint 
+            Just (ctxt, form) -> do
+              let xVars = (\a -> foldr a [] xNms) $
+                          \(xNm,bTy) xs -> (appUVars $
+                                            Var $ Exi dist xNm $ foralls $ foldl (appN (cons,dist,ctxt)) bTy xs
+                                           ):xs
+                                                                      
+                  l = foldr Abs (Pat $ foldl (:+:) (Var hB) xVars) tyLstA
+                  
+              return $ rebuild ctxt $ subst (cons, dist, ctxt) (l,tyB, Exi dist xNm tyA) $ form
+
+        gvar_uvar_outside (hA@(dist,xNm,tyA'),ppA) (hB,tyB',mB) = do
+          let xVal = len - dist - 1
+          
+          onlyIf $ case hB of
+            Con _ -> True
+            DeBr yVal -> yVal > xVal
+          gvar_fixed (xVal, hA, ppA) (liftV (length ppA - xVal) hB, tyB', mB)         
+
+        gvar_uvar_inside  (hA@(dist,xNm,tyA'),ppA) (DeBr yVal,tyB',mB)  = do
+          let xVal = len - dist - 1
+          hB <- elemIndex yVal ppA 
+          gvar_fixed (xVal, hA, ppA) (DeBr hB, tyB', mB)
+        gvar_uvar_inside _ _ = Nothing
+        
+        raise 0 v = v
+        raise i (Exi dist xNm tyA, (cons,len,ctxt'), form) = 
+          case upDone 1 (ctxt',form) of
+            Just (ctxt'',form') -> let ty = getTy (cons,len,ctxt') (DeBr 0)
+                                       newExi = Exi (dist - 1) (xNm++"@") (forall ty tyA)
+                                   in  raise (i-1) (newExi, (cons,len - 1, ctxt''), subst (cons,len - 1, ctxt'') (Pat $ Var newExi :+: var 0 ,tyA, Exi dist xNm tyA) form')
+            Nothing -> error $ "can't go this high! "++show i
+            
+        gvar_gvar_diff (hA@(dist,xNm,tyA),ppA) (hB@(dist',xNm',tyA'),ppB) | dist < dist' =
+          case upDone (len - dist' - 2) (ctx,constraint) of
+            Just (ctxt,form) -> case raise (dist' - dist) (Exi dist' xNm' tyA', (cons,dist',ctxt), form) of
+              (_,(_,_,ctxt),form) -> return $ rebuild ctxt form
+        gvar_gvar_diff (hA@(dist,_,_),_) (hB@(dist',_,_),_) | dist > dist' = Nothing
+        gvar_gvar_diff (hA@(dist,xNm,tyA),ppA) (hB@(dist',xNm',tyA'),ppB) | dist == dist' = do
+          let xx'Val = len - dist - 1
+          case upDone (xx'Val - 1) (ctx, constraint) of
+            Nothing -> error $ "can't go this high! "++show i
+            Just (ctxt, form) -> do
+              undefined
+
+type Reconstruction = M.Map Name (Int {- depth -} , Term {- reconstruction -}) 
+-- modify all the time, since the only time we mention an existential 
+-- is if we are in the same branch, and we know existentials are unique.
 
 evvar :: Int -> Name -> Type -> P
 evvar i n t = Var $ Exi i n t
@@ -359,20 +491,30 @@ evvar i n t = Var $ Exi i n t
 evar :: Int -> Name -> Type -> N
 evar i n t = Pat $ Var $ Exi i n t
 
-ttt = tipe ~> tipe ~> tipe
+
+tt = tipe ~> tipe
+ttt = tipe ~> tt
 tttt = tipe ~> ttt
 
 test3 :: Form
 test3 = Bind tipe -- 2
       $ Bind tipe -- 1 
       $ Bind tipe -- 0 
-      $ Pat (evvar 0 "a" tttt :+: var 1 :+: var 0 :+: var 2) :=: Pat (vvar 3 :+: var 2 :+: var 0 :+: var 1)
+      $ Pat (evvar 0 "a" tttt :+: var 1 :+: var 0 :+: var 2) :=: Pat (evvar 0 "a" tttt :+: var 2 :+: var 0 :+: var 1)
      :&: var 0 :=: evar 0 "a" tttt -- to view the result!
 
 test2 :: Form
-test2 = Bind ttt -- 3
-      $ Bind (tipe ~> tipe) -- 2
+test2 = Bind ttt  -- 3
+      $ Bind tt   -- 2
       $ Bind tipe -- 1
       $ Bind tipe -- 0 
-      $ Pat (evvar 2 "a" ttt :+: var 1 :+: var 0) :=: Pat (vvar 3 :+: var 0)
-     :&: var 2 :=: evar 2 "a" ttt -- to view the result!
+      $ Pat (evvar 2 "a" ttt :+: var 1 :+: var 0) :=: Pat (vvar 2 :+: var 0)
+     :&: var 3 :=: evar 2 "a" ttt -- to view the result!
+
+test1 :: Form
+test1 = Bind ttt  -- 3
+      $ Bind tt   -- 2
+      $ Bind tipe -- 1
+      $ Bind tipe -- 0 
+      $ Pat (evvar 2 "a" ttt :+: var 1 :+: var 0) :=: var 1
+     :&: var 3 :=: evar 2 "a" ttt -- to view the result!
