@@ -113,6 +113,7 @@ infixr 2 :&:
 infix 3 :=:
 
 data Form = Term :=: Term
+          | Term :@: Term
           | Form :&: Form
           | Done
           | Bind Type Form
@@ -121,6 +122,7 @@ data Form = Term :=: Term
 instance Show Form where
   show (t1 :=: t2) = show t1 ++ " ≐ "++ show t2
   show (t1 :&: t2) = " ( "++show t1 ++ " ) ∧ ( "++ show t2++" )"
+  show (t1 :@: t2) = " ( "++show t1 ++ " ) ∈ ( "++ show t2++" )"
   show (Bind t1 t2) = " ∀: "++ show t1 ++ " . "++show t2
   show Done = " ⊤ "
 
@@ -209,6 +211,7 @@ hered t ctxt (Left p1, l) nv =
 substF :: Context c => c -> (Term,Type,Variable) -> Form -> Form  
 substF _ _ Done = Done
 substF ctxt sub (a :=: b) = substN True ctxt sub a :=: substN True ctxt sub b
+substF ctxt sub (a :@: b) = substN True ctxt sub a :@: substN True ctxt sub b
 substF ctxt sub (a :&: b) = substF ctxt sub a :&: substF ctxt sub b
 substF ctxt sub (Bind ty f) = Bind (substN True ctxt sub ty) $ substF (putTy ctxt ty) (liftThree 1 sub) f
 
@@ -338,18 +341,24 @@ inj = inj mempty
   where inj m [] = True
         inj m (a:l) = not (S.member a m) && inj (S.insert a m) l
 
+type Reconstruction = M.Map Name (Int {- depth -} , Term {- reconstruction -}) 
 
+substRecon :: (Term,Type, Int, Name, Type) -> Reconstruction -> Reconstruction
+substRecon (s , tyB,d, x, tyA) m = M.insert x (d,s) $ fmap substy m
+  where substy (depth, t) | depth < d = (depth,t)
+        substy (depth, t) = (depth, substN False emptyCon (liftV (depth - d) s, tyB, Exi d x tyA) t) 
 
 -- | unify only performes transitions relating to "A :=: B". 
-unify :: ContCon -> Form -> Maybe Form
-unify ctxt (a :&: b) = case unify (lft ctxt b) a of
-  Nothing -> unify (rght ctxt a) b
+unify :: Reconstruction -> ContCon -> Form -> Maybe (Reconstruction, Form)
+unify recon ctxt (a :&: b) = case unify recon (lft ctxt b) a of
+  Nothing -> unify recon (rght ctxt a) b
   Just a  -> Just a
-unify ctxt (Bind ty f) = unify (putTy ctxt ty) f
-unify (cons,len,ctx) Done = Just $ rebuild ctx Done
-unify ctxt@(cons,len,ctx) constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
+unify recon ctxt (Bind ty f)    = unify recon (putTy ctxt ty) f
+unify recon (cons,len,ctx) Done = Just $ (recon, rebuild ctx Done)
+unify recon na (a :&: b)        = Nothing
+unify recon ctxt@(cons,len,ctx) constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
   where ueq (a,b) = case (a,b) of
-          (Abs ty n1, n2) -> Just $ rebuild ctx $ Bind ty $ n1 :=: appN (putTy ctxt ty) (liftV 1 n2) (var 0)
+          (Abs ty n1, n2) -> Just $ (recon , rebuild ctx $ Bind ty $ n1 :=: appN (putTy ctxt ty) (liftV 1 n2) (var 0))
           (Pat a, Pat b) -> identity a b <|> do
             (hAO,ppA) <- getPP a
             hA <- gvarTy ctxt hAO
@@ -360,7 +369,7 @@ unify ctxt@(cons,len,ctx) constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
           
         partialPerm hA ppA = all (hA >) ppA && all (isForall ctxt) ppA && inj ppA        
         
-        identity h1 h2 | h1 == h2 = return $ rebuild ctx Done
+        identity h1 h2 | h1 == h2 = return $ (recon, rebuild ctx Done)
         identity a b = do
           (hAO, ppA) <- viewPat a
           (hBO, ppB) <- viewPat b
@@ -370,9 +379,11 @@ unify ctxt@(cons,len,ctx) constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
           if length ppA /= length ppB 
             then error $ "universal quantifiers have different numbers of arguments: "++show constraint 
             else return ()
-          return $ rebuild ctx $ case zipWith (:=:) ppA ppB of
-            [] -> Done
-            lst -> foldr1 (:&:) lst
+          return $ ( recon 
+                   , rebuild ctx $ case zipWith (:=:) ppA ppB of
+                     [] -> Done
+                     lst -> foldr1 (:&:) lst
+                   )
         
         gvar_uvar a b = do
           (hB,mB) <- viewPat b
@@ -418,12 +429,14 @@ unify ctxt@(cons,len,ctx) constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
               
               l = foldr Abs (Pat vlstBase) tyLst
               xVal = len - dist - 1
+              tyB_top = liftV (1 - xVal) tyB -- this is safe since we are at "dist"
               -- we need to up the context by the dist!
           case upDone (xVal - 1)  (ctx,Done) of
-            Nothing -> return $ rebuild ctx Done
+            Nothing -> return (substRecon (l , tyB_top, dist, xNm , tyB_top) recon , rebuild ctx Done)
             Just (ctxt, form) -> do
-              let tyB_top = liftV (1 - xVal) tyB -- this is safe since we are at "dist"
-              return $ rebuild ctxt $ subst (cons, dist, ctxt) (l,tyB_top, Exi dist xNm tyB_top) $ form
+              return $ ( substRecon (l , tyB_top, dist, xNm , tyB_top) recon
+                       , rebuild ctxt $ subst (cons, dist, ctxt) (l,tyB_top, Exi dist xNm tyB_top) $ form 
+                       )
 
         gvar_fixed (xVal, hA@(dist,xNm,tyA'),ppA) (hB,tyB',mB) = do
               
@@ -455,7 +468,9 @@ unify ctxt@(cons,len,ctx) constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
                                                                       
                   l = foldr Abs (Pat $ foldl (:+:) (Var hB) xVars) tyLstA
                   
-              return $ rebuild ctxt $ subst (cons, dist, ctxt) (l,tyB, Exi dist xNm tyA) $ form
+              return $ ( substRecon (l , tyB , dist, xNm, tyA) recon
+                       , rebuild ctxt $ subst (cons, dist, ctxt) (l,tyB, Exi dist xNm tyA) $ form
+                       )
 
         gvar_uvar_outside (hA@(dist,xNm,tyA'),ppA) (hB,tyB',mB) = do
           let xVal = len - dist - 1
@@ -473,17 +488,22 @@ unify ctxt@(cons,len,ctx) constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
         gvar_uvar_inside _ _ = Nothing
                   
         raise 0 v = v
-        raise i (Exi dist xNm tyA, (cons,len,ctxt'), form) = 
+        raise i (recon, Exi dist xNm tyA, (cons,len,ctxt'), form) = 
           case upDone 1 (ctxt',form) of
             Just (ctxt'',form') -> let ty = getTy (cons,len,ctxt') (DeBr 0)
                                        newExi = Exi (dist - 1) (xNm++"@") (forall ty tyA)
-                                   in  raise (i-1) (newExi, (cons,len - 1, ctxt''), liftV (-1) $ subst (cons,len, ctxt') (Pat $ (liftV 1 $ Var newExi) :+: var 0 ,liftV 1 $ tyA, Exi dist xNm tyA) form')
+                                       newpat = Pat $ (liftV 1 $ Var newExi) :+: var 0 
+                                   in  raise (i-1) ( substRecon (newpat, liftV 1 $ tyA, (dist - 1) , xNm, tyA) recon 
+                                                   , newExi
+                                                   , (cons,len - 1, ctxt'')
+                                                   , liftV (-1) $ subst (cons,len, ctxt') (newpat,liftV 1 $ tyA, Exi dist xNm tyA) form'
+                                                   )
             Nothing -> error $ "can't go this high! "++show i
             
         gvar_gvar_diff (hA@(dist,xNm,tyA),ppA) (hB@(dist',xNm',tyA'),ppB) | dist < dist' =
           case upDone (len - dist' - 2) (ctx,constraint) of
-            Just (ctxt,form) -> case raise (dist' - dist) (Exi dist' xNm' tyA', (cons,dist',ctxt), form) of
-              (_,(_,_,ctxt),form) -> return $ rebuild ctxt form
+            Just (ctxt,form) -> case raise (dist' - dist) (recon , Exi dist' xNm' tyA', (cons,dist',ctxt), form) of
+              (recon, _,(_,_,ctxt),form) -> return $ (recon, rebuild ctxt form)
         gvar_gvar_diff (hA@(dist,_,_),_) (hB@(dist',_,_),_) | dist > dist' = Nothing
         gvar_gvar_diff (hA@(dist,xNm,tyA),ppA) (hB@(dist',xNm',tyB),ppB) | dist == dist' = do
           let xx'Val = len - dist - 1
@@ -514,11 +534,28 @@ unify ctxt@(cons,len,ctx) constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
                   lA = foldr Abs (Pat vlstBaseA) tyLstA
                   lB = foldr Abs (Pat vlstBaseB) tyLstB
 
-              return $ rebuild ctxt $ 
-                subst (cons, dist, ctxt) (lA, tyA, Exi dist xNm tyA) $ 
-                subst (cons, dist, ctxt) (lB,tyB, Exi dist xNm' tyA) $ form
+              return $ ( substRecon (lA, tyA, dist , xNm , tyA) $  
+                         substRecon (lB, tyB, dist , xNm', tyB) $ recon
+                       , rebuild ctxt $ 
+                         subst (cons, dist, ctxt) (lA, tyA, Exi dist xNm tyA) $ 
+                         subst (cons, dist, ctxt) (lB,tyB, Exi dist xNm' tyA) $ form
+                       )
 
-type Reconstruction = M.Map Name (Int {- depth -} , Term {- reconstruction -}) 
+search :: Reconstruction -> ContCon -> Form -> Maybe [[(Reconstruction, Form)]]
+search recon ctxt (a :&: b) = case search recon (lft ctxt b) a of
+  Nothing -> search recon (rght ctxt a) b
+  Just a  -> Just a
+search recon ctxt (Bind ty f)    = search recon (putTy ctxt ty) f
+search recon (cons,len,ctx) Done = Just [[(recon, rebuild ctx Done)]]
+search recon na (a :=: b)        = Nothing
+search recon ctxt@(cons,len,ctx) (a :@: b) = Just $ fmap (\(a,b) -> (a, rebuild ctx b)) <$> searchR a b
+  where searchR search (viewForallN -> Just (a,b)) = 
+          [[(recon , Bind a $ y :=: appN (putTy ctxt a) search (var 0) :&: y :@: b) ]]
+          where y = evar len "y" b -- y must be NEW!!!
+        
+        searchL (a,tyA) (b,tyB) = undefined
+
+
 -- modify all the time, since the only time we mention an existential 
 -- is if we are in the same branch, and we know existentials are unique.
 
@@ -573,8 +610,8 @@ testN1p = Bind tipe
        :&: evar 0 "z" ttt :=: evar 1 "arg" ttt
        :&: evar 1 "zola" tt :=: evar 0 "x@" tt
         
-unifyAll Done = return ()
-unifyAll unf = case unify emptyCon unf of
+unifyAll (recon,Done) = return recon
+unifyAll (recon,unf) = case unify recon emptyCon unf of
   Nothing -> error $ "can not unify "++show unf
   Just unf -> unifyAll unf
   
