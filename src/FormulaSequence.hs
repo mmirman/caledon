@@ -54,7 +54,9 @@ instance Environment Ctxt where
     a :< seqe ->  c { ctxtContext = a { elemRecon = Right b:elemRecon a} <| seqe }
   
   rebuild (c@Ctxt{ ctxtRecon = re, ctxtContext = seqe }) b = rebuildFromRecon re $ F.foldl reb b seqe
-    where reb f (B ty re) = Bind ty $ rebuildFromRecon re f
+    where reb f (B ty re) = case rebuildFromRecon re f of
+                                 Done -> Done
+                                 f -> Bind ty f
 
   upI i (Ctxt _ h _ _) _ | i > h = error "context is not large enough"
   upI i (Ctxt cons h ro ctxt) b = case S.splitAt i ctxt of
@@ -70,5 +72,5 @@ rebuildFromRecon :: Recon -> Form -> Form
 rebuildFromRecon [] a              = a
 rebuildFromRecon (Left a:l) Done   = rebuildFromRecon l a
 rebuildFromRecon (Right a:l) Done  = rebuildFromRecon l a
-rebuildFromRecon (Left a:l) b      = rebuildFromRecon l (a :&: b)
-rebuildFromRecon (Right a:l) b     = rebuildFromRecon l (b :&: a)
+rebuildFromRecon (Left a:l) b      = rebuildFromRecon l (b :&: a)
+rebuildFromRecon (Right a:l) b     = rebuildFromRecon l (a :&: b)

@@ -1,5 +1,7 @@
 module Src.Test where
 
+import Data.Monoid
+
 import Src.HOU
 import Src.AST
 
@@ -14,9 +16,11 @@ test3 = Bind tipe -- 2
       $ Pat (evvar 0 "a" tttt :+: var 1 :+: var 0 :+: var 2) :=: Pat (evvar 0 "a" tttt :+: var 2 :+: var 0 :+: var 1)
      :&: evar 1 "n" tttt :=: evar 0 "a" tttt -- to view the result!
 
-test2 :: Form
-test2 = Bind ttt  -- 3
+test2 :: Form       -- 0
+test2 = Bind ttt  -- 3 
+                    -- 1
       $ Bind tt   -- 2
+                    -- 2
       $ Bind tipe -- 1
       $ Bind tipe -- 0 
       $ Pat (evvar 2 "a" ttt :+: var 1 :+: var 0) :=: Pat (vvar 2 :+: var 0)
@@ -46,3 +50,6 @@ testN1p = Bind tipe
         $ Pat (evvar 0 "z" ttt :+: var 1 :+: var 0) :=: Pat (evvar 0 "x@" tt :+: var 0)      
        :&: evar 0 "z" ttt :=: evar 1 "arg" ttt
        :&: evar 1 "zola" tt :=: evar 0 "x@" tt
+
+
+test t = unifyAll constants (mempty,t)

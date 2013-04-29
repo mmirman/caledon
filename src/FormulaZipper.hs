@@ -43,7 +43,7 @@ instance Environment Ctxt where
   
   rebuild c b = rebuildForm (ctxtContext c) b
 
-  upI i (Ctxt cons j c) b = case upDone i (c,b) of
+  upI i (Ctxt cons j c) b = case upDone (i - 1) (c,b) of
     Just (ctxt,b) -> Just (Ctxt cons (j - i) ctxt, b)
     Nothing -> Nothing
 

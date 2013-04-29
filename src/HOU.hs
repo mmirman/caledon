@@ -6,7 +6,7 @@ module Src.HOU where
 import Src.AST
 import Src.Substitution
 import Src.Context
-import Src.FormulaZipper (Ctxt)
+import Src.FormulaSequence (Ctxt)
 
 import Control.Applicative 
 import Control.Monad
@@ -162,7 +162,7 @@ unify recon ctxt constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
               xVal = len - dist - 1
               tyB_top = liftV (1 - xVal) tyB -- this is safe since we are at "dist"
               -- we need to up the context by the dist!
-          case upI (xVal - 1) ctxt Done of
+          case upI (xVal) ctxt Done of
             Nothing -> 
               return (substRecon (l , tyB_top, dist, xNm , tyB_top) recon, rebuild ctxt Done)
             Just (ctxt,form) -> do
@@ -190,7 +190,7 @@ unify recon ctxt constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
               
               xNms  = [ (xNm++"@"++show i,ty) | (i,ty) <- zip [0..] tyLstB ]
               
-          case upI (xVal - 1) ctxt constraint of
+          case upI xVal ctxt constraint of
             Nothing -> error $ "we still have a constraint to unify "++show constraint 
             Just (ctxt, form) -> do
               let xVars = (\a -> foldr a [] xNms) $
@@ -233,18 +233,16 @@ unify recon ctxt constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
             Nothing -> error $ "can't go this high! "++show i
             
         gvar_gvar_diff (hA@(dist,xNm,tyA),ppA) (hB@(dist',xNm',tyA'),ppB) | dist < dist' =
-          case upI (len - dist' - 2) ctxt constraint of
+          case upI (len - dist') ctxt constraint of
             Just (ctxt,form) -> case raise (dist' - dist) (recon , Exi dist' xNm' tyA', ctxt, form) of
               (recon, _,ctxt,form) -> return $ (recon, rebuild ctxt form)
         gvar_gvar_diff (hA@(dist,_,_),_) (hB@(dist',_,_),_) | dist > dist' = Nothing
         gvar_gvar_diff (hA@(dist,xNm,tyA),ppA) (hB@(dist',xNm',tyB),ppB) | dist == dist' = do
           let xx'Val = len - dist - 1
-          case upI (xx'Val) ctxt constraint of
+          case upI xx'Val ctxt constraint of
             Nothing -> error $ "can't go this high! "++show xx'Val
             Just (ctxt, form) -> do
               let xNm'' = xNm++"+"++xNm'++"@"
-                  xVal = len - dist - 1              
-                  
                   
                   sames = [ (var i, var j) | (a,i) <- zip ppA [0..], (b,j) <- zip ppB [0..], a == b ]
                   
@@ -294,5 +292,5 @@ search recon ctxt (a :@: b) = Just $ fmap (\(a,b) -> (a, rebuild ctxt b)) <$> se
 unifyAll cons (recon,Done) = return recon
 unifyAll cons (recon,unf) = case unify recon (emptyCon cons :: Ctxt) unf of
   Nothing -> error $ "can not unify "++show unf
-  Just unf -> unifyAll cons unf
+  Just unf -> trace (show $ snd unf) $ unifyAll cons unf
   
