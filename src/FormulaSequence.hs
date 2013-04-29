@@ -6,11 +6,6 @@ import qualified Data.Map as M
 import Data.Sequence as S
 import Data.Monoid
 import qualified Data.Foldable as F
-import Data.List as L
-
-repeate 0 a = id
-repeate 1 f = f
-repeate n f = f . repeate (n-1) f
 
 type Recon = [Either Form Form]
 
@@ -35,7 +30,7 @@ instance Context Ctxt where
   height = ctxtHeight  
   
   getTy c (Con n) = ctxtConstants c M.! n
-  getTy _ (Exi i nm ty) = ty
+  getTy _ (Exi _ _ ty) = ty
   getTy c (DeBr i) = case i < height c of
     True  -> elemType $ index (ctxtContext c) i
     False -> error $ "WHAT? "++show i++"\nIN: "++show c
@@ -53,7 +48,7 @@ instance Environment Ctxt where
     EmptyL -> c { ctxtRecon = Right b:re }
     a :< seqe ->  c { ctxtContext = a { elemRecon = Right b:elemRecon a} <| seqe }
   
-  rebuild (c@Ctxt{ ctxtRecon = re, ctxtContext = seqe }) b = rebuildFromRecon re $ F.foldl reb b seqe
+  rebuild (Ctxt{ ctxtRecon = re, ctxtContext = seqe }) b = rebuildFromRecon re $ F.foldl reb b seqe
     where reb f (B ty re) = case rebuildFromRecon re f of
                                  Done -> Done
                                  f -> Bind ty f

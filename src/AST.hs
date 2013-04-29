@@ -14,6 +14,8 @@ data Variable = DeBr Int
               | Exi Int Name Type -- distance from the top, and type!
               deriving (Eq,Ord)
 
+uncurriedExi ~(a,b,c) = Exi a b c
+
 data P = P :+: N
        | Var Variable
        deriving (Eq, Ord)
@@ -24,7 +26,7 @@ data N = Abs Type N
     
 instance Show Variable where
   show (DeBr i) = show i
-  show (Exi i n ty) = n++"<"++show i++">" -- "("++n++"<"++show i++">:"++show ty++")"
+  show (Exi i n _) = n++"<"++show i++">" -- "("++n++"<"++show i++">:"++show ty++")"
   show (Con n) = n
 
 instance Show P where
@@ -48,8 +50,9 @@ viewForallP _ = Nothing
 viewN (viewForallN -> Just (ty,n)) = (ty:l,h)
   where (l,h) = viewN n
 viewN (Pat p) = ([],p)
+viewN Abs{} = error "can't view an abstraction as a forall"
 
-viewHead (p :+: n) = viewHead p
+viewHead (p :+: _) = viewHead p
 viewHead (Var v) = v
 
 vvar = Var . DeBr
@@ -128,7 +131,8 @@ instance TERM Form where
   addAt v@(amount,thresh) (Bind ty n) = Bind (addAt v ty) $ addAt (amount, thresh+1) n
   addAt i (p :=: n) = addAt i p :=: addAt i n
   addAt i (p :&: n) = addAt i p :&: addAt i n
-  addAt i Done = Done
+  addAt i (p :@: n) = addAt i p :@: addAt i n
+  addAt _ Done = Done
   
 liftV :: TERM n => Int -> n -> n
 liftV v = addAt (v,-1) 
