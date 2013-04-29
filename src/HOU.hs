@@ -1,41 +1,64 @@
-{-# LANGUAGE ViewPatterns              #-}
+{-# LANGUAGE ViewPatterns                     #-}
+{-# LANGUAGE FlexibleContexts                 #-}
+{-# LANGUAGE BangPatterns                     #-}
+{-# LANGUAGE ScopedTypeVariables              #-}
 module Src.HOU where
 
 import Src.AST
 import Src.Substitution
 import Src.Context
 import Src.FormulaSequence (Ctxt)
+import Src.Variables
+
+import Control.Monad.Trans (lift)
+
+import Control.Monad.State.Class (MonadState())
+import Control.Monad.Error.Class (MonadError(..))
 
 import Control.Applicative 
 import Data.Monoid
+import Data.Maybe
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.List
 
+import Control.Monad.Trans.Maybe
+import Control.Monad.Identity
 import Debug.Trace
+import qualified Data.Foldable as F
+
+import System.IO.Unsafe
+import Data.IORef
+
+{-# NOINLINE levelVar #-}
+levelVar :: IORef Int
+levelVar = unsafePerformIO $ newIORef 0
+
+{-# NOINLINE level #-}
+level = unsafePerformIO $ readIORef levelVar
+
+vtrace !i | i < level = trace
+vtrace _ = const id
+
+vtraceShow _ !i2 s v | i2 < level = trace $ s ++" : "++show v
+vtraceShow !i1 _ s _ | i1 < level = trace s
+vtraceShow _ _ _ _ = id
+
+throwTrace !i s = vtrace i s $ throwError s
 
 -------------------
 --- Combinators ---
 -------------------
 
-onlyIf b = if b then Just () else Nothing
+onlyIf b = if b then return () else nothing
 
--- try a then b
-a <+> b = do
-  f <- a
-  case f of
-    Nothing -> b
-    _ -> return $ Just f
+nothing :: Monad m => MaybeT m a
+nothing = fail ""
 
-a <?> b = case a of
-  Nothing -> error b
-  _ -> a
-
-
-getPP :: P -> Maybe (Variable, [Int])
+getPP :: Monad m => P -> MaybeT m (Variable, [Int])
 getPP p = case bpp p of
-  Just (h,pp) -> Just (h, pp)
-  Nothing -> Nothing
+  Just (h,pp) -> return (h, pp)
+  Nothing -> nothing
   where bpp (p :+: Pat (Var (DeBr v1))) = case bpp p of
           Just (h, pp) -> Just (h, v1:pp)
           Nothing -> Nothing
@@ -48,15 +71,17 @@ viewPat p = (h, ml)
           where ~(h,ml) = vp p
         vp (Var h) = (h,[])
         
-uvarTy :: Context a => a -> Variable -> Maybe Type
-uvarTy _ Exi{} = Nothing
+uvarTy :: (Monad m, Context a) => a -> Variable -> MaybeT m Type
+uvarTy _ Exi{} = nothing
 uvarTy ctxt hB = return $ getTy ctxt hB
 
-gvarTy :: Variable -> Maybe (Int,Name, Type)
-gvarTy (Exi i nm ty) = return $ (i,nm, ty)
-gvarTy _             = Nothing
 
-isForall ctxt c = case uvarTy ctxt c of
+
+gvarTy :: Monad m => Variable -> MaybeT m (Int,Name, Type)
+gvarTy (Exi i nm ty) = return $ (i,nm, ty)
+gvarTy _             = nothing
+
+isForall ctxt c = case runIdentity $ runMaybeT $ uvarTy ctxt c of
   Just _  -> True
   _ -> False
   
@@ -72,15 +97,18 @@ substRecon (s , tyB,d, x, tyA) m = M.insert x (d,s) $ fmap substy m
         substy (depth, t) = (depth, substN False (emptyCon constants :: Ctxt) (liftV (depth - d) s, tyB, Exi d x tyA) t) 
 
 -- | unify only performes transitions relating to "A :=: B". 
-unify :: (Show a, Environment a) => Reconstruction -> a -> Form -> Maybe (Reconstruction, Form)
+unify :: (Functor m, Monad m
+         , Show a, Environment a
+         , MonadError String m
+         ) => Reconstruction -> a -> Form -> MaybeT m (Reconstruction, Form)
 unify recon ctxt (a :&: b) = unify recon (putLeft ctxt b) a 
                           <|> unify recon (putRight a ctxt) b
-unify recon ctxt (Bind ty f)    = unify recon (putTy ctxt ty) f
-unify recon ctxt Done = Just $ (recon, rebuild ctxt Done)
-unify _ _ (_ :@: _)        = Nothing
+unify recon ctxt (Bind ty f) = unify recon (putTy ctxt ty) f
+unify recon ctxt Done = return $ (recon, rebuild ctxt Done)
+unify _ _ (_ :@: _)   = nothing
 unify recon ctxt constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
   where len = height ctxt
-                  
+        
         ueq (a,b) = case (a,b) of
           (Abs ty n1, n2) -> 
             return ( recon 
@@ -92,7 +120,7 @@ unify recon ctxt constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
             let a' = (hA,ppA)
             onlyIf $ partialPerm hAO $ DeBr <$> ppA                                
             gvar_uvar a' b <|> gvar_gvar a' b <|> occurs a' b
-          _ -> Nothing
+          _ -> nothing
           
         partialPerm hA ppA = all (hA >) ppA && all (isForall ctxt) ppA && inj ppA        
         
@@ -130,8 +158,8 @@ unify recon ctxt constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
         
         occurs ((dist',xNm',tyB'), _) b = do
           if rigidP (Exi dist' xNm' tyB') b
-            then error $ "occurs check"
-            else Nothing
+            then lift $ throwTrace 1 $ "occurs check"
+            else nothing
         
         gvar_gvar_same (hA@(_,_,_),ppA) (hB@(dist,xNm,tyB),ppB) = do
           onlyIf $ hA == hB && length ppA == length ppB 
@@ -208,8 +236,8 @@ unify recon ctxt constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
           let xVal = len - dist - 1
           case elemIndex yVal ppA of
             Just hB -> gvar_fixed (xVal, hA, ppA) (DeBr hB, tyB', mB)
-            Nothing -> error "GVAR-UVAR-DEPENDS"
-        gvar_uvar_inside _ _ = Nothing
+            Nothing -> lift $ throwTrace 1 "GVAR-UVAR-DEPENDS"
+        gvar_uvar_inside _ _ = nothing
                   
         raise 0 v = v
         raise i (recon, (dist,xNm,tyA), ctx, form) = 
@@ -230,7 +258,7 @@ unify recon ctxt constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
             Nothing -> error "constraint shouldn't be done"
             Just (ctxt,form) -> case raise (dist' - dist) (recon , (dist',xNm',tyA') , ctxt, form) of
               (recon, _,ctxt,form) -> return $ (recon, rebuild ctxt form)
-        gvar_gvar_diff ((dist,_,_),_) ((dist',_,_),_) | dist > dist' = Nothing
+        gvar_gvar_diff ((dist,_,_),_) ((dist',_,_),_) | dist > dist' = nothing
         gvar_gvar_diff ((dist,xNm,tyA),ppA) ((_,xNm',tyB),ppB) = do
           let xx'Val = len - dist - 1
           case upI xx'Val ctxt constraint of
@@ -264,24 +292,75 @@ unify recon ctxt constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
                          subst ctxt (lB,tyB, Exi dist xNm' tyA) $ form
                        )
 
-search :: (Show a, Environment a) => Reconstruction -> a -> Form -> Maybe [[(Reconstruction, Form)]]
-search recon ctxt (a :&: b) =  search recon (putLeft ctxt b) a 
-                           <|> search recon (putRight a ctxt) b
-search recon ctxt (Bind ty f)    = search recon (putTy ctxt ty) f
-search recon ctxt Done = Just [[(recon, rebuild ctxt Done)]]
-search _ _ (_ :=: _)        = Nothing
-search recon ctxt (a :@: b) = Just $ fmap (\(a,b) -> (a, rebuild ctxt b)) <$> searchR a b
-  where searchR search (viewForallN -> Just (a,b)) = 
-          [[(recon , Bind a $ y :=: appN (putTy ctxt a) search (var 0) :&: y :@: b) ]]
-          where y = evar (height ctxt) "y" b -- y must be NEW!!!
-        
-        searchL (a,tyA) (b,tyB) = undefined
+search :: ( Functor m, Show a, Monad m, Environment a
+          , MonadState c m, ValueTracker c) =>  a -> Form -> MaybeT m [[Form]]
+search ctxt (a :&: b) =  search (putLeft ctxt b) a 
+                           <|> search (putRight a ctxt) b
+search ctxt (Bind ty f)    = search (putTy ctxt ty) f
+search ctxt Done = return [[(rebuild ctxt Done)]]
+search _ (_ :=: _)        = nothing
+search ctxt (a :@: b) = (fmap (rebuild ctxt) <$>) <$> searchR a b
+  where searchR search (viewForallN -> Just (a,b)) = do
+          yv <- getNewWith "@y"
+          let y = evar (height ctxt) yv b
+          return $ [[Bind a $ y :=: appN (putTy ctxt a) search (var 0) :&: y :@: b]]
+        searchR _ Abs{}   = error "not a type"
+        searchR search (Pat p) = do
+          let (constants, anons) = getTypes ctxt
+              
+              pFam = case viewPat p of
+                ~(a,_) -> a
+                          
+              sameFamily s = case getFamily s of
+                Poly -> True
+                Family s -> s == pFam
+                NoFam -> False
+              
+              makeFromConstant (c,(bl,t)) = if sameFamily t 
+                                            then (\a -> Just (bl,a)) <$> searchL (con c, t) (search,p)
+                                            else return Nothing
+              makeFromAnons (i,t) = if sameFamily t
+                                    then (:[]) <$> searchL (var i, t) (search,p)
+                                    else return []
+                
+          cl <- mapM makeFromConstant $ M.toList constants
+          rl <- mapM makeFromAnons $ zip [0..] anons
+          return $ sortAndUse (catMaybes cl) ++ [ concat rl ]
+          
+        searchL (name,attempt) tg@(target,goal) = case attempt of
+          (viewForallN -> Just (av,b)) -> do
+            xv <- getNewWith "@xv"
+            let x = evar (height ctxt) xv av
+            (:&: x :@: av) <$> searchL (appN ctxt name x, b) tg
+          Abs{} -> error "not a type"
+          Pat p -> do
+            return $ Pat p :=: Pat goal :&: name :=: target
 
-
+sortAndUse cl = coalate [] $ sortBy (\a b -> compare (snd $ fst a) (snd $ fst b)) cl
+  where coalate [] [] = []
+        coalate cg [] = [reverse cg]
+        coalate cg (((sequ,_),targ):l) = 
+          if sequ
+          then if not $ null cg 
+               then reverse cg:[targ]:coalate [] l
+               else [targ]:coalate [] l
+          else coalate (targ:cg) l
+               
 -- modify all the time, since the only time we mention an existential 
 -- is if we are in the same branch, and we know existentials are unique.
-unifyAll _ (recon,Done) = return recon
-unifyAll cons (recon,unf) = case unify recon (emptyCon cons :: Ctxt) unf of
-  Nothing -> error $ "can not unify "++show unf
-  Just unf -> trace (show $ snd unf) $ unifyAll cons unf
-  
+unifyOrSearch :: (Functor m, Show a, MonadState c m, MonadError String m, Environment a, ValueTracker c) =>
+                 Reconstruction -> a -> Form -> MaybeT m [[(Reconstruction, Form)]]
+unifyOrSearch recon ctxt unf =  tryUnify <|> trySearch
+  where tryUnify  = (\a -> [[a]]) <$> unify recon ctxt unf
+        trySearch = (((\a -> (recon,a)) <$>) <$>) <$> search ctxt unf
+
+interpret _ (recon, Done) = return recon
+interpret cons (recon, unf ) = do
+  m <- runMaybeT $ unifyOrSearch recon (emptyCon cons :: Ctxt) unf 
+  case m of
+    Nothing  -> throwTrace 1 $ "constraints are not satisfiable: "++show unf
+    Just lst -> next lst
+      where next []     = fail ""
+            next (a:l)  = current <|> next l
+              where current = interpret cons =<< (F.asum $ return <$> a)
+    

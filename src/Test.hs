@@ -52,4 +52,4 @@ testN1p = Bind tipe
        :&: evar 1 "zola" tt :=: evar 0 "x@" tt
 
 
-test t = unifyAll constants (mempty,t)
+test t = interpret constants (mempty,t)

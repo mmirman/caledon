@@ -47,6 +47,21 @@ viewForallN _ = Nothing
 viewForallP (Var (Con "#forall#") :+: _ :+: Abs ty n ) = Just (ty,n)
 viewForallP _ = Nothing
 
+data Fam = NoFam 
+         | Poly 
+         | Family Variable 
+         deriving (Eq, Show)
+
+getFamily :: N -> Fam
+getFamily = getFamily' 0
+  where getFamily' i (viewForallN -> Just (_,n)) = getFamily' (i + 1) n
+        getFamily' _ Abs{} = NoFam
+        getFamily' i (Pat p) = case viewHead p of
+          DeBr j -> if j < i 
+                    then Poly 
+                    else Family $ DeBr $ j - i
+          c -> Family c
+
 viewN (viewForallN -> Just (ty,n)) = (ty:l,h)
   where (l,h) = viewN n
 viewN (Pat p) = ([],p)
@@ -75,11 +90,13 @@ a ~> b = forall a b
 tipeName = "type"
 tipe = con tipeName
 
-type Constants = M.Map Name Type
+type Constants = M.Map Name ((Bool,Int),Type)
+
+constant a = ((False,-1000),a)
 
 constants :: Constants
-constants = M.fromList [ (tipeName, tipe)
-                       , ("#forall#", forall tipe $ (var 0 ~> tipe) ~> tipe)
+constants = M.fromList [ (tipeName, constant tipe)
+                       , ("#forall#", constant $ forall tipe $ (var 0 ~> tipe) ~> tipe)
                        ]
             
 ---------------

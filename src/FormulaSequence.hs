@@ -29,7 +29,7 @@ instance Context Ctxt where
   
   height = ctxtHeight  
   
-  getTy c (Con n) = ctxtConstants c M.! n
+  getTy c (Con n) = snd $ ctxtConstants c M.! n
   getTy _ (Exi _ _ ty) = ty
   getTy c (DeBr i) = case i < height c of
     True  -> elemType $ index (ctxtContext c) i
@@ -38,7 +38,7 @@ instance Context Ctxt where
   putTy c ty = c { ctxtHeight  = ctxtHeight c + 1 
                  , ctxtContext = B ty mempty <| ctxtContext c
                  }
-
+  getTypes c = (ctxtConstants c, map elemType $ F.toList $ ctxtContext c)
 
 instance Environment Ctxt where
   putLeft (c@Ctxt{ ctxtRecon = re, ctxtContext = seqe }) b = case viewl seqe of

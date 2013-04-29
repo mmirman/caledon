@@ -8,6 +8,8 @@ class Context a where
   height :: a -> Int
   emptyCon :: Constants -> a
   
+  getTypes :: a -> (Constants, [Type])
+  
 class Context a => Environment a where
   putLeft :: a -> Form  -> a
   putRight :: Form -> a -> a
