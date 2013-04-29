@@ -46,9 +46,6 @@ instance Environment Ctxt where
   upI i (Ctxt cons j c) b = case upDone i (c,b) of
     Just (ctxt,b) -> Just (Ctxt cons (j - i) ctxt, b)
     Nothing -> Nothing
-    
-    
-
 
 upZero (L c f) = upZero c
 upZero (R f c) = upZero c
