@@ -9,6 +9,7 @@ import Src.Substitution
 import Src.Context
 import Src.FormulaSequence (Ctxt)
 import Src.Variables
+import Src.LatticeUnify
 
 import Control.Monad.Trans (lift)
 
@@ -89,12 +90,34 @@ inj = inj mempty
   where inj _ [] = True
         inj m (a:l) = not (S.member a m) && inj (S.insert a m) l
 
-type Reconstruction = M.Map Name (Int {- depth -} , Term {- reconstruction -}) 
+type Reconstruction = (ConsGraph, M.Map Name (Int {- depth -} , Term {- reconstruction -}) )
 
 substRecon :: (Term,Type, Int, Name, Type) -> Reconstruction -> Reconstruction
-substRecon (s , tyB,d, x, tyA) m = M.insert x (d,s) $ fmap substy m
+substRecon (s , tyB,d, x, tyA) (gr,m) = (gr, M.insert x (d,s) $ fmap substy m)
   where substy (depth, t) | depth < d = (depth,t)
         substy (depth, t) = (depth, substN False (emptyCon constants :: Ctxt) (liftV (depth - d) s, tyB, Exi d x tyA) t) 
+
+putGr (gr,recon) foo a b = case foo (con a) (con b) of
+  (Pat (Var (Con a))) :=:  (Pat (Var (Con b))) -> do
+    gr <- insLTE gr a b
+    gr <- insLTE  gr b a
+    return (gr,recon)
+  (Pat (Var (Con a))) :<:  (Pat (Var (Con b))) -> do
+    gr <- insLT gr a b
+    return (gr,recon)
+  (Pat (Var (Con a))) :<=: (Pat (Var (Con b))) -> do
+    gr <- insLTE gr a b
+    return (gr,recon)
+  _ -> error "can't put this type of constraint into the graph"
+  
+
+viewTipe (Var (Con "type") :+: (Pat (Var (Con a)))) = Just a
+viewTipe _ = Nothing
+
+viewEquiv (a :=: b) = ((:=:), a, b)
+viewEquiv (a :<: b) = ((:<:), a, b)
+viewEquiv (a :<=: b) = ((:<=:), a, b)
+viewEquiv _ = error "not an equivalence"
 
 -- | unify only performes transitions relating to "A :=: B". 
 unify :: (Functor m, Monad m
@@ -102,19 +125,19 @@ unify :: (Functor m, Monad m
          , MonadError String m
          ) => Reconstruction -> a -> Form -> MaybeT m (Reconstruction, Form)
 unify recon ctxt (a :&: b) = unify recon (putLeft ctxt b) a 
-                          <|> unify recon (putRight a ctxt) b
+                            <|> unify recon (putRight a ctxt) b
 unify recon ctxt (Bind ty f) = unify recon (putTy ctxt ty) f
 unify recon ctxt Done = return $ (recon, rebuild ctxt Done)
 unify _ _ (_ :@: _)   = nothing
-unify recon ctxt constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
+unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f) (b,a)
   where len = height ctxt
         
-        ueq (a,b) = case (a,b) of
+        ueq (=:=) (a,b) = case (a,b) of
           (Abs ty n1, n2) -> 
             return ( recon 
-                   , rebuild ctxt $ Bind ty $ n1 :=: appN (putTy ctxt ty) (liftV 1 n2) (var 0)
+                   , rebuild ctxt $ Bind ty $ n1 =:= appN (putTy ctxt ty) (liftV 1 n2) (var 0)
                    )
-          (Pat a, Pat b) -> identity a b <|> do
+          (Pat a, Pat b) -> identity (=:=) a b <|> do
             (hAO,ppA) <- getPP a
             hA <- gvarTy hAO
             let a' = (hA,ppA)
@@ -124,8 +147,13 @@ unify recon ctxt constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
           
         partialPerm hA ppA = all (hA >) ppA && all (isForall ctxt) ppA && inj ppA        
         
-        identity h1 h2 | h1 == h2 = return $ (recon, rebuild ctxt Done)
-        identity (viewPat -> ~(hAO,ppA)) (viewPat -> ~(hBO, ppB)) = do
+        identity _ h1 h2 | h1 == h2 = return $ (recon, rebuild ctxt Done)
+        identity f (viewTipe -> Just a) (viewTipe -> Just b) = do
+          recon <- putGr recon f a b
+          return (recon, rebuild ctxt Done)
+        identity (=:=) (viewForallP -> Just (a,b)) (viewForallP -> Just (a',b')) = do
+          return $ (recon, rebuild ctxt $ a :=: a' :&: b =:= b') -- implements the "switching" for atoms
+        identity f (viewPat -> ~(hAO,ppA)) (viewPat -> ~(hBO, ppB)) = do
           hA <- uvarTy ctxt hAO
           hB <- uvarTy ctxt hBO
           onlyIf $ hA == hB
@@ -133,7 +161,7 @@ unify recon ctxt constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
             then error $ "universal quantifiers have different numbers of arguments: "++show constraint 
             else return ()
           return $ ( recon 
-                   , rebuild ctxt $ case zipWith (:=:) ppA ppB of
+                   , rebuild ctxt $ case zipWith f ppA ppB of
                      [] -> Done
                      lst -> foldr1 (:&:) lst
                    )
@@ -295,10 +323,12 @@ unify recon ctxt constraint@(a :=: b) = ueq (a,b) <|> ueq (b,a)
 search :: ( Functor m, Show a, Monad m, Environment a
           , MonadState c m, ValueTracker c) =>  a -> Form -> MaybeT m [[Form]]
 search ctxt (a :&: b) =  search (putLeft ctxt b) a 
-                           <|> search (putRight a ctxt) b
+                     <|> search (putRight a ctxt) b
 search ctxt (Bind ty f)    = search (putTy ctxt ty) f
 search ctxt Done = return [[(rebuild ctxt Done)]]
-search _ (_ :=: _)        = nothing
+search _ (_ :=: _)    = nothing
+search _ (_ :<: _)    = nothing
+search _ (_ :<=: _)   = nothing
 search ctxt (a :@: b) = (fmap (rebuild ctxt) <$>) <$> searchR a b
   where searchR search (viewForallN -> Just (a,b)) = do
           yv <- getNewWith "@y"
@@ -363,4 +393,3 @@ interpret cons (recon, unf ) = do
       where next []     = fail ""
             next (a:l)  = current <|> next l
               where current = interpret cons =<< (F.asum $ return <$> a)
-    

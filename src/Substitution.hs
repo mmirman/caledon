@@ -62,6 +62,9 @@ hered _ ctxt (Left p1, l) nv =
 substF :: Context c => c -> (Term,Type,Variable) -> Form -> Form  
 substF _ _ Done = Done
 substF ctxt sub (a :=: b) = substN True ctxt sub a :=: substN True ctxt sub b
+substF ctxt sub (a :<: b) = substN True ctxt sub a :<: substN True ctxt sub b
+substF ctxt sub (a :<=: b) = substN True ctxt sub a :<=: substN True ctxt sub b
+
 substF ctxt sub (a :@: b) = substN True ctxt sub a :@: substN True ctxt sub b
 substF ctxt sub (a :&: b) = substF ctxt sub a :&: substF ctxt sub b
 substF ctxt sub (Bind ty f) = Bind (substN True ctxt sub ty) $ substF (putTy ctxt ty) (liftThree 1 sub) f

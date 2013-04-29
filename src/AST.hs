@@ -106,6 +106,9 @@ infixr 2 :&:
 infix 3 :=:
 
 data Form = Term :=: Term
+          | Term :<=: Term
+          | Term :<: Term
+            
           | Term :@: Term
           | Form :&: Form
           | Done
@@ -116,6 +119,8 @@ data Form = Term :=: Term
 
 instance Show Form where
   show (t1 :=: t2) = show t1 ++ " ≐ "++ show t2
+  show (t1 :<: t2) = show t1 ++ " < "++ show t2
+  show (t1 :<=: t2) = show t1 ++ " ≤ "++ show t2
   show (t1 :&: t2) = " ( "++show t1 ++ " ) ∧ ( "++ show t2++" )"
   show (t1 :@: t2) = " ( "++show t1 ++ " ) ∈ ( "++ show t2++" )"
   show (Bind t1 t2) = " ∀: "++ show t1 ++ " . "++show t2
@@ -147,6 +152,8 @@ instance TERM N where
 instance TERM Form where
   addAt v@(amount,thresh) (Bind ty n) = Bind (addAt v ty) $ addAt (amount, thresh+1) n
   addAt i (p :=: n) = addAt i p :=: addAt i n
+  addAt i (p :<: n) = addAt i p :<: addAt i n
+  addAt i (p :<=: n) = addAt i p :<=: addAt i n
   addAt i (p :&: n) = addAt i p :&: addAt i n
   addAt i (p :@: n) = addAt i p :@: addAt i n
   addAt _ Done = Done
