@@ -65,23 +65,6 @@ instance Environment Ctxt where
         where reb = rebuild (Ctxt cons i re lower) b
               newC = Ctxt cons (h - i) ro $ B ty [] <| ctxt'
 
-  {-
-      
-  upI 0 (Ctxt cons h ro ctxt) b = case viewl ctxt of
-    EmptyL -> if L.null ro && b == Done
-              then Nothing 
-              else Just (emptyCon cons, rebuildFromRecon ro b)
-    B ty [] :< ctxt' | b == Done -> Nothing
-    B ty re :< ctxt' -> Just (Ctxt cons h ro $ B ty [] <| ctxt', rebuildFromRecon ro b)
-  upI i (Ctxt cons h ro ctxt) b = case viewl ctxt of
-    EmptyL -> error "context is not large enough"
-    B ty re :< ctxt' -> upI (i-1) 
-                        (Ctxt cons (h - 1) ro ctxt')
-                        (case rebuildFromRecon re b of
-                            Done -> Done
-                            a -> Bind ty a)
-  
-  -}
 -- tail call optimized beauty?  Its naturally that way!
 rebuildFromRecon :: Recon -> Form -> Form
 rebuildFromRecon [] a              = a
