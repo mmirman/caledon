@@ -32,7 +32,7 @@ instance Context Ctxt where
   getTy c (Con n) = snd $ ctxtConstants c M.! n
   getTy _ (Exi _ _ ty) = ty
   getTy c (DeBr i) = case i < height c of
-    True  -> elemType $ index (ctxtContext c) i
+    True  -> liftV i $ elemType $ index (ctxtContext c) i
     False -> error $ "WHAT? "++show i++"\nIN: "++show c
     
   putTy c ty = c { ctxtHeight  = ctxtHeight c + 1 

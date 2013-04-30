@@ -9,7 +9,7 @@
 module Substitution where
 
 import AST
-
+import Names
 import qualified Data.Foldable as F
 import Data.List
 import Data.Maybe

@@ -7,6 +7,7 @@
  #-}
 module AST where
 
+import Names
 import qualified Data.Foldable as F
 import Data.Functor
 import qualified Data.Set as S
@@ -16,9 +17,6 @@ import Data.Monoid
 import Data.List
 
 import Control.Lens (makeLenses, (^.))
-
-
-type Name = String
 
 data Spine = Spine Name [Type]
            | Abs Name Type Spine 

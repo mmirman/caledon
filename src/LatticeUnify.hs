@@ -1,10 +1,10 @@
 module Src.LatticeUnify where
 
+import Names
 import Data.Graph.Inductive.PatriciaTree
 import Data.Graph.Inductive.Graph
 import Data.Graph.Inductive.NodeMap
 import Data.Graph.Inductive.Query.DFS
-import Src.AST
 
 data ConsGraph = ConsGraph { posGraph :: Gr Name () 
                            , negGraph :: Gr Name ()

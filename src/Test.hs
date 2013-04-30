@@ -1,5 +1,7 @@
 module Src.Test where
 
+import Control.Monad.State
+import Control.Monad.Error
 import Data.Monoid
 
 import Src.HOU
@@ -51,5 +53,4 @@ testN1p = Bind tipe
        :&: evar 0 "z" ttt :=: evar 1 "arg" ttt
        :&: evar 1 "zola" tt :=: evar 0 "x@" tt
 
-
-test t = interpret constants (mempty,t)
+test t = runState (runErrorT $ unifyAll constants t) 0

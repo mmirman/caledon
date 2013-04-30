@@ -2,8 +2,9 @@
 {-# LANGUAGE FlexibleContexts                 #-}
 {-# LANGUAGE BangPatterns                     #-}
 {-# LANGUAGE ScopedTypeVariables              #-}
-module Src.HOU where
+module Src.HOU (unifyAll) where
 
+import Names
 import Src.AST
 import Src.Substitution
 import Src.Context
@@ -90,9 +91,9 @@ inj = inj mempty
   where inj _ [] = True
         inj m (a:l) = not (S.member a m) && inj (S.insert a m) l
 
-type Reconstruction = (ConsGraph, M.Map Name (Int {- depth -} , Term {- reconstruction -}) )
+type UniContext = (ConsGraph, Reconstruction)
 
-substRecon :: (Term,Type, Int, Name, Type) -> Reconstruction -> Reconstruction
+substRecon :: (Term,Type, Int, Name, Type) -> UniContext -> UniContext
 substRecon (s , tyB,d, x, tyA) (gr,m) = (gr, M.insert x (d,s) $ fmap substy m)
   where substy (depth, t) | depth < d = (depth,t)
         substy (depth, t) = (depth, substN False (emptyCon constants :: Ctxt) (liftV (depth - d) s, tyB, Exi d x tyA) t) 
@@ -123,7 +124,7 @@ viewEquiv _ = error "not an equivalence"
 unify :: (Functor m, Monad m
          , Show a, Environment a
          , MonadError String m
-         ) => Reconstruction -> a -> Form -> MaybeT m (Reconstruction, Form)
+         ) => UniContext -> a -> Form -> MaybeT m (UniContext, Form)
 unify recon ctxt (a :&: b) = unify recon (putLeft ctxt b) a 
                             <|> unify recon (putRight a ctxt) b
 unify recon ctxt (Bind ty f) = unify recon (putTy ctxt ty) f
@@ -379,17 +380,19 @@ sortAndUse cl = coalate [] $ sortBy (\a b -> compare (snd $ fst a) (snd $ fst b)
 -- modify all the time, since the only time we mention an existential 
 -- is if we are in the same branch, and we know existentials are unique.
 unifyOrSearch :: (Functor m, Show a, MonadState c m, MonadError String m, Environment a, ValueTracker c) =>
-                 Reconstruction -> a -> Form -> MaybeT m [[(Reconstruction, Form)]]
+                 UniContext -> a -> Form -> MaybeT m [[(UniContext, Form)]]
 unifyOrSearch recon ctxt unf =  tryUnify <|> trySearch
   where tryUnify  = (\a -> [[a]]) <$> unify recon ctxt unf
         trySearch = (((\a -> (recon,a)) <$>) <$>) <$> search ctxt unf
 
 interpret _ (recon, Done) = return recon
-interpret cons (recon, unf ) = do
+interpret cons (recon, unf) = do
   m <- runMaybeT $ unifyOrSearch recon (emptyCon cons :: Ctxt) unf 
   case m of
     Nothing  -> throwTrace 1 $ "constraints are not satisfiable: "++show unf
     Just lst -> next lst
-      where next []     = fail ""
+      where next []     = fail "there are no more things to try"
             next (a:l)  = current <|> next l
-              where current = interpret cons =<< (F.asum $ return <$> a)
+              where current = interpret cons =<< F.asum (return <$> a)
+
+unifyAll cons unf = snd <$> interpret cons ((newGraph, mempty), unf)

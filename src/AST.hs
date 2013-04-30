@@ -1,10 +1,9 @@
 {-# LANGUAGE ViewPatterns              #-}
 module Src.AST where
 
+import Names
 import qualified Data.Map as M
 import Control.DeepSeq
-
-type Name = String
 
 -------------
 --- Terms ---
@@ -161,3 +160,4 @@ instance TERM Form where
 liftV :: TERM n => Int -> n -> n
 liftV v = addAt (v,-1) 
 
+type Reconstruction = M.Map Name (Int {- depth -} , Term {- reconstruction -}) 
