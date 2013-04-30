@@ -484,7 +484,7 @@ rightSearch m goal ret = vtrace 1 ("-rs- "++show m++" ∈ "++show goal) $ fail (
       case m of
         Abs{} -> throwError "not properly typed"
         _ | m == tipe || m == atom -> ret $ Just []
-        _ -> depth -- we should pretty much always use breadth first search here maybe, since this is type search
+        _ -> breadth -- we should pretty much always use breadth first search here maybe, since this is type search
           where srch r1 r2 = r1 $ F.asum $ r2 . Just . return . (m :=:) <$> [atom , tipe] -- for breadth first
                 breadth = srch (ret =<<) return
                 depth = srch id (appendErr "" . ret)
