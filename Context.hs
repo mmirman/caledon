@@ -3,6 +3,7 @@
  #-}
 module Context where
 
+import Names
 import AST
 import Substitution
 import Data.Monoid
@@ -11,8 +12,8 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
 import Data.Set (Set)
-import Control.Monad.State (StateT, runStateT, modify, get, put)
-import Control.Monad.RWS (RWST, ask, local, censor, runRWST, get, put,listen)
+import Control.Monad.State.Strict (StateT, runStateT, modify, get, put)
+import Control.Monad.RWS.Strict (RWST, ask, local, censor, runRWST, get, put,listen)
 import Control.Monad.Trans (lift)
 import Control.Monad.Trans.Cont
 import Choice

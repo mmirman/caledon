@@ -1,13 +1,14 @@
 #include "../prelude/combinators.ncc"
+#include "../prelude/naturals.ncc"
 #include "../prelude/logic.ncc"
 #include "../prelude/booleans.ncc"
 #include "../prelude/io.ncc"
 
-defn chooseType : bool -> prop -> prop
+defn chooseType : bool -> type -> type
    | chooseTrue = chooseType true natural
    | chooseFalse = chooseType false bool
 
-defn getWorld : (bool -> prop) -> prop
+defn getWorld : (bool -> type) -> type
    | getWorldImp = [F : bool -> type][S : string][B : bool] 
                      getWorld F 
                    <- putStrLn "false/true"
@@ -15,9 +16,9 @@ defn getWorld : (bool -> prop) -> prop
                    <- string_bool B S
                    <- F B
 
-defn getType : prop -> prop
+defn getType : type -> type
   as \P : type . getWorld (\B2 : bool . chooseType B2 P)
 
-defn metaThing    : {Gp : getType Pp} Pp -> prop
+defn metaThing    : {Gp : getType Pp} Pp -> type
    | metaThingImp = metaThing zero
 

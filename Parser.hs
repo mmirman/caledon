@@ -10,6 +10,7 @@
 
 module Parser (parseCaledon) where
 
+import Names
 import AST
 import Substitution
 import Control.Applicative (Applicative(..))

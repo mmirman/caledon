@@ -25,5 +25,5 @@ defn not : bool -> bool -> type
 #include <strings.ncc>
 
 defn string_bool : bool -> string -> type
-  >| string_bool/true  = string_bool true "true"
-  >| string_bool/false = string_bool false "false"
+  >| string_bool/true  = string_bool true "t"
+  >| string_bool/false = string_bool false "f"

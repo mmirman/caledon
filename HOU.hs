@@ -8,13 +8,14 @@
  #-}
 module HOU where
 
+import Names
 import Choice
 import AST
 import Substitution
 import Context
 import TopoSortAxioms
-import Control.Monad.State (StateT, forM_,runStateT, modify, get,put, State, runState)
-import Control.Monad.RWS (RWST, runRWST, ask, tell, listen)
+import Control.Monad.State.Strict (StateT, forM_,runStateT, modify, get,put, State, runState)
+import Control.Monad.RWS.Strict (RWST, runRWST, ask, tell, listen)
 import Control.Monad.Error (throwError, MonadError)
 import Control.Monad (unless, forM, replicateM, void, (<=<), when)
 import Control.Monad.Trans (lift)
@@ -584,11 +585,10 @@ subOf (Spine "#forall#" [t, Abs x _ l])  (Spine "#forall#" [t', Abs x' _ l']) = 
 subOf (Spine "#imp-forall#" [t, Abs x _ l])  (Spine "#imp-forall#" [t', Abs x' _ l']) = do
   subOf t t'
   subOf t' t
-  
   v <- getNewWith "@v"
   subOf (subst (x |-> var v) l) (subst (x' |-> var v) l')  
 subOf (Spine a [Spine nm []]) (Spine b [Spine nm' []]) | a == tipeName && b == tipeName = 
-  tell [nm :<=: nm']  
+  tell $ [nm :<=: nm']
 subOf a b = do 
   equiv (etaReduce a) (etaReduce b)
 
@@ -629,7 +629,7 @@ universeCheck nm env sp = case sp of
     return $ tipe `apply` var v'
   Spine a [Spine v []] | a == tipeName -> do 
     v' <- getNewWith "@tv"
-    tell [ v :<: v']
+    tell [ v :<: v' ]
     return $ tipe `apply` var v'
     
   Spine "#tycon#" [Spine nm [l]] -> universeCheck nm env l
@@ -639,11 +639,12 @@ universeCheck nm env sp = case sp of
     Just a  -> return a  
 
   (viewApp -> (f,a)) -> do
-    (fty,lst1) <- listen $ universeCheck nm env f
-    (aty,lst2) <- listen $ universeCheck nm env a
-    let lsts = lst1 ++ lst2
-    tell lsts    
-    checkU nm lsts -- LOCAL UNIVERSE CHECKING - socool!!!! 
+    --((fty,aty),lst) <- listen $ do
+    fty <- universeCheck nm env f
+    aty <- universeCheck nm env a
+    --  return $ (fty,aty)
+    --checkU nm lst -- LOCAL UNIVERSE CHECKING - socool!!!! 
+    --tell lst
     
     let byob fty = case fty of
           Spine "#imp_forall#" [ty, v] -> do
@@ -901,7 +902,7 @@ typePipe verbose lt (b,nm,ty,kind) = do
   (ty,kind,lt) <- mtrace verbose ("Elaborating: " ++nm) $ 
                   typeInfer True lt (b,nm, ty,kind) -- elaborate                  
                   
-  checkUniverses nm (snd <$> lt) (ascribe ty kind)                  
+  checkUniverses nm (snd <$> lt) ty
   
   (ty,kind,lt) <- mtrace verbose ("Checking:    " ++nm) $ 
                   typeInfer True lt (b,nm, ty,kind) -- type check
