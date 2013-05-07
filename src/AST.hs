@@ -4,6 +4,7 @@ module Src.AST where
 import Names
 import qualified Data.Map as M
 import Control.DeepSeq
+import Data.Monoid
 
 -------------
 --- Terms ---
@@ -25,7 +26,7 @@ data N = Abs Type N
     
 instance Show Variable where
   show (DeBr i) = show i
-  show (Exi i n _) = n++"<"++show i++">" -- "("++n++"<"++show i++">:"++show ty++")"
+  show (Exi i n _) = n++"<"++show i++">"
   show (Con n) = n
 
 instance Show P where
@@ -115,7 +116,14 @@ data Form = Term :=: Term
           deriving Eq
                    
                    
-
+instance Monoid Form where
+  mempty = Done
+  mappend Done a = a
+  mappend a Done = a
+  mappend a b = a :&: b
+  
+  
+  
 instance Show Form where
   show (t1 :=: t2) = show t1 ++ " ≐ "++ show t2
   show (t1 :<: t2) = show t1 ++ " < "++ show t2
@@ -160,4 +168,6 @@ instance TERM Form where
 liftV :: TERM n => Int -> n -> n
 liftV v = addAt (v,-1) 
 
-type Reconstruction = M.Map Name (Int {- depth -} , Term {- reconstruction -}) 
+type Reconstruction = M.Map Name ( Int {- depth -} 
+                                 , Term {- reconstruction -}
+                                 ) 

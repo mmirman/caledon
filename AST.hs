@@ -12,7 +12,6 @@ import qualified Data.Foldable as F
 import Data.Functor
 import qualified Data.Set as S
 import qualified Data.Map as M
-import Data.Maybe
 import Data.Monoid
 import Data.List
 
@@ -204,7 +203,7 @@ instance (FV a, F.Foldable f) => FV (f a) where
 instance FV Spine where
   freeVariables t = case t of
     Abs nm t p -> (S.delete nm $ freeVariables p) `mappend` freeVariables t
-    Spine "#tycon#" [Spine nm [v]] -> freeVariables v
+    Spine "#tycon#" [Spine _ [v]] -> freeVariables v
     Spine "#dontcheck#" [v] -> freeVariables v
     Spine ['\'',_,'\''] [] -> mempty
     Spine head others -> mappend (S.singleton head) $ mconcat $ map freeVariables others

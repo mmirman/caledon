@@ -14,8 +14,8 @@ data Elem = B { elemType :: Type
               } 
           deriving (Show)
                    
-data Ctxt = Ctxt { ctxtConstants :: Constants
-                 , ctxtHeight    :: Int
+data Ctxt = Ctxt { ctxtConstants :: !Constants
+                 , ctxtHeight    :: !Int
                  , ctxtRecon     :: Recon
                  , ctxtContext   :: Seq Elem
                  } deriving (Show)

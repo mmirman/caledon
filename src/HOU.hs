@@ -94,9 +94,10 @@ inj = inj mempty
 type UniContext = (ConsGraph, Reconstruction)
 
 substRecon :: (Term,Type, Int, Name, Type) -> UniContext -> UniContext
-substRecon (s , tyB,d, x, tyA) (gr,m) = (gr, M.insert x (d,s) $ fmap substy m)
-  where substy (depth, t) | depth < d = (depth,t)
-        substy (depth, t) = (depth, substN False (emptyCon constants :: Ctxt) (liftV (depth - d) s, tyB, Exi d x tyA) t) 
+substRecon (s,tyB,d, x, tyA) (gr,m) = (gr, M.insert x (d,s) $ fmap substy m)
+  where substy (depth, t,ty) | depth < d = (depth,t)
+        substy (depth, t,ty) = (depth, suber t)
+          where suber = substN False (emptyCon constants :: Ctxt) (liftV (depth - d) s, tyB, Exi d x tyA)
 
 putGr (gr,recon) foo a b = case foo (con a) (con b) of
   (Pat (Var (Con a))) :=:  (Pat (Var (Con b))) -> do
@@ -315,7 +316,7 @@ unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f
                   lB = foldr Abs (Pat vlstBaseB) tyLstB
               
               return $ ( substRecon (lA, tyA, dist , xNm , tyA) $  
-                         substRecon (lB, tyB, dist , xNm', tyB) $ recon
+                          substRecon (lB, tyB, dist , xNm', tyB) $ recon
                        , rebuild ctxt $ 
                          subst ctxt (lA, tyA, Exi dist xNm tyA) $ 
                          subst ctxt (lB,tyB, Exi dist xNm' tyA) $ form

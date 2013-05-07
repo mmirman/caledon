@@ -4,7 +4,10 @@ module Src.Substitution where
 import Src.AST
 import Src.Context
 import Control.Spoon
-  
+
+import qualified Data.Set as S  
+import Data.Monoid
+
 type Foralls = [Type]
 
 liftThree i (a,b,DeBr c) = (liftV i a, liftV i b, DeBr $ i + c)
@@ -82,3 +85,11 @@ appN :: Context c => c -> N -> N -> N
 appN c p n = case app c (Right p) n of
   Right n -> n
   Left p -> Pat p
+
+
+freeVarsN (Pat p) = freeVarsP p
+freeVarsN (Abs t1 t2) = freeVarsN t1 `S.union` freeVarsN t2
+
+freeVarsP (Var (Exi _ nm t)) = S.insert nm $ freeVarsN t
+freeVarsP (Var _) = mempty
+freeVarsP (p :+: n) = freeVarsP p `S.union` freeVarsN n

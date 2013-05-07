@@ -759,7 +759,7 @@ checkType b sp ty = case sp of
       tyA <- checkType b tyA tipe
       addToEnv (∃) e (forall "" tyA tipe) $ do
         forall x tyA (Spine e [var x]) ≐ ty
-        Abs x tyA <$> (addToEnv (∀) x tyA $ checkType b sp (Spine e [var x]))
+        Abs x tyA <$> (addToEnv (∀) x tyA $ checkType b sp $ Spine e [var x])
   Spine nm [] | isChar nm -> do
     ty ≐ Spine "char" []
     return sp
