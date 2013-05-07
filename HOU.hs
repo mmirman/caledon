@@ -683,7 +683,7 @@ checkUniverses :: String -> M.Map Name Type -> Type -> Choice ()
 checkUniverses nm env ty = do
   (_,_,lst) <- (\a -> runRWST a () emptyState) $ do
     env <- M.union constsMap <$> T.mapM initTypes env
-    ty <- initTypes ty
+    ty  <- initTypes ty
     universeCheck nm env ty
   vtrace 1 ("UNIVERSES: "++show lst) $ checkU nm lst
 -----------------------------
@@ -759,7 +759,7 @@ checkType b sp ty = case sp of
       tyA <- checkType b tyA tipe
       addToEnv (∃) e (forall "" tyA tipe) $ do
         forall x tyA (Spine e [var x]) ≐ ty
-        Abs x tyA <$> (addToEnv (∀) x tyA $ checkType b sp $ Spine e [var x])
+        Abs x tyA <$> addToEnv (∀) x tyA (checkType b sp $ Spine e [var x])
   Spine nm [] | isChar nm -> do
     ty ≐ Spine "char" []
     return sp

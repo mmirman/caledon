@@ -5,7 +5,6 @@ import Names
 import qualified Data.Map as M
 import Control.DeepSeq
 import Data.Monoid
-
 -------------
 --- Terms ---
 -------------
@@ -39,33 +38,34 @@ instance Show N where
 
 
 type Term = N
-type Type = N
+type Type = P
 
 viewForallN (Pat p) = viewForallP p
 viewForallN _ = Nothing
 
-viewForallP (Var (Con "#forall#") :+: _ :+: Abs ty n ) = Just (ty,n)
+viewForallP (Var (Con "#forall#") :+: _ :+: Abs ty (Pat n) ) = Just (ty,n)
+viewForallP cons@(Var (Con "#forall#") :+: _ :+: Abs ty n ) = error $ "not a type: "++show cons
 viewForallP _ = Nothing
 
-data Fam = NoFam 
-         | Poly 
+data Fam = Poly 
          | Family Variable 
          deriving (Eq, Show)
 
-getFamily :: N -> Fam
+getFamily :: P -> Fam
 getFamily = getFamily' 0
-  where getFamily' i (viewForallN -> Just (_,n)) = getFamily' (i + 1) n
-        getFamily' _ Abs{} = NoFam
-        getFamily' i (Pat p) = case viewHead p of
+  where getFamily' i (viewForallP -> Just (_,n)) = getFamily' (i + 1) n
+        getFamily' i p = case viewHead p of
           DeBr j -> if j < i 
                     then Poly 
                     else Family $ DeBr $ j - i
           c -> Family c
 
-viewN (viewForallN -> Just (ty,n)) = (ty:l,h)
-  where (l,h) = viewN n
-viewN (Pat p) = ([],p)
-viewN Abs{} = error "can't view an abstraction as a forall"
+viewP (viewForallP -> Just ~(ty,n)) = (ty:l,h)
+  where ~(l,h) = viewP n
+viewP p = ([],p)
+
+fromType (Pat p) = p
+fromType a = error $ "not a type: "++show a
 
 viewHead (p :+: _) = viewHead p
 viewHead (Var v) = v
@@ -82,21 +82,35 @@ evar i n t = Pat $ Var $ Exi i n t
 vcon = Var . Con
 con = Pat . vcon
 
-forall ty n = 
-  Pat $ vcon "#forall#" :+: ty :+: Abs ty n
+forall ty n = vcon "#forall#" :+: Pat ty :+: Abs ty (Pat n)
 
 a ~> b = forall a b
 
 tipeName = "type"
-tipe = con tipeName
+tipe = vcon tipeName
 
-type Constants = M.Map Name ((Bool,Int),Type)
+tipemake v = vcon "type" :+: (con $ '#':v)
 
-constant a = ((False,-1000),a)
+data TipeView = Init Name
+              | Uninit
+              | NotTipe
+
+tipeView (Var (Con "type") :+: (Pat (Var (Con ('#':v))))) = Init v
+tipeView (Var (Con "type")) = Uninit
+tipeview _ = NotTipe
+  
+
+data Constant = Axiom Bool Int
+              | Macro Term
+              deriving (Show, Eq)
+
+type Constants = M.Map Name (Constant,Type)
+
+constant a = (Axiom False $ -1000,a)
 
 constants :: Constants
 constants = M.fromList [ (tipeName, constant tipe)
-                       , ("#forall#", constant $ forall tipe $ (var 0 ~> tipe) ~> tipe)
+                       , ("#forall#", constant $ forall tipe $ (vvar 0 ~> tipe) ~> tipe)
                        ]
             
 ---------------
@@ -109,7 +123,7 @@ data Form = Term :=: Term
           | Term :<=: Term
           | Term :<: Term
             
-          | Term :@: Term
+          | Term :@: Type
           | Form :&: Form
           | Done
           | Bind Type Form
@@ -121,7 +135,6 @@ instance Monoid Form where
   mappend Done a = a
   mappend a Done = a
   mappend a b = a :&: b
-  
   
   
 instance Show Form where

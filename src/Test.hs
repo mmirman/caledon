@@ -53,4 +53,4 @@ testN1p = Bind tipe
        :&: evar 0 "z" ttt :=: evar 1 "arg" ttt
        :&: evar 1 "zola" tt :=: evar 0 "x@" tt
 
-test t = runState (runErrorT $ unifyAll constants t) 0
+test t = runState (runErrorT $ unifyAll newGraph constants t) 0

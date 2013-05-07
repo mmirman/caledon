@@ -10,7 +10,7 @@ import qualified Data.Map as M
 
 noType nm = error $ "no eta expansion necessary thus no type for "++nm
 
-substReconstruct :: Reconstruction -> Type -> Type
+substReconstruct :: Reconstruction -> N -> N
 substReconstruct recon t = foldr sub t $ filter (inFrees . fst) $ M.toList recon
   where sub (nm,(i,val)) = 
           substN False (emptyCon constants :: Ctxt) (val, noType nm, Exi i nm $ noType nm)

@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts                 #-}
 {-# LANGUAGE BangPatterns                     #-}
 {-# LANGUAGE ScopedTypeVariables              #-}
-module Src.HOU (unifyAll) where
+module Src.HOU (unifyAll, newGraph) where
 
 import Names
 import Src.AST
@@ -95,8 +95,8 @@ type UniContext = (ConsGraph, Reconstruction)
 
 substRecon :: (Term,Type, Int, Name, Type) -> UniContext -> UniContext
 substRecon (s,tyB,d, x, tyA) (gr,m) = (gr, M.insert x (d,s) $ fmap substy m)
-  where substy (depth, t,ty) | depth < d = (depth,t)
-        substy (depth, t,ty) = (depth, suber t)
+  where substy (depth,t) | depth < d = (depth,t)
+        substy (depth,t) = (depth, suber t)
           where suber = substN False (emptyCon constants :: Ctxt) (liftV (depth - d) s, tyB, Exi d x tyA)
 
 putGr (gr,recon) foo a b = case foo (con a) (con b) of
@@ -154,7 +154,7 @@ unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f
           recon <- putGr recon f a b
           return (recon, rebuild ctxt Done)
         identity (=:=) (viewForallP -> Just (a,b)) (viewForallP -> Just (a',b')) = do
-          return $ (recon, rebuild ctxt $ a :=: a' :&: b =:= b') -- implements the "switching" for atoms
+          return $ (recon, rebuild ctxt $ Pat a :=: Pat a' :&: Pat b =:= Pat b') -- implements the "switching" for atoms
         identity f (viewPat -> ~(hAO,ppA)) (viewPat -> ~(hBO, ppB)) = do
           hA <- uvarTy ctxt hAO
           hB <- uvarTy ctxt hBO
@@ -183,7 +183,7 @@ unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f
         rigidP x (var :+: p) = rigidP x var || rigid x p
         rigidP x (Var v) = v == x
         
-        rigid x (Abs ty m) = rigid x ty || rigid (liftV 1 x) m
+        rigid x (Abs ty m) = rigidP x ty || rigid (liftV 1 x) m
         rigid x (Pat p) = rigidP x p
         
         occurs ((dist',xNm',tyB'), _) b = do
@@ -196,14 +196,14 @@ unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f
           
           let xNm' = xNm++"@'"
               
-              (tyLst,tyBase) = viewN tyB
+              (tyLst,tyBase) = viewP tyB
               
               sames = [ var i | ((a,b),i) <- zip (zip ppA ppB) [0..], a == b ]
                             
               tyB' = getTyLst tyLst (zip ppA ppB)
                 where getTyLst (ty:c) ((a,b):lst) | a == b = forall ty $ getTyLst c lst
                       getTyLst (_:c) (_:lst) = liftV (-1) $ getTyLst c lst
-                      getTyLst _ _ = Pat $ tyBase
+                      getTyLst _ _ = tyBase
                             
               vlstBase = foldl (:+:) (Var $ Exi dist xNm' tyB') sames
               
@@ -224,16 +224,15 @@ unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f
           let tyA = liftV (1 - xVal) tyA'
               tyB = liftV (1 - xVal) tyB'
               
-              ~(tyLstA,_) = viewN tyA
+              ~(tyLstA,_) = viewP tyA
               tyLstB = viewB tyB
-                where viewB (viewForallN -> Just (ty,n)) = ty:map (Abs ty) (viewB n)
-                      viewB (Pat _) = []
-                      viewB Abs{} = error "can't view an abstraction as a forall"
+                where viewB (viewForallP -> Just ~(ty,n)) = Pat ty:map (Abs ty) (viewB n)
+                      viewB _ = []
               
               lenTyLstA = length tyLstA
               uVars = var <$> [0..(lenTyLstA - 1)]
               
-              appUVars c = Pat $ foldl (:+:) c uVars
+              appUVars c = foldl (:+:) c uVars
               
               foralls base = foldr forall (liftV (lenTyLstA - 1) base) tyLstA
               
@@ -244,10 +243,10 @@ unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f
             Just (ctxt, form) -> do
               let xVars = (\a -> foldr a [] xNms) $
                           \(xNm,bTy) xs -> (appUVars $
-                                            Var $ Exi dist xNm $ foralls $ foldl (appN ctxt) bTy xs
+                                            Var $ Exi dist xNm $ foralls $ fromType $ foldl (appP ctxt) bTy xs
                                            ):xs
                                                                       
-                  l = foldr Abs (Pat $ foldl (:+:) (Var hB) xVars) tyLstA
+                  l = foldr Abs (Pat $ foldl (:+:) (Var hB) $ Pat <$> xVars) tyLstA
                   
               return $ ( substRecon (l , tyB , dist, xNm, tyA) recon
                        , rebuild ctxt $ subst ctxt (l,tyB, Exi dist xNm tyA) $ form
@@ -302,10 +301,10 @@ unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f
                                     
                   getTyLst tb (ty:c) (a:lst) | elem a ppB = forall ty $ getTyLst tb c lst
                   getTyLst tb (_:c) (_:lst) = liftV (-1) $ getTyLst tb c lst                  
-                  getTyLst tb _ _ = Pat $ tb
+                  getTyLst tb _ _ = tb
                   
-                  (tyLstA,tyBaseA) = viewN tyA
-                  (tyLstB,_) = viewN tyB
+                  (tyLstA,tyBaseA) = viewP tyA
+                  (tyLstB,_) = viewP tyB
                   
                   tyX' = getTyLst tyBaseA tyLstA ppA
               
@@ -316,7 +315,7 @@ unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f
                   lB = foldr Abs (Pat vlstBaseB) tyLstB
               
               return $ ( substRecon (lA, tyA, dist , xNm , tyA) $  
-                          substRecon (lB, tyB, dist , xNm', tyB) $ recon
+                         substRecon (lB, tyB, dist , xNm', tyB) $ recon
                        , rebuild ctxt $ 
                          subst ctxt (lA, tyA, Exi dist xNm tyA) $ 
                          subst ctxt (lB,tyB, Exi dist xNm' tyA) $ form
@@ -332,12 +331,11 @@ search _ (_ :=: _)    = nothing
 search _ (_ :<: _)    = nothing
 search _ (_ :<=: _)   = nothing
 search ctxt (a :@: b) = (fmap (rebuild ctxt) <$>) <$> searchR a b
-  where searchR search (viewForallN -> Just (a,b)) = do
+  where searchR search (viewForallP -> Just (a,b)) = do
           yv <- getNewWith "@y"
           let y = evar (height ctxt) yv b
           return $ [[Bind a $ y :=: appN (putTy ctxt a) search (var 0) :&: y :@: b]]
-        searchR _ Abs{}   = error "not a type"
-        searchR search (Pat p) = do
+        searchR search p = do
           let (constants, anons) = getTypes ctxt
               
               pFam = case viewPat p of
@@ -346,11 +344,12 @@ search ctxt (a :@: b) = (fmap (rebuild ctxt) <$>) <$> searchR a b
               sameFamily s = case getFamily s of
                 Poly -> True
                 Family s -> s == pFam
-                NoFam -> False
               
-              makeFromConstant (c,(bl,t)) = if sameFamily t 
-                                            then (\a -> Just (bl,a)) <$> searchL (con c, t) (search,p)
-                                            else return Nothing
+              makeFromConstant (c,(Axiom bl i,t)) = if sameFamily t 
+                                                then (\a -> Just ((bl,i),a)) <$> searchL (con c, t) (search,p)
+                                                else return Nothing
+              makeFromConstant (c,_) = return Nothing
+              
               makeFromAnons (i,t) = if sameFamily t
                                     then (:[]) <$> searchL (var i, t) (search,p)
                                     else return []
@@ -360,12 +359,11 @@ search ctxt (a :@: b) = (fmap (rebuild ctxt) <$>) <$> searchR a b
           return $ sortAndUse (catMaybes cl) ++ [ concat rl ]
           
         searchL (name,attempt) tg@(target,goal) = case attempt of
-          (viewForallN -> Just (av,b)) -> do
+          (viewForallP -> Just (av,b)) -> do
             xv <- getNewWith "@xv"
             let x = evar (height ctxt) xv av
             (:&: x :@: av) <$> searchL (appN ctxt name x, b) tg
-          Abs{} -> error "not a type"
-          Pat p -> do
+          p -> do
             return $ Pat p :=: Pat goal :&: name :=: target
 
 sortAndUse cl = coalate [] $ sortBy (\a b -> compare (snd $ fst a) (snd $ fst b)) cl
@@ -386,6 +384,8 @@ unifyOrSearch recon ctxt unf =  tryUnify <|> trySearch
   where tryUnify  = (\a -> [[a]]) <$> unify recon ctxt unf
         trySearch = (((\a -> (recon,a)) <$>) <$>) <$> search ctxt unf
 
+interpret :: (MonadState c m, Alternative m, ValueTracker c,MonadError String m) =>
+             Constants -> (UniContext, Form) -> m UniContext
 interpret _ (recon, Done) = return recon
 interpret cons (recon, unf) = do
   m <- runMaybeT $ unifyOrSearch recon (emptyCon cons :: Ctxt) unf 
@@ -396,4 +396,6 @@ interpret cons (recon, unf) = do
             next (a:l)  = current <|> next l
               where current = interpret cons =<< F.asum (return <$> a)
 
-unifyAll cons unf = snd <$> interpret cons ((newGraph, mempty), unf)
+unifyAll :: (MonadState c f, Alternative f, ValueTracker c, MonadError String f) =>
+            ConsGraph -> Constants -> Form -> f (ConsGraph, Reconstruction)
+unifyAll cg cons unf = interpret cons ((cg, mempty), unf)

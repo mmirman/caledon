@@ -35,6 +35,11 @@ instance Context Ctxt where
     True  -> liftV i $ elemType $ index (ctxtContext c) i
     False -> error $ "WHAT? "++show i++"\nIN: "++show c
     
+  getVal c (Con n) = case fst $ ctxtConstants c M.! n of
+    Macro a -> a
+    _ -> Pat $ Var $ Con n
+  getVal c v = Pat $ Var v
+  
   putTy c ty = c { ctxtHeight  = ctxtHeight c + 1 
                  , ctxtContext = B ty mempty <| ctxtContext c
                  }
