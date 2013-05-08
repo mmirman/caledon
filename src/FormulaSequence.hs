@@ -6,6 +6,7 @@ import qualified Data.Map as M
 import Data.Sequence as S
 import Data.Monoid
 import qualified Data.Foldable as F
+import qualified Data.List as L
 
 type Recon = [Either Form Form]
 
@@ -45,7 +46,45 @@ instance Context Ctxt where
                  }
   getTypes c = (ctxtConstants c, map elemType $ F.toList $ ctxtContext c)
 
+toLeft (Left _) = True
+toLeft _ = False
+
+reset (Ctxt cons 0 recon ctxt,f) = (Ctxt cons 0 [] ctxt, rebuildFromRecon recon f)
+reset (a,f) = case upI 1 a f of
+    Nothing -> (emptyCon $ ctxtConstants a, rebuildFromRecon (ctxtRecon a) f)
+    Just a  -> a
+
 instance Environment Ctxt where
+  isDone (Ctxt{ctxtHeight = 0, ctxtRecon = []}) = True
+  isDone _ = False
+  
+  nextUp (Ctxt cons 0 recon ctxt,f) = (Ctxt cons 0 [] ctxt, rebuildFromRecon recon f)
+  nextUp (a,f) = case upI 1 a f of
+    Nothing -> (emptyCon $ ctxtConstants a, rebuildFromRecon (ctxtRecon a) f)
+    Just a  -> a
+  
+  viewLeft (ctxt@Ctxt{ ctxtContext = seqe, ctxtRecon = recon } , form) = case viewl seqe of
+    EmptyL -> do 
+      ~(form',recon') <- bR recon 
+      return (ctxt { ctxtRecon = recon' } , form' )
+    B ty recon :< seqe -> do
+      ~(form',recon') <- bR recon 
+      return (ctxt { ctxtContext = B ty recon' <| seqe } , form' )
+    where bR recon = case L.partition toLeft recon of
+            ([],_) -> Nothing
+            (lefts,rights) -> Just (foldr mappend Done $ map (\(Left a) -> a) lefts , Right form:rights) 
+
+  viewRight (ctxt@Ctxt{ ctxtContext = seqe, ctxtRecon = recon } , form) = case viewl seqe of
+    EmptyL -> do 
+      (form',recon') <- bR recon 
+      return (ctxt { ctxtRecon = recon' } , form' )
+    B ty recon :< seqe -> do
+      (form',recon') <- bR recon 
+      return (ctxt { ctxtContext = B ty recon' <| seqe } , form' )
+    where bR recon = case L.partition toLeft recon of
+            ([],_) -> Nothing
+            (lefts,rights) -> Just (foldl mappend Done $ map (\(Right a) -> a) rights , Left form:lefts)             
+            
   putLeft (c@Ctxt{ ctxtRecon = re, ctxtContext = seqe }) b = case viewl seqe of
     EmptyL -> c { ctxtRecon = Left b:re }
     a :< seqe ->  c { ctxtContext = a { elemRecon = Left b:elemRecon a} <| seqe }

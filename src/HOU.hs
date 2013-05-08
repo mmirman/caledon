@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts                 #-}
 {-# LANGUAGE BangPatterns                     #-}
 {-# LANGUAGE ScopedTypeVariables              #-}
-module Src.HOU (unifyAll, newGraph) where
+module Src.HOU (unifyAll, newGraph, ConsGraph) where
 
 import Names
 import Src.AST
@@ -121,23 +121,24 @@ viewEquiv (a :<: b) = ((:<:), a, b)
 viewEquiv (a :<=: b) = ((:<=:), a, b)
 viewEquiv _ = error "not an equivalence"
 
+
 -- | unify only performes transitions relating to "A :=: B". 
 unify :: (Functor m, Monad m
          , Show a, Environment a
          , MonadError String m
-         ) => UniContext -> a -> Form -> MaybeT m (UniContext, Form)
-unify recon ctxt (a :&: b) = unify recon (putLeft ctxt b) a 
-                            <|> unify recon (putRight a ctxt) b
-unify recon ctxt (Bind ty f) = unify recon (putTy ctxt ty) f
-unify recon ctxt Done = return $ (recon, rebuild ctxt Done)
-unify _ _ (_ :@: _)   = nothing
-unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f) (b,a)
+         ) => UniContext -> (a,Form) -> MaybeT m (UniContext, (a,Form))
+unify recon (ctxt,a :&: b) = unify recon (putLeft ctxt b, a )
+                          <|> unify recon (putRight a ctxt, b)
+unify recon (ctxt,Bind ty f) = unify recon (putTy ctxt ty, f)
+unify recon (ctxt,Done) = nothing -- return $ (recon, reset ctxt Done)
+unify _ (_,_ :@: _)   = nothing
+unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (flip f) (b,a)
   where len = height ctxt
         
         ueq (=:=) (a,b) = case (a,b) of
           (Abs ty n1, n2) -> 
             return ( recon 
-                   , rebuild ctxt $ Bind ty $ n1 =:= appN (putTy ctxt ty) (liftV 1 n2) (var 0)
+                   , reset ctxt $ Bind ty $ n1 =:= appN (putTy ctxt ty) (liftV 1 n2) (var 0)
                    )
           (Pat a, Pat b) -> identity (=:=) a b <|> do
             (hAO,ppA) <- getPP a
@@ -149,12 +150,12 @@ unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f
           
         partialPerm hA ppA = all (hA >) ppA && all (isForall ctxt) ppA && inj ppA        
         
-        identity _ h1 h2 | h1 == h2 = return $ (recon, rebuild ctxt Done)
+        identity _ h1 h2 | h1 == h2 = return $ (recon, reset ctxt Done)
         identity f (viewTipe -> Just a) (viewTipe -> Just b) = do
           recon <- putGr recon f a b
-          return (recon, rebuild ctxt Done)
+          return (recon, reset ctxt Done)
         identity (=:=) (viewForallP -> Just (a,b)) (viewForallP -> Just (a',b')) = do
-          return $ (recon, rebuild ctxt $ Pat a :=: Pat a' :&: Pat b =:= Pat b') -- implements the "switching" for atoms
+          return $ (recon, reset ctxt $ Pat a :=: Pat a' :&: Pat b =:= Pat b') -- implements the "switching" for atoms
         identity f (viewPat -> ~(hAO,ppA)) (viewPat -> ~(hBO, ppB)) = do
           hA <- uvarTy ctxt hAO
           hB <- uvarTy ctxt hBO
@@ -163,7 +164,7 @@ unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f
             then error $ "universal quantifiers have different numbers of arguments: "++show constraint 
             else return ()
           return $ ( recon 
-                   , rebuild ctxt $ case zipWith f ppA ppB of
+                   , reset ctxt $ case zipWith f ppA ppB of
                      [] -> Done
                      lst -> foldr1 (:&:) lst
                    )
@@ -213,10 +214,10 @@ unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f
               -- we need to up the context by the dist!
           case upI (xVal) ctxt Done of
             Nothing -> 
-              return (substRecon (l , tyB_top, dist, xNm , tyB_top) recon, rebuild ctxt Done)
+              return (substRecon (l , tyB_top, dist, xNm , tyB_top) recon, reset ctxt Done)
             Just (ctxt,form) -> do
               return $ ( substRecon (l , tyB_top, dist, xNm , tyB_top) recon
-                       , rebuild ctxt $ subst ctxt (l,tyB_top, Exi dist xNm tyB_top) $ form 
+                       , reset ctxt $ subst ctxt (l,tyB_top, Exi dist xNm tyB_top) $ form 
                        )
 
         gvar_fixed (xVal, (dist,xNm,tyA'),_) (hB,tyB',_) = do
@@ -249,7 +250,7 @@ unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f
                   l = foldr Abs (Pat $ foldl (:+:) (Var hB) $ Pat <$> xVars) tyLstA
                   
               return $ ( substRecon (l , tyB , dist, xNm, tyA) recon
-                       , rebuild ctxt $ subst ctxt (l,tyB, Exi dist xNm tyA) $ form
+                       , reset ctxt $ subst ctxt (l,tyB, Exi dist xNm tyA) $ form
                        )
 
         gvar_uvar_outside (hA@(dist,_,_),ppA) (hB,tyB',mB) = do
@@ -286,7 +287,7 @@ unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f
           case upI (len - dist') ctxt constraint of
             Nothing -> error "constraint shouldn't be done"
             Just (ctxt,form) -> case raise (dist' - dist) (recon , (dist',xNm',tyA') , ctxt, form) of
-              (recon, _,ctxt,form) -> return $ (recon, rebuild ctxt form)
+              (recon, _,ctxt,form) -> return $ (recon, reset ctxt form)
         gvar_gvar_diff ((dist,_,_),_) ((dist',_,_),_) | dist > dist' = nothing
         gvar_gvar_diff ((dist,xNm,tyA),ppA) ((_,xNm',tyB),ppB) = do
           let xx'Val = len - dist - 1
@@ -316,21 +317,21 @@ unify recon ctxt constraint@(viewEquiv -> (f,a,b)) = ueq f (a,b) <|> ueq (flip f
               
               return $ ( substRecon (lA, tyA, dist , xNm , tyA) $  
                          substRecon (lB, tyB, dist , xNm', tyB) $ recon
-                       , rebuild ctxt $ 
+                       , reset ctxt $ 
                          subst ctxt (lA, tyA, Exi dist xNm tyA) $ 
                          subst ctxt (lB,tyB, Exi dist xNm' tyA) $ form
                        )
 
 search :: ( Functor m, Show a, Monad m, Environment a
-          , MonadState c m, ValueTracker c) =>  a -> Form -> MaybeT m [[Form]]
-search ctxt (a :&: b) =  search (putLeft ctxt b) a 
-                     <|> search (putRight a ctxt) b
-search ctxt (Bind ty f)    = search (putTy ctxt ty) f
-search ctxt Done = return [[(rebuild ctxt Done)]]
-search _ (_ :=: _)    = nothing
-search _ (_ :<: _)    = nothing
-search _ (_ :<=: _)   = nothing
-search ctxt (a :@: b) = (fmap (rebuild ctxt) <$>) <$> searchR a b
+          , MonadState c m, ValueTracker c) => (a,Form) -> MaybeT m [[(a,Form)]]
+search (ctxt,a :&: b) =  search (putLeft ctxt b,a)
+                     <|> search (putRight a ctxt,b)
+search (ctxt, Bind ty f)    = search (putTy ctxt ty,f)
+search (ctxt,Done) = nothing -- return [[(reset ctxt Done)]]
+search (_,_ :=: _)    = nothing
+search (_,_ :<: _)    = nothing
+search (_,_ :<=: _)   = nothing
+search (ctxt,a :@: b) = (fmap (reset ctxt) <$>) <$> searchR a b
   where searchR search (viewForallP -> Just (a,b)) = do
           yv <- getNewWith "@y"
           let y = evar (height ctxt) yv b
@@ -376,19 +377,36 @@ sortAndUse cl = coalate [] $ sortBy (\a b -> compare (snd $ fst a) (snd $ fst b)
                else [targ]:coalate [] l
           else coalate (targ:cg) l
                
+rebuildC a = (emptyCon $ fst $ getTypes $ fst a, uncurry rebuild a)
+
 -- modify all the time, since the only time we mention an existential 
 -- is if we are in the same branch, and we know existentials are unique.
 unifyOrSearch :: (Functor m, Show a, MonadState c m, MonadError String m, Environment a, ValueTracker c) =>
-                 UniContext -> a -> Form -> MaybeT m [[(UniContext, Form)]]
-unifyOrSearch recon ctxt unf =  tryUnify <|> trySearch
-  where tryUnify  = (\a -> [[a]]) <$> unify recon ctxt unf
-        trySearch = (((\a -> (recon,a)) <$>) <$>) <$> search ctxt unf
+                 UniContext -> (a,Form) -> MaybeT m [[(UniContext, (a,Form))]]
+unifyOrSearch recon (cunf, Done) | isDone cunf = nothing
+unifyOrSearch recon cunf = sunify (Just cunf) <|> tryUnify cunf 
+  where -- we perform the search in an ever expanding "outwards" pattern
+        -- knowing that local unifications are most likely to effect local
+        -- areas.  Although it actually only effects the reconstruction, 
+        -- this method prevents any search from being repeated!  
+        -- This could practically be made more efficient, but it is theoretically 
+        -- efficient enough.  Importantly, this provides some notion of cache coherency
+        -- during the search.
+        tryUnify cunf | isDone $ fst cunf = trySearch cunf
+        tryUnify cunf =  sunify (viewLeft cunf)
+                     <|> sunify (viewRight cunf)
+                     <|> tryUnify (nextUp cunf)
+                         
+        sunify (Just cunf) = (\a -> [[a]]) <$> unify recon cunf
+        sunify Nothing = nothing
+        
+        trySearch cunf = (((\a -> (recon,a)) <$>) <$>) <$> search cunf
 
-interpret :: (MonadState c m, Alternative m, ValueTracker c,MonadError String m) =>
-             Constants -> (UniContext, Form) -> m UniContext
-interpret _ (recon, Done) = return recon
+interpret :: (MonadState c m, Show a, Alternative m, ValueTracker c,MonadError String m,Environment a) =>
+             Constants -> (UniContext, (a,Form)) -> m UniContext
+interpret _ (recon, (ctxt,Done)) | isDone ctxt = return recon
 interpret cons (recon, unf) = do
-  m <- runMaybeT $ unifyOrSearch recon (emptyCon cons :: Ctxt) unf 
+  m <- runMaybeT $ unifyOrSearch recon unf -- (emptyCon cons :: Ctxt,unf) 
   case m of
     Nothing  -> throwTrace 1 $ "constraints are not satisfiable: "++show unf
     Just lst -> next lst
@@ -398,4 +416,4 @@ interpret cons (recon, unf) = do
 
 unifyAll :: (MonadState c f, Alternative f, ValueTracker c, MonadError String f) =>
             ConsGraph -> Constants -> Form -> f (ConsGraph, Reconstruction)
-unifyAll cg cons unf = interpret cons ((cg, mempty), unf)
+unifyAll cg cons unf = interpret cons ((cg, mempty), (emptyCon cons :: Ctxt, unf))

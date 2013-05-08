@@ -906,8 +906,6 @@ typePipe verbose lt (b,nm,ty,kind) = do
   
   (ty,kind,lt) <- mtrace verbose ("Checking:    " ++nm) $ 
                   typeInfer True lt (b,nm, ty,kind) -- type check
-                  
-
   
   return (ty,kind,lt)
   

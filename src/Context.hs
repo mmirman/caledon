@@ -11,6 +11,7 @@ class Context a where
   
   getTypes :: a -> (Constants, [Type])
 
+instance Context () where  
   
 class Context a => Environment a where
   putLeft :: a -> Form  -> a
@@ -19,5 +20,13 @@ class Context a => Environment a where
   rebuild :: a -> Form -> Form
   
   upI :: Int -> a -> Form -> Maybe (a,Form)
+  
+  isDone :: a -> Bool
+  
+  nextUp :: (a,Form) -> (a,Form)
+  viewLeft :: (a,Form) -> Maybe (a,Form)
+  viewRight :: (a,Form) -> Maybe (a,Form)
 
-instance Context () where
+reset a Done | isDone a = (a,Done)
+reset a Done = uncurry reset $ nextUp(a,Done)
+reset a f = (a,f)
