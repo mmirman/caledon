@@ -4,6 +4,7 @@ import Src.Elaborate
 import Src.Reconstruction
 import Src.HOU
 import Src.AST
+import Debug.Trace
 
 infer (graph , constants) tm ty = do
   (tm    , constraints) <- typeConstraints constants tm ty
@@ -12,6 +13,6 @@ infer (graph , constants) tm ty = do
 
 pipe env@(graph , constants) name tm ty = do
   tm <- infer env tm ty
-  
   trace (name++" : "++show tm) $ return ()
+  
   

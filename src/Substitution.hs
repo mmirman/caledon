@@ -6,6 +6,7 @@ import Src.Context
 import Control.Spoon
 
 import qualified Data.Set as S  
+import qualified Data.Map as M
 import Data.Monoid
 
 type Foralls = [Type]
@@ -47,7 +48,7 @@ hered t ctxt (Right p1@(Abs a1 n), l) nv =
   , case viewForallP l of 
     Just ~(a1',a2) -> liftV (-1) $ substTy (putTy ctxt a1') (liftV 1 nv,liftV 1 a1',DeBr 0) a2
     Nothing -> error $ show p1++" r: "++show l
-  )
+  )  
 hered _ ctxt (Right (Pat p1), l) nv = 
   ( Right $ Pat $ p1 :+: nv
   , case viewForallP l of
@@ -63,6 +64,9 @@ hered _ ctxt (Left p1, l) nv =
 
 substTy c s t = case substP False c s t of
   ~(~(Left a),_) -> a -- might want to make this lazier
+
+substituteType :: (Term, Type, Variable) -> P -> P
+substituteType = substTy ()
 
 substF :: Context c => c -> (Term,Type,Variable) -> Form -> Form  
 substF _ _ Done = Done
@@ -108,10 +112,16 @@ appN' p n = case app' (Right p) n of
   Right n -> n
   Left p -> Pat p
 
-
 freeVarsN (Pat p) = freeVarsP p
-freeVarsN (Abs t1 t2) = freeVarsP t1 `S.union` freeVarsN t2
+freeVarsN (Abs t1 t2) = freeVarsP t1 `mappend` freeVarsN t2
 
 freeVarsP (Var (Exi _ nm t)) = S.insert nm $ freeVarsP t
 freeVarsP (Var _) = mempty
-freeVarsP (p :+: n) = freeVarsP p `S.union` freeVarsN n
+freeVarsP (p :+: n) = freeVarsP p `mappend` freeVarsN n
+
+freeVarsMapN (Pat p) = freeVarsMapP p
+freeVarsMapN (Abs t1 t2) = freeVarsMapP t1 `mappend` freeVarsMapN t2
+
+freeVarsMapP (Var (Exi _ nm t)) = M.insert nm t $ freeVarsMapP t
+freeVarsMapP (Var _) = mempty
+freeVarsMapP (p :+: n) = freeVarsMapP p `mappend` freeVarsMapN n

@@ -20,20 +20,23 @@ data P = P :+: N
        deriving (Eq, Ord)
                 
 data N = Abs Type N 
+       | ImpAbs Name Type N
        | Pat P 
        deriving (Eq, Ord)
     
 instance Show Variable where
   show (DeBr i) = show i
-  show (Exi i n _) = n++"<"++show i++">"
+  show (Exi i n ty) = n++"<"++show i++">"
   show (Con n) = n
 
 instance Show P where
-  show (viewForallP -> Just (ty,p)) = "( "++show ty ++" ) ~> ( "++ show p++" )"
+  show (viewForallP -> Just (ty,p)) = "[ "++show ty ++" ]  "++ show p
+  show (viewImpForallP -> Just (nm,ty,p)) = "{ "++nm++" : "++show ty ++" }  "++ show p
   show (a :+: b) = show a ++" ( "++ show b++" ) "
   show (Var a) = show a
 instance Show N where
   show (Abs ty a) = "λ:"++show ty ++" . ("++ show a++")"
+  show (ImpAbs nm ty a) = "?λ"++nm++" : "++show ty ++" . ("++ show a++")"
   show (Pat p) = show p
 
 
@@ -44,8 +47,15 @@ viewForallN (Pat p) = viewForallP p
 viewForallN _ = Nothing
 
 viewForallP (Var (Con "#forall#") :+: _ :+: Abs ty (Pat n) ) = Just (ty,n)
-viewForallP cons@(Var (Con "#forall#") :+: _ :+: Abs ty n ) = error $ "not a type: "++show cons
+viewForallP cons@(Var (Con "#forall#") :+: _ :+: Abs{} ) = error $ "not a type: "++show cons
 viewForallP _ = Nothing
+
+viewImpForallN (Pat p) = viewImpForallP p
+viewImpForallN _ = Nothing
+
+viewImpForallP (Var (Con "#imp_forall#") :+: _ :+: ImpAbs nm ty (Pat n) ) = Just (nm,ty,n)
+viewImpForallP cons@(Var (Con "#imp_forall#") :+: _ :+: ImpAbs{} ) = error $ "not a type: "++show cons
+viewImpForallP _ = Nothing
 
 data Fam = Poly 
          | Family Variable 
@@ -83,6 +93,8 @@ vcon = Var . Con
 con = Pat . vcon
 
 forall ty n = vcon "#forall#" :+: Pat ty :+: Abs ty (Pat n)
+
+imp_forall nm ty n = vcon "#imp_forall#" :+: Pat ty :+: ImpAbs nm ty (Pat n)
 
 a ~> b = forall a b
 
