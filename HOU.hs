@@ -8,6 +8,7 @@
  #-}
 module HOU where
 
+import Src.Tracing
 import Names
 import Choice
 import AST
@@ -29,31 +30,11 @@ import Data.Monoid
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Debug.Trace
+import System.IO.Unsafe
 
 import Control.Lens hiding (Choice(..))
 
-import System.IO.Unsafe
-import Data.IORef
-
-{-# NOINLINE levelVar #-}
-levelVar :: IORef Int
-levelVar = unsafePerformIO $ newIORef 0
-
-{-# NOINLINE level #-}
-level = unsafePerformIO $ readIORef levelVar
-
-vtrace !i | i < level = trace
-vtrace !i = const id
-
-vtraceShow !i1 !i2 s v | i2 < level = trace $ s ++" : "++show v
-vtraceShow !i1 !i2 s v | i1 < level = trace s
-vtraceShow !i1 !i2 s v = id
-
 throwTrace !i s = vtrace i s $ throwError s
-
-mtrace True = trace
-mtrace False = const id
-
 
 -----------------------------------------------
 ---  the higher order unification algorithm ---
@@ -977,43 +958,6 @@ typeCheckAxioms verbose lst = do
   
   return $ (lv, snd <$> lt)
 
-topoSortAxioms :: Bool -> [FlatPred] -> [FlatPred]
-topoSortAxioms accountPot axioms = showRes $ topoSortComp (\p -> (p^.predName,) 
-                                            $ showGraph (p^.predName)
-                                            -- unsound can mean this causes extra cyclical things to occur
-                                            $ (if accountPot && p^.predSound then S.union (getImplieds $ p^.predName) else id)
-                                            $ S.fromList 
-                                            $ filter (not . flip elem (map fst consts)) 
-                                            $ S.toList $ freeVariables p ) axioms
-                        
-  where showRes a = vtrace 0 ("TOP_RESULT: "++show ((^.predName) <$> a)) a
-        showGraph n a = vtrace 1 ("TOP_EDGE: "++n++" -> "++show a) a
-
-        nm2familyLst  = catMaybes $ (\p -> (p^.predName,) <$> (p^.predFamily)) <$> axioms
-        
-        family2nmsMap = foldr (\(fam,nm) m -> M.insert nm (case M.lookup nm m of
-                                  Nothing -> S.singleton fam
-                                  Just s -> S.insert fam s) m
-                                )  mempty nm2familyLst
-        
-        family2impliedsMap = M.fromList $ (\p -> (p^.predName, 
-                                                  mconcat 
-                                                  $ catMaybes 
-                                                  $ map (`M.lookup` family2nmsMap) 
-                                                  $ S.toList 
-                                                  $ S.union (getImpliedFamilies $ p^.predType) (fromMaybe mempty $ freeVariables <$> p^.predValue)
-                                                 )) <$> axioms
-        
-        getImplieds nm = fromMaybe mempty (M.lookup nm family2impliedsMap)
-
-getImpliedFamilies s = S.intersection fs $ gif s
-  where fs = freeVariables s
-        gif (Spine "#imp_forall#" [ty,a]) = (case getFamilyM ty of
-          Nothing -> id
-          Just f | f == tipeName -> id
-          Just f -> S.insert f) $ gif ty `S.union` gif a 
-        gif (Spine a l) = mconcat $ gif <$> l
-        gif (Abs _ ty l) = S.union (gif ty) (gif l)
 
 typeCheckAll :: Bool -> [Decl] -> Choice [Decl]
 typeCheckAll verbose preds = do

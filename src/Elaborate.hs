@@ -11,17 +11,16 @@ import Src.Substitution
 import Data.Functor
 import Control.Monad.RWS.Lazy (RWS, ask, local, censor, runRWS, censor, tell)
 import Control.Monad.State.Class (MonadState(), get, modify)
-
-type TypeChecker = RWS Ctxt Form Integer
+import Control.Spoon
+import Data.Monoid
+type TypeChecker = RWS Ctxt Form ()
 
 typeConstraints cons tm ty = evalGen (genConstraintN tm ty) cons 
 
-evalGen :: (Functor m, MonadState c m, ValueTracker c) 
+evalGen :: (Monad m)
            => TypeChecker a -> Constants -> m (a,Form)
 evalGen m cons = do
-  i <- takeValue <$> get 
-  let ~(a,s,f) = runRWS m (emptyCon cons) i
-  modify $ putValue s
+  let ~(a,(),f) = runRWS m (emptyCon cons) ()
   return (a,f)
 
 getNewExists s ty = do
@@ -29,8 +28,9 @@ getNewExists s ty = do
   depth <- height <$> ask 
   return $ Var $ Exi depth nm ty
 
+  
 bindForall :: Type -> TypeChecker a -> TypeChecker a
-bindForall ty = censor (Bind ty) . local (\a -> putTy a ty)
+bindForall ty = censor (bind ty) . local (\a -> putTy a ty)
 
 (.=.) a b = tell $ a :=: b
 (.<.) a b = tell $ a :<: b
@@ -46,8 +46,9 @@ genConstraintN n ty = case n of
       bindForall tyA $ do
         Abs tyA <$> genConstraintN sp tyF'
     _ -> do
+      v1 <- getNewWith "@tmake1"
       tyA <- genConstraintTy tyA
-      e <- getNewExists "@e" (forall tyA tipe)
+      e <- getNewExists "@e" (forall tyA $ tipemake v1)
       
       let body = e :+: var 0
       Pat (forall tyA body) .<=. Pat ty
@@ -60,7 +61,9 @@ genConstraintN n ty = case n of
 genConstraintTy :: Type -> TypeChecker Type
 genConstraintTy p = do
   ~(a , b) <- genConstraintP p
-  Pat b .=. Pat tipe
+  v1 <- getNewWith "@tmake0"
+  
+  Pat b .=. Pat (tipemake v1)
   return $ fromType a
   
 genConstraintP :: P -> TypeChecker (Term, Type)
@@ -77,12 +80,12 @@ genConstraintP p = case p of
     
     return (Pat $ forall tyA' (fromType tyF), tyret)
   (tipeView -> Init v1) -> do
-    v2 <- getNewWith "@tmake"
+    v2 <- getNewWith "@tmakeA"
     Pat (tipemake v1) .<. Pat (tipemake v2)
     return (Pat $ tipemake v1, tipemake v2)
   (tipeView -> Uninit) -> do
-    v1 <- getNewWith "@tmake"
-    v2 <- getNewWith "@tmake"
+    v1 <- getNewWith "@tmakeB"
+    v2 <- getNewWith "@tmakeC"
     Pat (tipemake v1) .<. Pat (tipemake v2)
     return (Pat $ tipemake v1 , tipemake v2)
   f :+: v -> do
@@ -94,13 +97,21 @@ genConstraintP p = case p of
         let tyR' = appN ctxt (Abs tyV $ Pat tyR) v
         return (appN ctxt f v, fromType tyR')
       Nothing -> do
-        x <- getNewExists "@xin" tipe
-        let tybodyty = forall x tipe
+        v1 <- getNewWith "@tmakeD"
+        v2 <- getNewWith "@tmakeE"
+        
+        x <- getNewExists "@xin" (tipemake v1)
+        let tybodyty = forall x (tipemake v2)
         tybody <- getNewExists "@tybody" tybodyty
         Pat tyF .<=. Pat (forall x $ tybody :+: var 0)
         v <- genConstraintN v x
         ctxt <- ask
         return (appN ctxt f v, tybody :+: v)
+  Var (Con a) | a == "#hole#" -> do
+    v <- getNewWith   "@tmakeF"
+    ty <- getNewExists "@xty" $ tipemake v
+    e  <- getNewExists "@xin" ty
+    return (Pat e, ty)
   Var a -> do
     ctxt <- ask
     return (getVal ctxt a, getTy ctxt a)

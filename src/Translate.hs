@@ -11,8 +11,6 @@ import qualified Src.Context as B
 import qualified Data.Map as M
 import Data.Functor
 import Data.Monoid
-
-import Data.IORef
 import System.IO.Unsafe
   
 ------------------------------
@@ -27,7 +25,7 @@ putName :: Stack -> Name -> Stack
 putName (Stack sl sm se) n = Stack (sl + 1) (M.insert n sl sm) (M.delete n se)
 
 getIndex :: Stack -> Name -> Maybe Int
-getIndex (Stack sl sm se) n = (sl -) <$> M.lookup n sm
+getIndex (Stack sl sm se) n = ((sl - 1) -) <$> M.lookup n sm
 
 putExists :: Stack -> Name -> B.Type -> Stack
 putExists (Stack sl sm se) n ty = Stack sl (M.delete n sm) (M.insert n (sl,ty) se) 
@@ -35,7 +33,7 @@ putExists (Stack sl sm se) n ty = Stack sl (M.delete n sm) (M.insert n (sl,ty) s
 getExists :: Stack -> Name -> Maybe (Int,B.Type)
 getExists (Stack sl sm se) n = do
   ~(i,t) <- M.lookup n se
-  return $ (i, B.liftV (sl - i) t)
+  return $ (i, B.liftV (sl - i) t) -- sketch maybe?
   
 newStack :: Stack
 newStack = Stack 0 mempty mempty
@@ -52,7 +50,7 @@ s2n stk s = case s of
             Nothing -> case getExists stk n of
               Just (i,ty) -> B.Exi i n ty
               Nothing -> case isGen n of 
-                True -> B.Exi 0 n $ B.Var $ B.Exi 0 ('@':n) B.tipe
+                True -> B.Exi 0 n $ B.Var $ B.Exi 0 ('#':'@':n) B.tipe
                 False -> B.Con n
             Just i  -> B.DeBr i
   A.Abs n ty s -> B.Abs (B.fromType $ s2n stk ty) $ s2n (putName stk n) s

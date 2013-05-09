@@ -4,9 +4,10 @@ module Main where
 import Options
 import AST
 import Substitution
-
+import Src.Tracing
 import Choice
 import HOU
+import qualified Src.Pipeline as Src
 import Parser
 import System.Environment
 import Data.Foldable as F (forM_)
@@ -29,7 +30,7 @@ checkAndRun verbose decs = do
     forM_ decs $ \s -> putStrLn $ show s++"\n"
 
   when verbose $ putStrLn "\nCOMPILING: "
-  decs <- case runError $ typeCheckAll verbose decs of
+  decs <- case runError $ Src.typeCheckAll verbose decs of
     Left e -> error e
     Right e -> do when verbose $ putStrLn "DONE: compilation success!\n"
                   return e

@@ -1,5 +1,4 @@
 module Src.Reconstruction ( substReconstruct
-                          , raiseAll
                           , quantifyExistentials
                           ) where
 
@@ -38,8 +37,12 @@ raiseAll = ran []
                     ty' = foldr forall (rap lst ty) (reverse types)
                     exi' = Var $ Exi 0 nm ty'
                     
-quantifyExistentials :: N -> Type
-quantifyExistentials n = foldr (\(i,(a,ty)) b -> imp_forall a ty $ sub i a ty b) (fromType n') gens
+quantifyExistentials :: N -> N
+quantifyExistentials n = case n' of
+  Pat p -> Pat $ foldr (\(i,(a,ty)) b -> imp_forall a ty $ sub i a ty b) p gens
+  _ -> if null genlst 
+              then n 
+              else error $ "Can not quantify free existentials in a term: "++show n
   where n' = raiseAll n
         genmap = freeVarsMapN n'
         genlst = topoSort (\(nm,ty) -> (nm,freeVarsP ty)) $ M.toList $ genmap

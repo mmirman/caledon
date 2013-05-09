@@ -53,16 +53,18 @@ reset (Ctxt cons 0 recon ctxt,f) = (Ctxt cons 0 [] ctxt, rebuildFromRecon recon 
 reset (a,f) = case upI 1 a f of
     Nothing -> (emptyCon $ ctxtConstants a, rebuildFromRecon (ctxtRecon a) f)
     Just a  -> a
-
+    
 instance Environment Ctxt where
   isDone (Ctxt{ctxtHeight = 0, ctxtRecon = []}) = True
   isDone _ = False
   
   nextUp (Ctxt cons 0 recon ctxt,f) = (Ctxt cons 0 [] ctxt, rebuildFromRecon recon f)
-  nextUp (a,f) = case upI 1 a f of
-    Nothing -> (emptyCon $ ctxtConstants a, rebuildFromRecon (ctxtRecon a) f)
-    Just a  -> a
   
+  nextUp (Ctxt cons 0 recon ctxt,f) = (Ctxt cons 0 [] ctxt, rebuildFromRecon recon f)
+  nextUp (Ctxt cons h ro ctxt,b) = case viewl ctxt of
+    EmptyL -> (emptyCon cons, rebuildFromRecon ro b)
+    B ty ro' :< ctxt' -> (Ctxt cons (h-1) ro ctxt', bind ty $ rebuildFromRecon ro' b)
+
   viewLeft (ctxt@Ctxt{ ctxtContext = seqe, ctxtRecon = recon } , form) = case viewl seqe of
     EmptyL -> do 
       ~(form',recon') <- bR recon 
@@ -93,9 +95,7 @@ instance Environment Ctxt where
     a :< seqe ->  c { ctxtContext = a { elemRecon = Right b:elemRecon a} <| seqe }
   
   rebuild (Ctxt{ ctxtRecon = re, ctxtContext = seqe }) b = rebuildFromRecon re $ F.foldl reb b seqe
-    where reb f (B ty re) = case rebuildFromRecon re f of
-                                 Done -> Done
-                                 f -> Bind ty f
+    where reb f (B ty re) = bind ty $ rebuildFromRecon re f
 
   upI i (Ctxt _ h _ _) _ | i > h = error "context is not large enough"
   upI i (Ctxt cons h ro ctxt) b = case S.splitAt i ctxt of
@@ -109,7 +109,5 @@ instance Environment Ctxt where
 -- tail call optimized beauty?  Its naturally that way!
 rebuildFromRecon :: Recon -> Form -> Form
 rebuildFromRecon [] a              = a
-rebuildFromRecon (Left a:l) Done   = rebuildFromRecon l a
-rebuildFromRecon (Right a:l) Done  = rebuildFromRecon l a
-rebuildFromRecon (Left a:l) b      = rebuildFromRecon l (b :&: a)
-rebuildFromRecon (Right a:l) b     = rebuildFromRecon l (a :&: b)
+rebuildFromRecon (Left a:l) b      = rebuildFromRecon l (b `mappend` a)
+rebuildFromRecon (Right a:l) b     = rebuildFromRecon l (a `mappend` b)

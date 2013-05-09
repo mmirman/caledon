@@ -3,14 +3,14 @@ module TopoSortAxioms where
 
 import AST
 import Names
-
+import Substitution
 import Data.Graph
 import qualified Data.Set as S
 import qualified Data.Map as M
 import Data.Functor
 import Data.Monoid
 import Data.Maybe
-
+import Control.Lens hiding (Choice(..))
 
 seqList :: [a] -> (b -> b) 
 seqList [] = id
@@ -50,3 +50,39 @@ isUniverseGraph lst = all isAcyc $ stronglyConnComp graph'
         isAcyc (AcyclicSCC _) = True
         isAcyc (CyclicSCC sames) = all noOverlap sames
           where noOverlap x = S.null $ S.intersection (fromMaybe mempty $ M.lookup x someGraph) (S.fromList sames)
+
+
+
+topoSortAxioms :: Bool -> [FlatPred] -> [FlatPred]
+topoSortAxioms accountPot axioms = topoSortComp (\p -> (p^.predName,) 
+                                                       -- unsound can mean this causes extra cyclical things to occur
+                                                       $ (if accountPot && p^.predSound then S.union (getImplieds $ p^.predName) else id)
+                                                       $ S.fromList 
+                                                       $ filter (not . flip elem (map fst consts)) 
+                                                       $ S.toList $ freeVariables p ) axioms
+                        
+  where nm2familyLst  = catMaybes $ (\p -> (p^.predName,) <$> (p^.predFamily)) <$> axioms
+        
+        family2nmsMap = foldr (\(fam,nm) m -> M.insert nm (case M.lookup nm m of
+                                  Nothing -> S.singleton fam
+                                  Just s -> S.insert fam s) m
+                                )  mempty nm2familyLst
+        
+        family2impliedsMap = M.fromList $ (\p -> (p^.predName, 
+                                                  mconcat 
+                                                  $ catMaybes 
+                                                  $ map (`M.lookup` family2nmsMap) 
+                                                  $ S.toList 
+                                                  $ S.union (getImpliedFamilies $ p^.predType) (fromMaybe mempty $ freeVariables <$> p^.predValue)
+                                                 )) <$> axioms
+        
+        getImplieds nm = fromMaybe mempty (M.lookup nm family2impliedsMap)
+        
+getImpliedFamilies s = S.intersection fs $ gif s
+  where fs = freeVariables s
+        gif (Spine "#imp_forall#" [ty,a]) = (case getFamilyM ty of
+          Nothing -> id
+          Just f | f == tipeName -> id
+          Just f -> S.insert f) $ gif ty `S.union` gif a 
+        gif (Spine a l) = mconcat $ gif <$> l
+        gif (Abs _ ty l) = S.union (gif ty) (gif l)

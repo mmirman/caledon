@@ -4,6 +4,9 @@
 {-# LANGUAGE ScopedTypeVariables              #-}
 module Src.HOU (unifyAll, newGraph, ConsGraph) where
 
+
+
+import Choice
 import Names
 import Src.AST
 import Src.Substitution
@@ -11,6 +14,7 @@ import Src.Context
 import Src.FormulaSequence (Ctxt)
 import Src.Variables
 import Src.LatticeUnify
+import Src.Tracing
 
 import Control.Monad.Trans (lift)
 
@@ -32,20 +36,6 @@ import qualified Data.Foldable as F
 import System.IO.Unsafe
 import Data.IORef
 
-{-# NOINLINE levelVar #-}
-levelVar :: IORef Int
-levelVar = unsafePerformIO $ newIORef 0
-
-{-# NOINLINE level #-}
-level = unsafePerformIO $ readIORef levelVar
-
-vtrace !i | i < level = trace
-vtrace _ = const id
-
-vtraceShow _ !i2 s v | i2 < level = trace $ s ++" : "++show v
-vtraceShow !i1 _ s _ | i1 < level = trace s
-vtraceShow _ _ _ _ = id
-
 throwTrace !i s = vtrace i s $ throwError s
 
 -------------------
@@ -55,7 +45,7 @@ throwTrace !i s = vtrace i s $ throwError s
 onlyIf b = if b then return () else nothing
 
 nothing :: Monad m => MaybeT m a
-nothing = fail ""
+nothing = fail " nothing "
 
 getPP :: Monad m => P -> MaybeT m (Variable, [Int])
 getPP p = case bpp p of
@@ -113,9 +103,6 @@ putGr (gr,recon) foo a b = case foo (con a) (con b) of
   _ -> error "can't put this type of constraint into the graph"
   
 
-viewTipe (Var (Con "type") :+: (Pat (Var (Con a)))) = Just a
-viewTipe _ = Nothing
-
 viewEquiv (a :=: b) = ((:=:), a, b)
 viewEquiv (a :<: b) = ((:<:), a, b)
 viewEquiv (a :<=: b) = ((:<=:), a, b)
@@ -140,6 +127,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
             return ( recon 
                    , reset ctxt $ Bind ty $ n1 =:= appN (putTy ctxt ty) (liftV 1 n2) (var 0)
                    )
+            
           (Pat a, Pat b) -> identity (=:=) a b <|> do
             (hAO,ppA) <- getPP a
             hA <- gvarTy hAO
@@ -151,7 +139,10 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
         partialPerm hA ppA = all (hA >) ppA && all (isForall ctxt) ppA && inj ppA        
         
         identity _ h1 h2 | h1 == h2 = return $ (recon, reset ctxt Done)
-        identity f (viewTipe -> Just a) (viewTipe -> Just b) = do
+        identity f (universeView -> Init a) (universeView -> Init b) = do
+          recon <- putGr recon f a b
+          return (recon, reset ctxt Done)
+        identity f (tipeView -> Init a) (tipeView -> Init b) = do
           recon <- putGr recon f a b
           return (recon, reset ctxt Done)
         identity (=:=) (viewForallP -> Just (a,b)) (viewForallP -> Just (a',b')) = do
@@ -322,8 +313,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                          subst ctxt (lB,tyB, Exi dist xNm' tyA) $ form
                        )
 
-search :: ( Functor m, Show a, Monad m, Environment a
-          , MonadState c m, ValueTracker c) => (a,Form) -> MaybeT m [[(a,Form)]]
+search :: ( Functor m, Show a, Monad m, Environment a) => (a,Form) -> MaybeT m [[(a,Form)]]
 search (ctxt,a :&: b) =  search (putLeft ctxt b,a)
                      <|> search (putRight a ctxt,b)
 search (ctxt, Bind ty f)    = search (putTy ctxt ty,f)
@@ -381,9 +371,7 @@ rebuildC a = (emptyCon $ fst $ getTypes $ fst a, uncurry rebuild a)
 
 -- modify all the time, since the only time we mention an existential 
 -- is if we are in the same branch, and we know existentials are unique.
-unifyOrSearch :: (Functor m, Show a, MonadState c m, MonadError String m, Environment a, ValueTracker c) =>
-                 UniContext -> (a,Form) -> MaybeT m [[(UniContext, (a,Form))]]
-unifyOrSearch recon (cunf, Done) | isDone cunf = nothing
+unifyOrSearch recon (cunf, Done) | isDone cunf = return [[(recon, (cunf,Done))]]
 unifyOrSearch recon cunf = sunify (Just cunf) <|> tryUnify cunf 
   where -- we perform the search in an ever expanding "outwards" pattern
         -- knowing that local unifications are most likely to effect local
@@ -392,6 +380,7 @@ unifyOrSearch recon cunf = sunify (Just cunf) <|> tryUnify cunf
         -- This could practically be made more efficient, but it is theoretically 
         -- efficient enough.  Importantly, this provides some notion of cache coherency
         -- during the search.
+        tryUnify (c,Done) | isDone c = return [[(recon, (c,Done))]]
         tryUnify cunf | isDone $ fst cunf = trySearch cunf
         tryUnify cunf =  sunify (viewLeft cunf)
                      <|> sunify (viewRight cunf)
@@ -402,7 +391,7 @@ unifyOrSearch recon cunf = sunify (Just cunf) <|> tryUnify cunf
         
         trySearch cunf = (((\a -> (recon,a)) <$>) <$>) <$> search cunf
 
-interpret :: (MonadState c m, Show a, Alternative m, ValueTracker c,MonadError String m,Environment a) =>
+interpret :: (Show a, Alternative m, MonadError String m,Environment a) =>
              Constants -> (UniContext, (a,Form)) -> m UniContext
 interpret _ (recon, (ctxt,Done)) | isDone ctxt = return recon
 interpret cons (recon, unf) = do
@@ -410,10 +399,14 @@ interpret cons (recon, unf) = do
   case m of
     Nothing  -> throwTrace 1 $ "constraints are not satisfiable: "++show unf
     Just lst -> next lst
-      where next []     = fail "there are no more things to try"
-            next (a:l)  = current <|> next l
+      where next []     = throwTrace 1 $ "There are no more things to try! "
+                          ++"\nCONS: "++show (uncurry rebuild unf)
+                          ++"\nLIST: "++show (concatMap (snd <$>) lst)
+            next ([]:l) = next l
+            next [a] = interpret cons =<< F.asum (return <$> a)
+            next (a:l)  = appendErr "" current <|> next l -- this will need to be tested extensively
               where current = interpret cons =<< F.asum (return <$> a)
 
-unifyAll :: (MonadState c f, Alternative f, ValueTracker c, MonadError String f) =>
-            ConsGraph -> Constants -> Form -> f (ConsGraph, Reconstruction)
+unifyAll :: (Alternative m, MonadError String m) =>
+            ConsGraph -> Constants -> Form -> m UniContext
 unifyAll cg cons unf = interpret cons ((cg, mempty), (emptyCon cons :: Ctxt, unf))

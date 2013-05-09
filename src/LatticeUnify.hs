@@ -6,6 +6,7 @@ import Data.Graph.Inductive.Graph
 import Data.Graph.Inductive.NodeMap
 import Data.Graph.Inductive.Query.DFS
 
+import Debug.Trace
 data ConsGraph = ConsGraph { posGraph :: Gr Name () 
                            , negGraph :: Gr Name ()
                            , nodeMap  :: NodeMap Name
@@ -24,12 +25,12 @@ insert gr s l = ins $ insertNode (insertNode gr s) l
                  then gr
                  else insEdge (fst s, fst l, ()) gr 
 
-insLTE (ConsGraph pos neg nm) s l = 
+insLTE (ConsGraph pos neg nm) s l =
   let (s',nm')  = mkNode nm s
       (l',nm'') = mkNode nm' l
   in if not $ connected neg s' l' 
      then return $ ConsGraph (insert pos s' l') neg nm''
-     else error $ s++" ≤ "++l
+     else error $ "CAN NOT ADD: "++s++" ≤ "++l
           
 insLT (ConsGraph pos neg nm) s l = 
   let (s',nm') = mkNode nm s

@@ -1,22 +1,21 @@
+
 module Src.Variables where
 
 import Data.Functor
-import Control.Monad.State.Class (MonadState(), get, modify)
 
-class ValueTracker c where
-  putValue :: Integer -> c -> c
-  takeValue :: c -> Integer
+import System.IO.Unsafe
+import Data.IORef
 
-instance ValueTracker Integer where
-  putValue _ i = i
-  takeValue i = i
+currVar = unsafePerformIO $ newIORef 0
 
-getNew :: (Functor m, MonadState c m, ValueTracker c) => m String
-getNew = do
-  st <- takeValue <$> get
-  let n = 1 + st
-  modify $ putValue n
-  return $ show n
+unsafeGetNewVar a = unsafePerformIO $ case a of
+  () -> atomicModifyIORef currVar $ \a -> (a + 1, (show a))
+
+getNew :: (Monad m) => m String
+getNew = return $ unsafeGetNewVar ()
   
-getNewWith :: (Functor f, MonadState c f, ValueTracker c) => String -> f String
+getNewWith :: (Functor f, Monad f) => String -> f String
 getNewWith s = (++s) <$> getNew
+
+
+
