@@ -51,7 +51,7 @@ getPP :: Monad m => P -> MaybeT m (Variable, [Int])
 getPP p = case bpp p of
   Just (h,pp) -> return (h, pp)
   Nothing -> nothing
-  where bpp (p :+: Pat (Var (DeBr v1))) = case bpp p of
+  where bpp (p :+: (etaReduce -> Pat (Var (DeBr v1)))) = case bpp p of
           Just (h, pp) -> Just (h, v1:pp)
           Nothing -> Nothing
         bpp (Var h) = Just (h, [])
@@ -64,7 +64,7 @@ viewPat p = (h, ml)
         vp (Var h) = (h,[])
         
 uvarTy recon _ Exi{} = nothing
-{-
+
 uvarTy recon ctxt (Con "#forall#") = do
   v1 <- getNewWith "@v1"
   v2 <- getNewWith "@v2"
@@ -72,7 +72,6 @@ uvarTy recon ctxt (Con "#forall#") = do
   recon <- putGr recon (:<=:) v1 v3
   recon <- putGr recon (:<=:) v2 v3
   return $ (forall (tipemake v1) $ (vvar 0 ~> tipemake v2) ~> tipemake v3, recon)
-  -}
 uvarTy recon ctxt hB = return $ (getTy ctxt hB, recon)
 
 
@@ -84,7 +83,7 @@ gvarTy _             = nothing
 isForall ctxt Exi{} = False
 isForall ctxt c = True
   
-  
+inj :: Ord a => [a] -> Bool  
 inj = inj mempty
   where inj _ [] = True
         inj m (a:l) = not (S.member a m) && inj (S.insert a m) l
@@ -95,7 +94,7 @@ substRecon :: (Term,Type, Int, Name, Type) -> UniContext -> UniContext
 substRecon (s,tyB,d, x, tyA) (gr,m) = (gr, M.insert x (d,s) $ fmap substy m)
   where substy (depth,t) | depth < d = (depth,t)
         substy (depth,t) = (depth, suber t)
-          where suber = substN False (emptyCon constants :: Ctxt) (liftV (depth - d) s, tyB, Exi d x tyA)
+          where suber = substN' (liftV (depth - d) s, Exi d x tyA)
 
 putGr (gr,recon) foo a b = case foo (con a) (con b) of
   (Pat (Var (Con a))) :=:  (Pat (Var (Con b))) -> do
@@ -121,6 +120,7 @@ viewEquiv _ = error "not an equivalence"
 unify :: (Functor m, Monad m
          , Show a, Environment a
          , MonadError String m
+         , MonadState Int m
          ) => UniContext -> (a,Form) -> MaybeT m (UniContext, (a,Form))
 unify recon (ctxt,a :&: b) = unify recon (putLeft ctxt b, a )
                           <|> unify recon (putRight a ctxt, b)
@@ -140,11 +140,13 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
             (hAO,ppA) <- getPP a
             hA <- gvarTy hAO
             let a' = (hA,ppA)
-            onlyIf $ partialPerm hAO $ DeBr <$> ppA                                
+            onlyIf $ partialPerm hAO ppA                                
             gvar_uvar a' b <|> gvar_gvar a' b <|> occurs a' b
           _ -> nothing
           
-        partialPerm hA ppA = all (hA >) ppA && all (isForall ctxt) ppA && inj ppA        
+        partialPerm hA ppA = case hA of
+          DeBr i -> all (i >) ppA && inj ppA
+          _ -> inj ppA
         
         identity _ h1 h2 | h1 == h2 = return $ (recon, reset ctxt Done)
         identity f (universeView -> Init a) (universeView -> Init b) = do
@@ -177,7 +179,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
           (hBO,ppB) <- getPP b
           hB <- gvarTy hBO 
           let b' = (hB,ppB)
-          onlyIf $ partialPerm hBO $ DeBr <$> ppB              
+          onlyIf $ partialPerm hBO ppB              
           gvar_gvar_same a b' <|> gvar_gvar_diff a b'
         
         rigidP x (var :+: p) = rigidP x var || rigid x p
@@ -263,9 +265,13 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
 
         gvar_uvar_inside recon (hA@(dist,_,_),ppA) (DeBr yVal,tyB',mB) = do
           let xVal = len - dist - 1
+              
+          onlyIf $ yVal < xVal 
           case elemIndex yVal ppA of
             Just hB -> gvar_fixed recon (xVal, hA, ppA) (DeBr hB, tyB', mB)
-            Nothing -> lift $ throwTrace 1 "GVAR-UVAR-DEPENDS"
+            Nothing -> lift $ throwTrace 1 $ "GVAR-UVAR-DEPENDS: "++show constraint
+                                           ++"\nYVAL: "++show yVal
+                                           ++"\nPPA:  "++show ppA
         gvar_uvar_inside _ _ _ = nothing
                   
         raise 0 v = v
@@ -274,7 +280,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
             Just (ctx'',form') -> let ty = getTy ctx (DeBr 0)
                                       newExi = (dist - 1, xNm++"@", forall ty tyA)
                                       newpat = Pat $ (liftV 1 $ Var $ uncurriedExi newExi) :+: var 0 
-                                  in  raise (i-1) ( substRecon (newpat, liftV 1 $ tyA, (dist - 1) , xNm, tyA) recon 
+                                  in  raise (i-1) ( substRecon (newpat, liftV 1 $ tyA, dist , xNm, tyA) recon 
                                                   , newExi
                                                   , ctx''
                                                   , liftV (-1) $ subst ctx (newpat,liftV 1 $ tyA, Exi dist xNm tyA) form'
@@ -321,7 +327,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                          subst ctxt (lB,tyB, Exi dist xNm' tyA) $ form
                        )
 
-search :: ( Functor m, Show a, Monad m, Environment a) => (a,Form) -> MaybeT m [[(a,Form)]]
+search :: ( Functor m, Show a, Monad m, Environment a, MonadState Int m) => (a,Form) -> MaybeT m [[(a,Form)]]
 search (ctxt,a :&: b) =  search (putLeft ctxt b,a)
                      <|> search (putRight a ctxt,b)
 search (ctxt, Bind ty f)    = search (putTy ctxt ty,f)
@@ -399,7 +405,7 @@ unifyOrSearch recon cunf = sunify (Just cunf) <|> tryUnify cunf
         
         trySearch cunf = (((\a -> (recon,a)) <$>) <$>) <$> search cunf
 
-interpret :: (Show a, Alternative m, MonadError String m,Environment a) =>
+interpret :: (Show a, Alternative m, MonadError String m,Environment a, MonadState Int m) =>
              Constants -> (UniContext, (a,Form)) -> m UniContext
 interpret _ (recon, (ctxt,Done)) | isDone ctxt = return recon
 interpret cons (recon, unf) = do
@@ -415,6 +421,6 @@ interpret cons (recon, unf) = do
             next (a:l)  = appendErr "" current <|> next l -- this will need to be tested extensively
               where current = interpret cons =<< F.asum (return <$> a)
 
-unifyAll :: (Alternative m, MonadError String m) =>
+unifyAll :: (Alternative m, MonadError String m, MonadState Int m) =>
             ConsGraph -> Constants -> Form -> m UniContext
 unifyAll cg cons unf = interpret cons ((cg, mempty), (emptyCon cons :: Ctxt, unf))

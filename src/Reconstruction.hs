@@ -1,11 +1,12 @@
 module Src.Reconstruction ( substReconstruct
                           , quantifyExistentials
                           ) where
-
+import Names
 import TopoSortAxioms
 import Src.AST
 import Src.Substitution
 import Src.Context
+import Data.Functor
 import Src.FormulaSequence (Ctxt)
 import qualified Data.Set as S
 import qualified Data.Map as M
@@ -13,11 +14,11 @@ import qualified Data.Map as M
 noType nm = error $ "no eta expansion necessary thus no type for "++nm
 
 substReconstruct :: Reconstruction -> N -> N
-substReconstruct recon t = foldr sub t $ filter (inFrees . fst) $ M.toList recon
+substReconstruct recon t = foldr sub t $ filter (\(nm,(d,_)) -> inFrees (d,nm)) $ M.toList recon
   where sub (nm,(i,val)) = 
-          substN False (emptyCon constants :: Ctxt) (val, noType nm, Exi i nm $ noType nm)
-        inFrees i = S.member i freeVars
-        freeVars = freeVarsN t
+          substN' (val, Exi i nm $ noType nm)
+        inFrees i = S.member (snd i) freeVars
+        freeVars = M.keysSet $ freeVarsN t
         
 
 raiseAll :: N -> N
@@ -39,14 +40,13 @@ raiseAll = ran []
                     
 quantifyExistentials :: N -> N
 quantifyExistentials n = case n' of
-  Pat p -> Pat $ foldr (\(i,(a,ty)) b -> imp_forall a ty $ sub i a ty b) p gens
+  Pat p -> Pat $ foldl (\b (a,ty) -> imp_forall (snd a) ty $ sub 0 a ty b) p genlst
   _ -> if null genlst 
               then n 
               else error $ "Can not quantify free existentials in a term: "++show n
   where n' = raiseAll n
+        genmap :: M.Map Name (Int,Type)
         genmap = freeVarsMapN n'
-        genlst = topoSort (\(nm,ty) -> (nm,freeVarsP ty)) $ M.toList $ genmap
+        genlst = topoSort (\(nm,ty) -> (snd nm,M.keysSet $ freeVarsP ty)) $ map (\(a,(b,c)) -> ((b,a),c)) $ M.toList $ genmap
         
-        gens = uncurry zip $ (\(a,b) -> (reverse a, b)) $ unzip $ (zip [0..] genlst)
-        
-        sub i a ty = substituteType (var i, ty, Exi i a ty)
+        sub i (depth,a) ty = substituteType (var i, ty, Exi depth a ty)

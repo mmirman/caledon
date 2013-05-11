@@ -7,6 +7,7 @@ import Data.Sequence as S
 import Data.Monoid
 import qualified Data.Foldable as F
 import qualified Data.List as L
+import Debug.Trace
 
 type Recon = [Either Form Form]
 
@@ -29,15 +30,17 @@ instance Context Ctxt where
                        }
   
   height = ctxtHeight  
-  
-  getTy c (Con n) = snd $ ctxtConstants c M.! n
+  getTy c (Con n) | isUniverse (Var $ Con n) = universe
+  getTy c (Con n) = snd $ case M.lookup n $ ctxtConstants c of
+    Just i -> i
+    Nothing -> error $ show n ++" not found in the context."
   getTy _ (Exi _ _ ty) = ty
   getTy c (DeBr i) = case i < height c of
     True  -> liftV i $ elemType $ index (ctxtContext c) i
     False -> error $ "WHAT? "++show i++"\nIN: "++show c
     
   getVal c (Con n) = case fst $ ctxtConstants c M.! n of
-    Macro a -> a
+    Macro a -> a -- we shouldn't need to lift because this is coming from constants
     _ -> Pat $ Var $ Con n
   getVal c v = Pat $ Var v
   
@@ -57,8 +60,6 @@ reset (a,f) = case upI 1 a f of
 instance Environment Ctxt where
   isDone (Ctxt{ctxtHeight = 0, ctxtRecon = []}) = True
   isDone _ = False
-  
-  nextUp (Ctxt cons 0 recon ctxt,f) = (Ctxt cons 0 [] ctxt, rebuildFromRecon recon f)
   
   nextUp (Ctxt cons 0 recon ctxt,f) = (Ctxt cons 0 [] ctxt, rebuildFromRecon recon f)
   nextUp (Ctxt cons h ro ctxt,b) = case viewl ctxt of

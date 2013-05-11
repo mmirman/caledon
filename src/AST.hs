@@ -11,21 +11,21 @@ import Data.Monoid
 data Variable = DeBr Int 
               | Con Name 
               | Exi Int Name Type -- distance from the top, and type!
-              deriving (Eq,Ord)
+              deriving Eq
 
 uncurriedExi ~(a,b,c) = Exi a b c
 
 data P = P :+: N
        | Var Variable
-       deriving (Eq, Ord)
+       deriving Eq
                 
 data N = Abs Type N 
        | Pat P 
-       deriving (Eq, Ord)
+       deriving Eq
     
 instance Show Variable where
   show (DeBr i) = show i
-  show (Exi i n ty) = n++"<"++show i++">"
+  show (Exi i n _) = n++"<"++show i++">"
   show (Con n) = n
 
 instance Show P where
@@ -43,25 +43,28 @@ instance Show N where
 type Term = N
 type Type = P
 
+toTerm :: Type -> Term
+toTerm p = Pat p
+
 viewForallN (Pat p) = viewForallP p
 viewForallN _ = Nothing
 
 viewForallP (Var (Con "#forall#") :+: _ :+: Abs ty (Pat n) ) = Just (ty,n)
-viewForallP cons@(Var (Con "#forall#") :+: _ :+: Abs{} ) = error $ "not a type: "++show cons
+viewForallP cons@(Var (Con "#forall#") :+: _ :+: Abs{} ) = error $ "\nNot a forall type: "++show cons
 viewForallP _ = Nothing
 
 viewImpForallN (Pat p) = viewImpForallP p
 viewImpForallN _ = Nothing
 
-viewImpForallP (Var (Con "#imp_forall#") :+: _ :+: (Pat (Var (Con nm))) :+: Abs ty (Pat n) ) = Just (nm,ty,n)
-viewImpForallP cons@(Var (Con "#imp_forall#") :+: _ :+: _ :+: Abs{} ) = error $ "not a type: "++show cons
+viewImpForallP (Var (Con "#imp_forall#") :+: _ :+: (view_imp_name -> Just nm) :+: Abs ty (Pat n) ) = Just (nm,ty,n)
+viewImpForallP cons@(Var (Con "#imp_forall#") :+: _ :+: _ :+: Abs{} ) = error $ "\nnot an imp_forall: "++show cons
 viewImpForallP _ = Nothing
 
 viewImpAbsN (Pat p) = viewImpAbsP p
 viewImpAbsN _ = Nothing
 
-viewImpAbsP (Var (Con "#imp_abs#") :+: _ :+: (Pat (Var (Con nm))) :+: Abs ty (Pat n) ) = Just (nm,ty,n)
-viewImpAbsP cons@(Var (Con "#imp_abs#") :+: _ :+: _ :+: Abs{} ) = error $ "not a type: "++show cons
+viewImpAbsP (Var (Con "#imp_abs#") :+: _ :+: (view_imp_name -> Just nm) :+: Abs ty (Pat n) ) = Just (nm,ty,n)
+viewImpAbsP cons@(Var (Con "#imp_abs#") :+: _ :+: _ :+: Abs{} ) = error $ "\nnot an imp_abs: "++show cons
 viewImpAbsP _ = Nothing
 
 data Fam = Poly 
@@ -82,44 +85,52 @@ viewP (viewForallP -> Just ~(ty,n)) = (ty:l,h)
 viewP p = ([],p)
 
 fromType (Pat p) = p
-fromType a = error $ "not a type: "++show a
+fromType a = error $ "\nNot a type: "++show a
 
 viewHead (p :+: _) = viewHead p
 viewHead (Var v) = v
 
 vvar = Var . DeBr
-var = Pat . vvar
+var = toTerm . vvar
 
 evvar :: Int -> Name -> Type -> P
 evvar i n t = Var $ Exi i n t
 
 evar :: Int -> Name -> Type -> N
-evar i n t = Pat $ Var $ Exi i n t
+evar i n t = toTerm $ Var $ Exi i n t
 
 vcon = Var . Con
-con = Pat . vcon
+con = toTerm . vcon
 
-forall ty n = vcon "#forall#" :+: Pat ty :+: Abs ty (Pat n)
+forall ty n = vcon "#forall#" :+: toTerm ty :+: Abs ty (toTerm n)
 
-imp_abs nm ty n = vcon "#imp_abs#" :+: Pat ty :+: imp_name (Var $ Con nm) :+: Abs ty (Pat n)
+inameName = "#name#"
+iname = vcon inameName
+imp_name nm = toTerm $ iname :+: (toTerm nm) -- implement it like a string!
 
-imp_forall nm ty n = vcon "#imp_forall#" :+: Pat ty :+: imp_name (Var $ Con nm) :+: Abs ty (Pat n)
+viewIname = (iname ==)
+
+view_imp_name (Pat ((viewIname -> True) :+: (Pat (Var (Con nm))))) = Just nm
+view_imp_name _ = Nothing
+
+
+imp_abs nm ty n = vcon "#imp_abs#" :+: toTerm ty :+: imp_name (Var $ Con nm) :+: Abs ty (toTerm n)
+imp_forall nm ty n = vcon "#imp_forall#" :+: toTerm ty :+: imp_name (Var $ Con nm) :+: Abs ty (toTerm n)
 
 a ~> b = forall a b
 
 tipeName = "type"
 tipe = vcon tipeName
 
-inameName = "#name#"
-iname = vcon inameName
-imp_name nm = Pat $ (Var $ Con "#imp_name#") :+: (Pat nm) -- implement it like a string!
+
 
 tipemake v = vcon "type" :+: (con $ "#%#"++v)
 
 data TipeView = Init Name
               | Uninit
               | NotTipe
-
+              deriving (Show, Eq, Read)
+                         
 tipeView (Var (Con "type") :+: (Pat (Var (Con ('#':'%':'#':v))))) = Init v
 tipeView (Var (Con "type")) = Uninit
 tipeView _ = NotTipe
@@ -130,19 +141,27 @@ tipeViewN _ = NotTipe
 universeView (Var (Con ('#':'%':'#':v))) = Init v
 universeView _ = NotTipe
 
+isUniverse v = universeView v /= NotTipe
+
 data Constant = Axiom Bool Int
               | Macro Term
               deriving (Show, Eq)
 
 type Constants = M.Map Name (Constant,Type)
 
-constant a = (Axiom False $ -1000,a)
+universeName = "#universe#"
+universe = vcon universeName
 
+tipeu = tipe :+: Pat universe
+
+
+constant a = (Axiom False $ -1000,a)
 constants :: Constants
-constants = M.fromList [ (tipeName, constant tipe)
-                       , ("#forall#", constant $ forall tipe $ (vvar 0 ~> tipe) ~> tipe)
-                       , ("#name#", constant tipe)
-                       , ("#imp_forall#", constant $ forall tipe $ forall iname $ (forall (vvar 1) tipe) ~> tipe)
+constants = M.fromList [ (tipeName, constant $ universe ~> (tipe :+: var 0) )
+                       , (universeName, constant $ universe)
+                       , ("#forall#", constant $ forall tipeu $ (vvar 0 ~> tipeu) ~> tipeu)
+                       , ("#name#", constant tipeu)
+                       , ("#imp_forall#", constant $ forall tipeu $ forall iname $ (forall (vvar 1) tipeu) ~> tipeu)
                        ]
             
 ---------------
@@ -203,7 +222,7 @@ instance TERM P where
   addAt i (p :+: n) = addAt i p :+: addAt i n
 instance TERM N where  
   addAt v@(amount,thresh) (Abs ty n) = Abs (addAt v ty) $ addAt (amount, thresh+1) n
-  addAt i (Pat p) = Pat $ addAt i p
+  addAt i (Pat p) = toTerm $ addAt i p
 
 instance TERM Form where
   addAt v@(amount,thresh) (Bind ty n) = bind (addAt v ty) $ addAt (amount, thresh+1) n

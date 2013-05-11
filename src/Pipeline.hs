@@ -54,15 +54,21 @@ inferAxiom verb (!name,st,!tmOrg,!tyOrg) (!graph , !constants) = do
   (graph , !recon)       <- unifyAll graph constants constraints
   !ty <- return $! A.fromType $!
          quantifyExistentials $! substReconstruct recon ty
-         
+  impurePutStrLn verb $ "TmOld: " ++show tm         
   (!tm   ,  constraints) <- typeConstraints constants tm ty
+  impurePutStrLn verb $ "TmNew: " ++show tm
   impurePutStrLn verb $ "Constraints2: " ++show constraints
+
   (graph , !recon)       <- unifyAll graph constants constraints
   
-
+  tm <- return $! substReconstruct recon tm
+  
+  impurePutStrLn verb $ "TmNewReconstructed: " ++show tm
   
   !tm <- return $! 
-         quantifyExistentials $! substReconstruct recon tm
+         quantifyExistentials $! tm
+  impurePutStrLn verb $ "TmNewEr: " ++show tm
+  
   !constants <- return $! 
                 M.insert name (case st of 
                                   Just (sequential,i) -> (A.Axiom sequential i,A.fromType tm)
@@ -76,12 +82,10 @@ inferAxiom verb (!name,st,!tmOrg,!tyOrg) (!graph , !constants) = do
 
 pipeline verbose nttLst = do
   let bundle (FlatPred (PredData _ seqi i _) nm tm ty ki) = case tm of
-        Just tm -> (nm,Just (seqi,fromIntegral i),tm,ty)
-        Nothing -> (nm,Nothing,ty,ki)
+        Just tm -> (nm,Nothing,tm,ty)
+        Nothing -> (nm,Just (seqi,fromIntegral i),ty,ki)
         
       axioms = map bundle $ reverse $ topoSortAxioms True nttLst
-  s <- getNew
-  s <- getNew
   
   (graph,!constants) <- foldrM (inferAxiom verbose) (newGraph, A.constants) axioms
   
@@ -91,7 +95,7 @@ pipeline verbose nttLst = do
 typeCheckAll :: Bool -> [Decl] -> Choice [Decl]
 typeCheckAll verbose preds = do
   
-  constants <- pipeline verbose $ toAxioms True preds
+  (constants,_) <- runStateT (pipeline verbose $ toAxioms True preds) (0 :: Int)
   
   let constList = M.toList constants
       valMap = M.fromList 

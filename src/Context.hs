@@ -11,7 +11,14 @@ class Context a where
   
   getTypes :: a -> (Constants, [Type])
 
+emptyErr = error "\nContext () not for actual use" 
 instance Context () where  
+  getTy = emptyErr
+  getVal = emptyErr
+  height = emptyErr
+  emptyCon = emptyErr
+  getTypes = emptyErr
+  putTy = emptyErr
   
 class Context a => Environment a where
   putLeft :: a -> Form  -> a

@@ -1,3 +1,5 @@
+{-# LANGUAGE ViewPatterns #-}
+
 module Src.Translate ( consToForm
                      , toSpine
                      , fromSpine
@@ -11,8 +13,7 @@ import qualified Src.Context as B
 import qualified Data.Map as M
 import Data.Functor
 import Data.Monoid
-import System.IO.Unsafe
-  
+
 ------------------------------
 --- conversion to debruijn ---
 ------------------------------
@@ -51,7 +52,7 @@ s2n stk s = case s of
               Just (i,ty) -> B.Exi i n ty
               Nothing -> case isGen n of 
                 True -> B.Exi 0 n $ B.Var $ B.Exi 0 ('#':'@':n) B.tipe
-                False -> B.Con n
+                False -> B.Con n 
             Just i  -> B.DeBr i
   A.Abs n ty s -> B.Abs (B.fromType $ s2n stk ty) $ s2n (putName stk n) s
 
@@ -84,15 +85,19 @@ nToSpine = n2s newUnstack
 
 n2s :: UnStack -> B.N -> A.Spine
 n2s stk@(UnStack i lst) n = case n of
+  (B.viewImpForallN -> Just (nm,ty,v)) -> A.imp_forall nm (n2s stk $ B.Pat ty) $ n2s (UnStack (i+1) $ nm:lst) $ B.Pat v
+  (B.viewImpAbsN -> Just (nm,ty,v)) -> A.imp_forall nm (n2s stk $ B.Pat ty) $ n2s (UnStack (i+1) $ nm:lst) $ B.Pat v
   B.Abs ty n -> A.Abs next (n2s stk $ B.Pat ty) $ n2s (UnStack (i+1) $ next:lst) n
     where next = '@':show i
   B.Pat p -> A.Spine nm $ reverse l
     where ~(nm,l) = p2s stk p
   
 p2s :: UnStack -> B.P -> (Name,[A.Spine])
-p2s stk@(UnStack i lst) p = case p of
+p2s stk@(UnStack len lst) p = case p of
   B.Var v -> case v of
-    B.DeBr i -> (lst !! i,[])
+    B.DeBr i -> (case i < len of 
+                    True -> lst !! i
+                    False -> error $ show lst ++ " \n "++show p,[])
     B.Exi i n ty -> (n,[])
     B.Con n -> (n,[])
   p B.:+: n -> (nm,n2s stk n:l)
