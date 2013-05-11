@@ -50,13 +50,13 @@ inferAxiom verb (!name,st,!tmOrg,!tyOrg) (!graph , !constants) = do
   v <- getNewWith "@tipe"
   
   (!ty   ,  constraints) <- typeConstraints constants (A.Pat ty) (A.tipemake v)
-  impurePutStrLn verb $ "Constraints: " ++show constraints
+  impurePutStrLn verb $ "Constraints1: " ++show constraints
   (graph , !recon)       <- unifyAll graph constants constraints
   !ty <- return $! A.fromType $!
          quantifyExistentials $! substReconstruct recon ty
          
   (!tm   ,  constraints) <- typeConstraints constants tm ty
-
+  impurePutStrLn verb $ "Constraints2: " ++show constraints
   (graph , !recon)       <- unifyAll graph constants constraints
   
 

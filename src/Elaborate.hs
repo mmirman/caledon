@@ -107,7 +107,7 @@ genConstraintP p = case p of
         v <- genConstraintN v x
         ctxt <- ask
         return (appN ctxt f v, tybody :+: v)
-  Var (Con a) | a == "#hole#" -> do
+  Var (Con "#hole#") -> do
     v <- getNewWith   "@tmakeF"
     ty <- getNewExists "@xty" $ tipemake v
     e  <- getNewExists "@xin" ty

@@ -63,7 +63,9 @@ hered _ ctxt (Left p1, l) nv =
   )
 
 substTy c s t = case substP False c s t of
-  ~(~(Left a),_) -> a -- might want to make this lazier
+  ((Left a),_) -> a -- might want to make this lazier
+  ((Right (Pat a)),_) -> a -- might want to make this lazier
+  ((Right (Abs{})),_) -> error "not a type"
 
 substituteType :: (Term, Type, Variable) -> P -> P
 substituteType = substTy ()
@@ -78,9 +80,9 @@ substF ctxt sub (a :@: b) = substN True ctxt sub a :@: substTy ctxt sub b
 substF ctxt sub (a :&: b) = substF ctxt sub a :&: substF ctxt sub b
 substF ctxt sub (Bind ty f) = Bind (substTy ctxt sub ty) $ substF (putTy ctxt ty) (liftThree 1 sub) f
 
-subst c s f = case spoon (substF c s f) of
+subst c s f = substF c s f {- case spoon (substF c s f) of
   Nothing -> error $ "SUBST: ["++show s++" ] " ++ show f ++ "\nCTXT: "++show c
-  Just a  -> a
+  Just a  -> a -}
 
 app  :: Context c => c -> Either P N -> N -> Either P N
 app ctxt (Right (Abs a1 n)) nv = Right $ liftV (-1) $ substN True (putTy ctxt a1) (liftV 1 nv,liftV 1 a1,DeBr 0) n

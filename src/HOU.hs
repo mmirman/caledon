@@ -63,9 +63,17 @@ viewPat p = (h, ml)
           where ~(h,ml) = vp p
         vp (Var h) = (h,[])
         
-uvarTy :: (Monad m, Context a) => a -> Variable -> MaybeT m Type
-uvarTy _ Exi{} = nothing
-uvarTy ctxt hB = return $ getTy ctxt hB
+uvarTy recon _ Exi{} = nothing
+{-
+uvarTy recon ctxt (Con "#forall#") = do
+  v1 <- getNewWith "@v1"
+  v2 <- getNewWith "@v2"
+  v3 <- getNewWith "@v3"
+  recon <- putGr recon (:<=:) v1 v3
+  recon <- putGr recon (:<=:) v2 v3
+  return $ (forall (tipemake v1) $ (vvar 0 ~> tipemake v2) ~> tipemake v3, recon)
+  -}
+uvarTy recon ctxt hB = return $ (getTy ctxt hB, recon)
 
 
 
@@ -73,9 +81,9 @@ gvarTy :: Monad m => Variable -> MaybeT m (Int,Name, Type)
 gvarTy (Exi i nm ty) = return $ (i,nm, ty)
 gvarTy _             = nothing
 
-isForall ctxt c = case runIdentity $ runMaybeT $ uvarTy ctxt c of
-  Just _  -> True
-  _ -> False
+isForall ctxt Exi{} = False
+isForall ctxt c = True
+  
   
 inj = inj mempty
   where inj _ [] = True
@@ -148,8 +156,8 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
         identity (=:=) (viewForallP -> Just (a,b)) (viewForallP -> Just (a',b')) = do
           return $ (recon, reset ctxt $ Pat a :=: Pat a' :&: Pat b =:= Pat b') -- implements the "switching" for atoms
         identity f (viewPat -> ~(hAO,ppA)) (viewPat -> ~(hBO, ppB)) = do
-          hA <- uvarTy ctxt hAO
-          hB <- uvarTy ctxt hBO
+          (hA,recon) <- uvarTy recon ctxt hAO
+          (hB,recon) <- uvarTy recon ctxt hBO
           onlyIf $ hA == hB
           if length ppA /= length ppB 
             then error $ "universal quantifiers have different numbers of arguments: "++show constraint 
@@ -161,9 +169,9 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                    )
         
         gvar_uvar a (viewPat -> ~(hB,mB)) = do
-          tyB <- uvarTy ctxt hB
+          (tyB,recon) <- uvarTy recon ctxt hB
           let b' = (hB, tyB, mB)
-          gvar_uvar_outside a b' <|> gvar_uvar_inside a b'
+          gvar_uvar_outside recon a b' <|> gvar_uvar_inside recon a b'
 
         gvar_gvar a b = do
           (hBO,ppB) <- getPP b
@@ -211,7 +219,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                        , reset ctxt $ subst ctxt (l,tyB_top, Exi dist xNm tyB_top) $ form 
                        )
 
-        gvar_fixed (xVal, (dist,xNm,tyA'),_) (hB,tyB',_) = do
+        gvar_fixed recon (xVal, (dist,xNm,tyA'),_) (hB,tyB',_) = do
               
           let tyA = liftV (1 - xVal) tyA'
               tyB = liftV (1 - xVal) tyB'
@@ -244,21 +252,21 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                        , reset ctxt $ subst ctxt (l,tyB, Exi dist xNm tyA) $ form
                        )
 
-        gvar_uvar_outside (hA@(dist,_,_),ppA) (hB,tyB',mB) = do
+        gvar_uvar_outside recon (hA@(dist,_,_),ppA) (hB,tyB',mB) = do
           let xVal = len - dist - 1
           
           onlyIf $ case hB of
             Con _ -> True
             DeBr yVal -> yVal > xVal
             _ -> False
-          gvar_fixed (xVal, hA, ppA) (liftV (length ppA - xVal) hB, tyB', mB)         
+          gvar_fixed recon (xVal, hA, ppA) (liftV (length ppA - xVal) hB, tyB', mB)         
 
-        gvar_uvar_inside (hA@(dist,_,_),ppA) (DeBr yVal,tyB',mB) = do
+        gvar_uvar_inside recon (hA@(dist,_,_),ppA) (DeBr yVal,tyB',mB) = do
           let xVal = len - dist - 1
           case elemIndex yVal ppA of
-            Just hB -> gvar_fixed (xVal, hA, ppA) (DeBr hB, tyB', mB)
+            Just hB -> gvar_fixed recon (xVal, hA, ppA) (DeBr hB, tyB', mB)
             Nothing -> lift $ throwTrace 1 "GVAR-UVAR-DEPENDS"
-        gvar_uvar_inside _ _ = nothing
+        gvar_uvar_inside _ _ _ = nothing
                   
         raise 0 v = v
         raise i (recon, (dist,xNm,tyA), ctx, form) = 
