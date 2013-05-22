@@ -2,7 +2,7 @@ module Src.Context where
 
 import Src.AST
 
-class Context a where
+class Show a => Context a where
   getTy :: a -> Variable -> Type
   getVal:: a -> Variable -> Term
   putTy :: a -> Type -> a
@@ -20,7 +20,7 @@ instance Context () where
   getTypes = emptyErr
   putTy = emptyErr
   
-class Context a => Environment a where
+class (Show a, Context a) => Environment a where
   putLeft :: a -> Form  -> a
   putRight :: Form -> a -> a
   

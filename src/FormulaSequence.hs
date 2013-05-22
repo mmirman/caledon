@@ -20,7 +20,13 @@ data Ctxt = Ctxt { ctxtConstants :: !Constants
                  , ctxtHeight    :: !Int
                  , ctxtRecon     :: Recon
                  , ctxtContext   :: Seq Elem
-                 } deriving (Show)
+                 }
+
+instance Show Ctxt where
+  show (Ctxt _ h r c) = "\nCtxt { ctxtHeight = "++show h
+                      ++"\n     , ctxtRecon  = "++show r
+                      ++"\n     , ctxtContext = "++show c
+                      ++"\n     }"
 
 instance Context Ctxt where
   emptyCon cons = Ctxt { ctxtConstants = cons
@@ -37,7 +43,7 @@ instance Context Ctxt where
   getTy _ (Exi _ _ ty) = ty
   getTy c (DeBr i) = case i < height c of
     True  -> liftV i $ elemType $ index (ctxtContext c) i
-    False -> error $ "WHAT? "++show i++"\nIN: "++show c
+    False -> error $ "WHAT (in formulasequence)? "++show i++"\nIN: "++show c
     
   getVal c (Con n) = case fst $ ctxtConstants c M.! n of
     Macro a -> a -- we shouldn't need to lift because this is coming from constants
@@ -98,7 +104,7 @@ instance Environment Ctxt where
   rebuild (Ctxt{ ctxtRecon = re, ctxtContext = seqe }) b = rebuildFromRecon re $ F.foldl reb b seqe
     where reb f (B ty re) = bind ty $ rebuildFromRecon re f
 
-  upI i (Ctxt _ h _ _) _ | i > h = error "context is not large enough"
+  upI i (Ctxt _ h _ _) _ | i > h = Nothing -- error "context is not large enough"
   upI i (Ctxt cons h ro ctxt) b = case S.splitAt i ctxt of
     (lower, upper) -> case viewl upper of
       EmptyL -> if b == Done && reb == Done then Nothing else Just (emptyCon cons, reb)

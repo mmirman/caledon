@@ -25,13 +25,14 @@ data N = Abs Type N
     
 instance Show Variable where
   show (DeBr i) = show i
-  show (Exi i n _) = n++"<"++show i++">"
+  show (Exi i n ty) = "("++n++"<"++show i++">:"++show ty++")"
   show (Con n) = n
 
 instance Show P where
   show (viewForallP -> Just (ty,p)) = "[ "++show ty ++" ]  "++ show p
   show (viewImpForallP -> Just (nm,ty,p)) = "{ "++nm++" : "++show ty ++" }  "++ show p
   show (viewImpAbsP -> Just(nm,ty,a)) = "?λ"++nm++" : "++show ty ++" . ("++ show a++")"
+  show (tipeView -> Init _) = "type"
   show (a :+: b) = show a ++" ( "++ show b++" ) "
   show (Var a) = show a
 instance Show N where
@@ -49,9 +50,13 @@ toTerm p = Pat p
 viewForallN (Pat p) = viewForallP p
 viewForallN _ = Nothing
 
-viewForallP (Var (Con "#forall#") :+: _ :+: Abs ty (Pat n) ) = Just (ty,n)
-viewForallP cons@(Var (Con "#forall#") :+: _ :+: Abs{} ) = error $ "\nNot a forall type: "++show cons
+viewForallP (Var (Con "#forall#") :+: Pat ty :+: Abs ty' (Pat n) ) | ty == ty' = Just (ty,n)
+viewForallP (Var (Con "#forall#") :+: a :+: b@Abs{} ) = error $ "\nNot a forall type: ["++show a ++ " ] "++show b
 viewForallP _ = Nothing
+
+viewForallPsimp (Var (Con "#forall#") :+: ty :+: b ) = Just (ty,b)
+viewForallPsimp _ = Nothing
+
 
 viewImpForallN (Pat p) = viewImpForallP p
 viewImpForallN _ = Nothing
@@ -117,6 +122,7 @@ view_imp_name _ = Nothing
 imp_abs nm ty n = vcon "#imp_abs#" :+: toTerm ty :+: imp_name (Var $ Con nm) :+: Abs ty (toTerm n)
 imp_forall nm ty n = vcon "#imp_forall#" :+: toTerm ty :+: imp_name (Var $ Con nm) :+: Abs ty (toTerm n)
 
+infixr 2 ~>
 a ~> b = forall a b
 
 tipeName = "type"
@@ -154,14 +160,18 @@ universe = vcon universeName
 
 tipeu = tipe :+: Pat universe
 
+tiperName = "#tiper#"
+tiper = vcon tiperName
+  
 
 constant a = (Axiom False $ -1000,a)
 constants :: Constants
-constants = M.fromList [ (tipeName, constant $ universe ~> (tipe :+: var 0) )
-                       , (universeName, constant $ universe)
+constants = M.fromList [ (tipeName, constant $ universe ~> tiper )
+                       , (universeName, constant $ tiper)
+                       , (tiperName, constant $ tiper)
                        , ("#forall#", constant $ forall tipeu $ (vvar 0 ~> tipeu) ~> tipeu)
                        , ("#name#", constant tipeu)
-                       , ("#imp_forall#", constant $ forall tipeu $ forall iname $ (forall (vvar 1) tipeu) ~> tipeu)
+                       , ("#imp_forall#", constant $ forall tipe $ forall iname $ (forall (vvar 1) tipe) ~> tipe)
                        ]
             
 ---------------
@@ -193,16 +203,22 @@ instance Monoid Form where
   
   
 instance Show Form where
-  show (t1 :=: t2) = show t1 ++ " ≐ "++ show t2
-  show (t1 :<: t2) = show t1 ++ " < "++ show t2
-  show (t1 :<=: t2) = show t1 ++ " ≤ "++ show t2
-  show (t1 :&: t2) = " ( "++show t1 ++ " ) ∧ ( "++ show t2++" )"
-  show (t1 :@: t2) = " ( "++show t1 ++ " ) ∈ ( "++ show t2++" )"
-  show (Bind t1 t2) = " ∀: "++ show t1 ++ " . "++show t2
+  show (t1 :=: t2) = show t1 ++ " ≐ "++ show t2 
+  show (t1 :<: t2) = show t1 ++ " < "++ show t2 
+  show (t1 :<=: t2) =show t1 ++ " ≤ "++ show t2
+  show (t1 :&: t2) = show t1 ++ " ∧ "++ show t2
+  show (t1 :@: t2) = show t1 ++ " ∈  "++ show t2
+  show (Bind t1 t2) = "∀: "++ show t1 ++ " .( "++show t2 ++ " )"
   show Done = " ⊤ "
 
 instance NFData Form where
   rnf a = rnf $ show a
+  
+instance NFData N where
+  rnf a = rnf $ show a
+  
+instance NFData P where
+  rnf a = rnf $ show a  
 
 
 
@@ -239,3 +255,10 @@ liftV v = addAt (v,-1)
 type Reconstruction = M.Map Name ( Int {- depth -} 
                                  , Term {- reconstruction -}
                                  ) 
+                      
+        
+viewEquiv (a :=: b) = ((:=:), a, b)
+viewEquiv (a :<: b) = ((:<:), a, b)
+viewEquiv (a :<=: b) = ((:<=:), a, b)
+viewEquiv _ = error "not an equivalence"
+        

@@ -94,6 +94,8 @@ processFile options = do
   checkAndRun (not $ options ^. optIO_Only) $ reduceDecsByName decs
           
 main = do
+  writeIORef levelVar 0
+  
   (options, files) <- compilerOpts =<< getArgs
   
   processFile $ options & case files of

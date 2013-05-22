@@ -6,6 +6,7 @@ module Src.Translate ( consToForm
                      ) where
 
 import Names
+import Src.Variables
 import qualified AST as A
 import qualified Src.AST as B
 import qualified Src.Reconstruction as B
@@ -13,6 +14,8 @@ import qualified Src.Context as B
 import qualified Data.Map as M
 import Data.Functor
 import Data.Monoid
+import qualified Data.Traversable as T
+import Control.Monad.State.Strict (forM_,modify, get,put, State, runState)
 
 ------------------------------
 --- conversion to debruijn ---
@@ -51,7 +54,10 @@ s2n stk s = case s of
             Nothing -> case getExists stk n of
               Just (i,ty) -> B.Exi i n ty
               Nothing -> case isGen n of 
-                True -> B.Exi 0 n $ B.Var $ B.Exi 0 ('#':'@':n) B.tipe
+                True -> B.Exi 0 n $ B.Var $ B.Exi 0 ('#':'@':n) B.tipe 
+                        -- these shouldn't be generalized like this, as this permits them to sway.  
+                        -- they need to be universally quantified.  
+                        -- at the very least, we can count the number that remain in the result/ make a map to ensure the sameness. 
                 False -> B.Con n 
             Just i  -> B.DeBr i
   A.Abs n ty s -> B.Abs (B.fromType $ s2n stk ty) $ s2n (putName stk n) s
@@ -89,6 +95,7 @@ n2s stk@(UnStack i lst) n = case n of
   (B.viewImpAbsN -> Just (nm,ty,v)) -> A.imp_forall nm (n2s stk $ B.Pat ty) $ n2s (UnStack (i+1) $ nm:lst) $ B.Pat v
   B.Abs ty n -> A.Abs next (n2s stk $ B.Pat ty) $ n2s (UnStack (i+1) $ next:lst) n
     where next = '@':show i
+  B.Pat (B.tipeView -> B.Init _) -> A.Spine "type" []
   B.Pat p -> A.Spine nm $ reverse l
     where ~(nm,l) = p2s stk p
   
@@ -110,7 +117,7 @@ p2s stk@(UnStack len lst) p = case p of
 consToForm :: (A.Spine,A.Constraint) -> (B.Term,B.Form)
 consToForm (a,b)= (s2n newStack a, cons2form newStack b) 
 
-fromSpine = s2n newStack
+fromSpine = s2n newStack 
 
 toSpine :: B.Term -> A.Spine
 toSpine = nToSpine

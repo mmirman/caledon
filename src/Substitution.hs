@@ -1,8 +1,13 @@
-{-# LANGUAGE ViewPatterns              #-}
+{-# LANGUAGE 
+ ViewPatterns,
+ BangPatterns
+ #-}
 module Src.Substitution where
 
+import Src.Tracing
 import Src.AST
 import Src.Context
+import Data.Functor
 
 import qualified Data.Set as S  
 import qualified Data.Map as M
@@ -37,9 +42,7 @@ substP _ _ (n, a, x') (Var x) | x == x' = (Right n, a)
 substP _ ctxt na (Var (Exi i nm ty)) = (Left $ Var $ Exi i nm ty', ty')
   where ty' = substTy ctxt na ty
 substP _ ctxt _ (y@(Var v)) = (Left y, getTy ctxt v)
-substP t ctxt na (p :+: n) = 
-  -- only eta expand heads and not arguments!
-  hered t ctxt (substP t ctxt na p) (substNnoEta False ctxt na n)
+substP t ctxt na (p :+: n) = hered t ctxt (substP t ctxt na p) (substNnoEta t ctxt na n)
 
 hered :: Context c => Bool -> c -> (Either P N, Type) -> N -> (Either P N, Type)
 hered t ctxt (Right p1@(Abs a1 n), l) nv = 
@@ -57,7 +60,11 @@ hered _ ctxt (Left p1, l) nv =
     Just ~(a1',a2) -> liftV (-1) $ substTy (putTy ctxt a1') (liftV 1 nv, liftV 1 a1',DeBr 0) a2
     Nothing -> case (p1, nv) of
       (Var (Con "type"), Pat n) | isUniverse n -> p1 :+: nv
-      _ -> error $ show p1++" l: "++show l++"\n :+: "++show nv   
+      _ -> error $ show p1++" l: "
+           ++show l
+           ++"\n :+: "++show nv 
+           ++"\n CTXT: "++show ctxt
+           ++ "\nFROM SUBSTITUTION "
   )
   
 
@@ -139,7 +146,7 @@ etaReduce (Abs ty n) = case etaReduce n of
   Pat (a :+: b) -> case etaReduce b of
     b'@(Pat (Var (DeBr 0))) -> if containsP 0 a 
                                then Abs ty $ Pat $ a :+: b'
-                               else Pat $ liftV 1 a
+                               else Pat $ liftV (-1) a
     b' -> Abs ty $ Pat $ a :+: b'
   n -> Abs ty n
 etaReduce p = p
@@ -179,3 +186,71 @@ substP' na (p :+: n) = hered' (substP' na p) (substN' na n)
 hered' :: N -> N -> N
 hered' p1@(Abs a1 n) nv = liftV (-1) $ substN'  (liftV 1 nv,DeBr 0) n
 hered' (Pat p1) nv = Pat $ p1 :+: nv
+
+
+substF' :: (Term,Variable) -> Form -> Form  
+substF' _ Done = Done
+substF' sub (a :=: b) = substN' sub a :=: substN' sub b
+substF' sub (a :<: b) = substN' sub a :<: substN' sub b
+substF' sub (a :<=: b) = substN' sub a :<=: substN' sub b
+
+substF' sub (a :@: b) = substN' sub a :@: fromType (substP' sub b)
+substF' sub (a :&: b) = substF' sub a :&: substF' sub b
+substF' sub (Bind ty f) = Bind (fromType $ substP' sub ty) $ substF' (liftTwo 1 sub) f
+
+subst' s f = substF' s f
+
+infinity = 100000000000000000000
+
+maybeMin (Just a) (Just b) = Just $ min a b
+maybeMin Nothing b = b
+maybeMin a Nothing = a
+
+
+
+class CheckExi a where
+  checkExi :: Int -> a -> Bool
+  
+  minFreeVars :: Int -> Int -> a -> Maybe Int
+  
+instance CheckExi Variable where
+  minFreeVars c j (Exi a nm ty) = (if c - a + 1 > j then Just $ c - a - j + 1 else Nothing) `maybeMin` minFreeVars c j ty
+  minFreeVars c j (DeBr i) | i < 0 = error $ "CAN NOT HAVE NEGATIVE VARS: "++show i
+  minFreeVars c j (DeBr i) = if i > j then Just (i - j) else Nothing
+  minFreeVars _ _ (Con _) = Nothing
+  
+  checkExi i e@(Exi a nm ty) = case minFreeVars i 0 ty of
+    Nothing -> checkExi i ty 
+    Just v | i - a <= v -> checkExi i ty 
+    Just v -> error $ "OUT OF SCOPE "++show v++" IN: "++show e
+  checkExi i _ = True
+
+instance CheckExi P where
+  minFreeVars c i (a :+: b) = minFreeVars c i a `maybeMin` minFreeVars c i b 
+  minFreeVars c  i (Var a) = minFreeVars c i a
+  
+  checkExi i (a :+: b) = checkExi i a && checkExi i b
+  checkExi i (Var v) = checkExi i v
+  
+instance CheckExi N where
+  minFreeVars c i (Abs ty b) = minFreeVars c i ty `maybeMin` minFreeVars (c + 1) (i+1) b 
+  minFreeVars c i (Pat a) = minFreeVars c i a
+  
+  checkExi i (Pat p) = checkExi i p
+  checkExi i e@(Abs ty v) = checkExi i ty && deepAppendError ("IN: λ : "++show ty) (checkExi (i+1) v)
+  
+instance CheckExi Form where  
+  checkExi i (a :&: b) = checkExi i a && checkExi i b 
+  checkExi i (a :@: b) = checkExi i a && checkExi i b 
+  checkExi i (Bind ty v) = checkExi i ty && deepAppendError ("IN: ∀: "++show ty) (checkExi (i+1) v)
+  checkExi i (viewEquiv -> (f,a,b)) = checkExi i a && checkExi i b
+
+  minFreeVars = error "NOT A DEFINED OPERATION"
+  
+
+checkExiTop  :: (Show a , CheckExi a) => Int -> a -> Bool
+checkExiTop i f = deepAppendError ("ON: "++show f) $ 
+                      checkExi i f
+checkExiForm :: (Show a , CheckExi a) => a -> Bool
+checkExiForm f = deepAppendError ("ON: "++show f) $ 
+                      checkExi 0 f

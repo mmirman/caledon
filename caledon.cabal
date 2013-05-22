@@ -55,5 +55,5 @@ executable caledon
               TypeSynonymInstances,
               TemplateHaskell
               
-  ghc-options: -prof -fprof-auto -osuf hsp -O2 -optc-O3 -funfolding-use-threshold=16 -fspec-constr-count=10 -fdo-lambda-eta-expansion 
-    
+  ghc-options: -prof -fprof-auto -osuf hsp 
+-- -O2 -optc-O3 -funfolding-use-threshold=16 -fspec-constr-count=10 -fdo-lambda-eta-expansion 

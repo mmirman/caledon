@@ -36,6 +36,8 @@ import qualified Data.Foldable as F
 import System.IO.Unsafe
 import Data.IORef
 
+
+
 throwTrace !i s = vtrace i s $ throwError s
 
 -------------------
@@ -62,7 +64,18 @@ viewPat p = (h, ml)
         vp (p :+: m) = (h,m:ml)
           where ~(h,ml) = vp p
         vp (Var h) = (h,[])
-        
+
+viewTy [] p = ([],p)
+viewTy (arg:lst) (viewForallP -> Just ~(ty,n)) = (ty:l,h)
+  where ~(l,h) = viewTy lst n
+viewTy _ p = ([],p)
+
+viewTyArgs ctxt [] p = []
+viewTyArgs ctxt (arg:l) (viewForallP -> Just ~(ty,n)) = 
+  ty:viewTyArgs ctxt l n -- (fromType $ appP' (Abs ty $ Pat n) $ Var $ DeBr arg)
+viewTyArgs ctxt l p = map (getTy ctxt . DeBr) l
+
+
 uvarTy recon _ Exi{} = nothing
 
 uvarTy recon ctxt (Con "#forall#") = do
@@ -109,13 +122,6 @@ putGr (gr,recon) foo a b = case foo (con a) (con b) of
     return (gr,recon)
   _ -> error "can't put this type of constraint into the graph"
   
-
-viewEquiv (a :=: b) = ((:=:), a, b)
-viewEquiv (a :<: b) = ((:<:), a, b)
-viewEquiv (a :<=: b) = ((:<=:), a, b)
-viewEquiv _ = error "not an equivalence"
-
-
 -- | unify only performes transitions relating to "A :=: B". 
 unify :: (Functor m, Monad m
          , Show a, Environment a
@@ -131,7 +137,12 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
   where len = height ctxt
         
         ueq (=:=) (a,b) = case (a,b) of
-          (Abs ty n1, n2) -> 
+          (Abs ty1 n1, Abs ty2 n2) -> vtrace 4 "*abs*" $ 
+            return ( recon 
+                   , reset ctxt $ Pat ty1 :=: Pat ty2 :&: (Bind ty2 $ n1 =:= n2)
+                   )
+
+          (Abs ty n1, n2) -> vtrace 4 "*abs*" $ 
             return ( recon 
                    , reset ctxt $ Bind ty $ n1 =:= appN (putTy ctxt ty) (liftV 1 n2) (var 0)
                    )
@@ -155,8 +166,8 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
         identity f (tipeView -> Init a) (tipeView -> Init b) = do
           recon <- putGr recon f a b
           return (recon, reset ctxt Done)
-        identity (=:=) (viewForallP -> Just (a,b)) (viewForallP -> Just (a',b')) = do
-          return $ (recon, reset ctxt $ Pat a :=: Pat a' :&: Pat b =:= Pat b') -- implements the "switching" for atoms
+        identity (=:=) (viewForallPsimp -> Just (a,b)) (viewForallPsimp -> Just (a',b')) = do
+          return $ (recon, reset ctxt $ a :=: a' :&: b =:= b') -- implements the "switching" for atoms
         identity f (viewPat -> ~(hAO,ppA)) (viewPat -> ~(hBO, ppB)) = do
           (hA,recon) <- uvarTy recon ctxt hAO
           (hB,recon) <- uvarTy recon ctxt hBO
@@ -196,6 +207,8 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
         gvar_gvar_same (hA@(_,_,_),ppA) (hB@(dist,xNm,tyB),ppB) = do
           onlyIf $ hA == hB && length ppA == length ppB 
           
+          vtrace 4 "*gvar_gvar_same*" $ return ()
+          
           let xNm' = xNm++"@'"
               
               (tyLst,tyBase) = viewP tyB
@@ -210,96 +223,155 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
               vlstBase = foldl (:+:) (Var $ Exi dist xNm' tyB') sames
               
               l = foldr Abs (Pat vlstBase) tyLst
-              xVal = len - dist - 1
-              tyB_top = liftV (1 - xVal) tyB -- this is safe since we are at "dist"
+              xVal = len - dist
+              tyB_top = liftV (- xVal) tyB -- this is safe since we are at "dist"
               -- we need to up the context by the dist!
-          case upI (xVal) ctxt Done of
+          case upI xVal ctxt Done of
             Nothing -> 
               return (substRecon (l , tyB_top, dist, xNm , tyB_top) recon, reset ctxt Done)
             Just (ctxt,form) -> do
               return $ ( substRecon (l , tyB_top, dist, xNm , tyB_top) recon
                        , reset ctxt $ subst ctxt (l,tyB_top, Exi dist xNm tyB_top) $ form 
                        )
+        
+        
+        gvar_fixed isIn recon (xVal, (dist,xNm,tyA'),ppA) (hB,tyB',mB) = do
+          let tyA = liftV (- xVal) tyA'
+              tyB = if isIn 
+                    then case hB of
+                      DeBr hB -> lst !! (length lst - hB - 1)
+                        where lst = fst (viewP tyA)
+                    else liftV (- xVal) tyB'
+              
+              viewTyArgs _ (viewHead -> Exi{} ) = nothing -- always solve the type first (as much as needed), then solve the value!
+              viewTyArgs [] p = return []
+              viewTyArgs (arg:l) (viewForallP -> Just ~(ty,n)) = do
+                l' <- viewTyArgs l n
+                return $ ty:l'
 
-        gvar_fixed recon (xVal, (dist,xNm,tyA'),_) (hB,tyB',_) = do
+              viewTyArgs args p = nothing
+                                  
+              viewTyArgs _ (viewHead -> Exi{} ) = nothing -- always solve the type first (as much as needed), then solve the value!
+              viewB [] _ = return []
+              viewB (arg:l) (viewForallP -> Just ~(ty,n)) = do
+                v <- viewB l n
+                return $ Pat ty:map (Abs ty) v
+              viewB args _ = nothing
+          tyLstA <- viewTyArgs ppA tyA
               
-          let tyA = liftV (1 - xVal) tyA'
-              tyB = liftV (1 - xVal) tyB'
-              
-              ~(tyLstA,_) = viewP tyA
-              tyLstB = viewB tyB
-                where viewB (viewForallP -> Just ~(ty,n)) = Pat ty:map (Abs ty) (viewB n)
-                      viewB _ = []
-              
-              lenTyLstA = length tyLstA
-              uVars = var <$> [0..(lenTyLstA - 1)]
+          tyLstB <- viewB mB tyB
+                      
+          let lenTyLstA = length tyLstA
+              uVars = reverse $ var <$> [0..(lenTyLstA - 1)]
               
               appUVars c = foldl (:+:) c uVars
               
-              foralls base = foldr forall (liftV (lenTyLstA - 1) base) tyLstA
-              
-              xNms  = [ (xNm++"@"++show i,ty) | (i,ty) <- zip [0..] tyLstB ]
+              foralls base = 
+                liftV lenTyLstA $ foldr forall base tyLstA  -- we raise after quantifying because we are capturing base with tyLstA
+                  
+              xNms = [ ("/"++xNm++"^"++show i++"\\",ty) | (i,ty) <- zip [0..] tyLstB ]
               
           case upI xVal ctxt constraint of
             Nothing -> error $ "we still have a constraint to unify "++show constraint 
             Just (ctxt, form) -> do
-              let xVars = (\a -> foldr a [] xNms) $
-                          \(xNm,bTy) xs -> (appUVars $
-                                            Var $ Exi dist xNm $ foralls $ fromType $ foldl (appP ctxt) bTy xs
-                                           ):xs
-                                                                      
-                  l = foldr Abs (Pat $ foldl (:+:) (Var hB) $ Pat <$> xVars) tyLstA
-                  
-              return $ ( substRecon (l , tyB , dist, xNm, tyA) recon
-                       , reset ctxt $ subst ctxt (l,tyB, Exi dist xNm tyA) $ form
+              let xVars [] = []                         
+                  xVars ((xNm,bTy):xNms) = 
+                    (appUVars $ Var $ Exi dist xNm $ foralls $ fromType $ foldl appP' bTy xs):xs
+                    where xs = xVars xNms
+
+                  xVar = reverse $ xVars $ reverse xNms
+                  l = foldr Abs (Pat $ foldl (:+:) (Var hB) $ Pat <$> xVar) tyLstA
+
+              True <- return $ deepAppendError ( "CHECK_EXI_TOP: ****" 
+                                               ++"\nWITH:  "++show tyLstA
+                                               ++"\nFOR: "++show tyA
+                                               ++"\nXA: "++show (Exi dist xNm tyA)
+                                               ++"\nTYB: "++show tyB
+                                               ++"\nPPA: "++show ppA
+                                               ++"\nMB: "++show mB
+                                               ++"\nL: "++show l
+                                               ++"\nCONSTRAINT: "++show constraint
+                                               ++"\nFORM: "++show (rebuild ctxt constraint)
+                                               ) $ checkExiTop (height ctxt) l
+              
+              vtrace 6 ("L: "++show l) $ 
+                vtrace 6 ("TYLSTB: "++show tyLstB) $               
+                vtrace 6 ("TYB: "++show tyB) $                               
+                vtrace 6 ("xVar: "++show xVar) $                             
+                vtrace 6 ("xNm: "++show xNm) $                                             
+                return $ ( substRecon (l , tyA , dist, xNm, tyA) recon
+                       , reset ctxt 
+                         $ deepAppendError (    "CTXT: "++show ctxt 
+                                            ++"\nSUBST: "++show l
+                                            ++"\nFOR: " ++show (Exi dist xNm tyA)
+                                            ++"\nCURRENTLY: " ++show constraint
+                                            ++"\nXVAL: "++show xVal
+                                            ++"\nDIST: "++show dist
+                                           ) 
+                         $ subst' (l, Exi dist xNm tyA) $ form 
                        )
 
-        gvar_uvar_outside recon (hA@(dist,_,_),ppA) (hB,tyB',mB) = do
-          let xVal = len - dist - 1
-          
+        gvar_uvar_outside recon (hA@(dist,_,tyA),ppA) (hB,tyB',mB) = do
+          let xVal = len - dist
           onlyIf $ case hB of
             Con _ -> True
-            DeBr yVal -> yVal > xVal
+            DeBr yVal -> yVal >= xVal
             _ -> False
-          gvar_fixed recon (xVal, hA, ppA) (liftV (length ppA - xVal) hB, tyB', mB)         
+          
+          
+          vtrace 4 "*gvar_uvar_outside*" $  return ()
+          
+          let lppa = length $ viewTyArgs ctxt ppA tyA
+          gvar_fixed False recon (xVal , hA, ppA) (liftV (lppa - xVal) hB, tyB', mB) 
+          -- "length ppA" because we abstract over all the variables.
 
-        gvar_uvar_inside recon (hA@(dist,_,_),ppA) (DeBr yVal,tyB',mB) = do
-          let xVal = len - dist - 1
+        gvar_uvar_inside recon (hA@(dist,_,tyA),ppA) (DeBr yVal,tyB',mB) = do
+          let xVal = len - dist
               
-          onlyIf $ yVal < xVal 
+          onlyIf $ yVal < xVal
+          
+          vtrace 4 "*gvar_uvar_inside*" $ return ()
+          
           case elemIndex yVal ppA of
-            Just hB -> gvar_fixed recon (xVal, hA, ppA) (DeBr hB, tyB', mB)
+            Just hB -> gvar_fixed True recon (xVal, hA, ppA) (DeBr hB, tyB', mB)
+            -- not length ppA because we pick one of the variables! 
             Nothing -> lift $ throwTrace 1 $ "GVAR-UVAR-DEPENDS: "++show constraint
                                            ++"\nYVAL: "++show yVal
                                            ++"\nPPA:  "++show ppA
+                                           ++"\nCTX:  "++show ctxt
         gvar_uvar_inside _ _ _ = nothing
                   
-        raise 0 v = v
+        raise j v | j <= 0 = v
         raise i (recon, (dist,xNm,tyA), ctx, form) = 
           case upI 1 ctx form of
             Just (ctx'',form') -> let ty = getTy ctx (DeBr 0)
-                                      newExi = (dist - 1, xNm++"@", forall ty tyA)
+                                      newExi = (dist - 1, xNm++"@r", forall ty tyA)
                                       newpat = Pat $ (liftV 1 $ Var $ uncurriedExi newExi) :+: var 0 
-                                  in  raise (i-1) ( substRecon (newpat, liftV 1 $ tyA, dist , xNm, tyA) recon 
+                                      tyA' = liftV 1 tyA
+                                  in  raise (i-1) ( substRecon (newpat, tyA', dist , xNm, tyA) recon 
                                                   , newExi
                                                   , ctx''
-                                                  , liftV (-1) $ subst ctx (newpat,liftV 1 $ tyA, Exi dist xNm tyA) form'
+                                                  , liftV (-1) $ subst ctx (newpat,tyA', Exi dist xNm tyA) form'
                                                   )
-            Nothing -> error $ "can't go this high! "++show i
-
+            Nothing -> error $ "can't go this high! "++show i 
+                          ++ "\nDIST: "++show dist
+                          ++ "\nxNm:  "++show xNm
+                          ++ "\ntyA:  "++show tyA
+                          ++ "\nCTXT: "++show ctx
+                          ++ "\nFORM: "++show form
           
-        gvar_gvar_diff ((dist,_,_),_) ((dist',xNm',tyA'),_) | dist < dist' =
+        gvar_gvar_diff ((dist,_,_),_) ((dist',xNm',tyA'),_) | dist < dist' = vtrace 4 "*raise*" $ 
           case upI (len - dist') ctxt constraint of
             Nothing -> error "constraint shouldn't be done"
             Just (ctxt,form) -> case raise (dist' - dist) (recon , (dist',xNm',tyA') , ctxt, form) of
               (recon, _,ctxt,form) -> return $ (recon, reset ctxt form)
         gvar_gvar_diff ((dist,_,_),_) ((dist',_,_),_) | dist > dist' = nothing
-        gvar_gvar_diff ((dist,xNm,tyA),ppA) ((_,xNm',tyB),ppB) = do
-          let xx'Val = len - dist - 1
+        gvar_gvar_diff ((dist,xNm,tyA),ppA) ((_,xNm',tyB),ppB) = vtrace 4 "*gvar_gvar_diff*" $ do
+          let xx'Val = len - dist
           case upI xx'Val ctxt constraint of
             Nothing -> error $ "can't go this high! "++show xx'Val
             Just (ctxt, form) -> do
-              let xNm'' = xNm++"+"++xNm'++"@"
+              let xNm'' = "/"++xNm++"+"++xNm'++"\\"
                   
                   sames = [ (var i, var j) | (a,i) <- zip ppA [0..], (b,j) <- zip ppB [0..], a == b ]
                   
@@ -309,8 +381,8 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                   getTyLst tb (_:c) (_:lst) = liftV (-1) $ getTyLst tb c lst                  
                   getTyLst tb _ _ = tb
                   
-                  (tyLstA,tyBaseA) = viewP tyA
-                  (tyLstB,_) = viewP tyB
+                  (tyLstA,tyBaseA) = viewTy ppA tyA -- viewP tyA
+                  (tyLstB,_) = viewTy ppB tyB  -- viewP tyB
                   
                   tyX' = getTyLst tyBaseA tyLstA ppA
               
@@ -331,7 +403,7 @@ search :: ( Functor m, Show a, Monad m, Environment a, MonadState Int m) => (a,F
 search (ctxt,a :&: b) =  search (putLeft ctxt b,a)
                      <|> search (putRight a ctxt,b)
 search (ctxt, Bind ty f)    = search (putTy ctxt ty,f)
-search (ctxt,Done) = nothing -- return [[(reset ctxt Done)]]
+search (ctxt,Done) = nothing
 search (_,_ :=: _)    = nothing
 search (_,_ :<: _)    = nothing
 search (_,_ :<=: _)   = nothing
@@ -408,7 +480,9 @@ unifyOrSearch recon cunf = sunify (Just cunf) <|> tryUnify cunf
 interpret :: (Show a, Alternative m, MonadError String m,Environment a, MonadState Int m) =>
              Constants -> (UniContext, (a,Form)) -> m UniContext
 interpret _ (recon, (ctxt,Done)) | isDone ctxt = return recon
-interpret cons (recon, unf) = do
+interpret cons (recon, unf) = vtrace 5 ("\nCONSTRAINTS: "++(show $ uncurry rebuild unf)) $ do
+  True <- return $ checkExiForm $ uncurry rebuild unf
+  
   m <- runMaybeT $ unifyOrSearch recon unf -- (emptyCon cons :: Ctxt,unf) 
   case m of
     Nothing  -> throwTrace 1 $ "constraints are not satisfiable: "++show unf
