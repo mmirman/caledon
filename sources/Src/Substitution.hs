@@ -50,7 +50,7 @@ hered t ctxt (Right p1@(Abs a1 n), l) nv =
   , case viewForallP l of 
     Just ~(a1',a2) -> liftV (-1) $ substTy (putTy ctxt a1') (liftV 1 nv,liftV 1 a1',DeBr 0) a2
     Nothing -> error $ show p1++" r: "++show l
-  )  
+  )
 hered t ctxt (Right (Pat p1), l) nv = case hered t ctxt (Left p1,l) nv of
   (Left p , l) -> (Right $ Pat p, l)
   (Right p, l) -> (Right p, l)

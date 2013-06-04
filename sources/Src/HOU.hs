@@ -231,7 +231,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
               return (substRecon (l , dist, xNm) recon, reset ctxt Done)
             Just (ctxt,form) -> do
               return $ ( substRecon (l , dist, xNm) recon
-                       , reset ctxt $ subst ctxt (l,tyB_top, Exi dist xNm tyB_top) $ form 
+                       , reset ctxt $ subst' (l, Exi dist xNm tyB_top) $ form 
                        )
         
         
@@ -382,12 +382,18 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                   
                   (samesA,samesB) = unzip sames
                                     
-                  getTyLst tb (ty:c) (a:lst) | elem a ppB = forall ty $ getTyLst tb c lst
-                  getTyLst tb (_:c) (_:lst) = liftV (-1) $ getTyLst tb c lst                  
+                  getTyLst tb (ty:c) (a:lst) | elem a ppB = forall ty $
+                                                         getTyLst tb c lst
+                  getTyLst tb (ty:c) (a:lst) = liftV (-1) $ getTyLst tb c lst
                   getTyLst tb _ _ = tb
                   
                   (tyLstA,tyBaseA) = viewTy ppA tyA -- viewP tyA
-                  (tyLstB,_) = viewTy ppB tyB  -- viewP tyB
+
+              case viewHead tyBaseA of -- always resolve the type before the value!
+                Exi{} -> nothing
+                _ -> return ()
+                
+              let (tyLstB,_)       = viewTy ppB tyB  -- viewP tyB
                   
                   tyX' = getTyLst tyBaseA tyLstA ppA
               
@@ -399,12 +405,13 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
               
               True <- vtrace 6 ("LA:" ++ show lA)
                     $ vtrace 6 ("LB:" ++ show lB)
+                    $ vtrace 6 ("PPA:" ++ show ppA)                                            
                     $ vtrace 6 ("CONS:" ++ show constraint)
                     $ return True
               return $ ( substRecon (lA, dist , xNm ) $  
                          substRecon (lB, dist , xNm') $ recon
                        , reset ctxt $ 
-                         subst' (lA, Exi dist xNm  tyA) $ 
+                         subst' (lA,  Exi dist xNm  tyA) $ 
                          subst' (lB, Exi dist xNm' tyB) $ form
                        )
 
