@@ -48,7 +48,7 @@ onlyIf b = if b then return () else nothing
 
 nothing :: Monad m => MaybeT m a
 nothing = fail " nothing "
-
+ 
 getPP :: Monad m => P -> MaybeT m (Variable, [Int])
 getPP p = case bpp p of
   Just (h,pp) -> return (h, pp)
@@ -103,11 +103,11 @@ inj = inj mempty
 
 type UniContext = (ConsGraph, Reconstruction)
 
-substRecon :: (Term,Type, Int, Name, Type) -> UniContext -> UniContext
-substRecon (s,tyB,d, x, tyA) (gr,m) = (gr, M.insert x (d,s) $ fmap substy m)
+substRecon :: (Term,Int, Name) -> UniContext -> UniContext
+substRecon (s,d, x) (gr,m) = (gr, M.insert x (d,s) $ fmap substy m)
   where substy (depth,t) | depth < d = (depth,t)
         substy (depth,t) = (depth, suber t)
-          where suber = substN' (liftV (depth - d) s, Exi d x tyA)
+          where suber = substN' (liftV (depth - d) s, Exi d x undefined)
 
 putGr (gr,recon) foo a b = case foo (con a) (con b) of
   (Pat (Var (Con a))) :=:  (Pat (Var (Con b))) -> do
@@ -228,9 +228,9 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
               -- we need to up the context by the dist!
           case upI xVal ctxt Done of
             Nothing -> 
-              return (substRecon (l , tyB_top, dist, xNm , tyB_top) recon, reset ctxt Done)
+              return (substRecon (l , dist, xNm) recon, reset ctxt Done)
             Just (ctxt,form) -> do
-              return $ ( substRecon (l , tyB_top, dist, xNm , tyB_top) recon
+              return $ ( substRecon (l , dist, xNm) recon
                        , reset ctxt $ subst ctxt (l,tyB_top, Exi dist xNm tyB_top) $ form 
                        )
         
@@ -299,7 +299,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                 vtrace 6 ("TYB: "++show tyB) $                               
                 vtrace 6 ("xVar: "++show xVar) $                             
                 vtrace 6 ("xNm: "++show xNm) $                                             
-                return $ ( substRecon (l , tyA , dist, xNm, tyA) recon
+                return $ ( substRecon (l , dist, xNm) recon
                        , reset ctxt 
                          $ deepAppendError (    "CTXT: "++show ctxt 
                                             ++"\nSUBST: "++show l
@@ -344,15 +344,18 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
         raise j v | j <= 0 = v
         raise i (recon, (dist,xNm,tyA), ctx, form) = 
           case upI 1 ctx form of
-            Just (ctx'',form') -> let ty = getTy ctx (DeBr 0)
-                                      newExi = (dist - 1, xNm++"@r", forall ty tyA)
-                                      newpat = Pat $ (liftV 1 $ Var $ uncurriedExi newExi) :+: var 0 
-                                      tyA' = liftV 1 tyA
-                                  in  raise (i-1) ( substRecon (newpat, tyA', dist , xNm, tyA) recon 
-                                                  , newExi
-                                                  , ctx''
-                                                  , liftV (-1) $ subst ctx (newpat,tyA', Exi dist xNm tyA) form'
-                                                  )
+            Just (ctx'', form) ->
+              let ty = getTy ctx (DeBr 0) -- from the original context! 
+                  newExi = (dist - 1, xNm++"@r", forall ty tyA)
+                  newpat = Pat $ (liftV 1 $ Var $ uncurriedExi newExi) :+: var 0 
+                  tyA' = liftV 1 tyA
+
+                  substF (Bind ty' f) | ty == ty' = Bind ty' $ subst (putTy ctx'' ty') (newpat, tyA, Exi dist xNm tyA) f
+                  substF (a :&: b) = substF a :&: substF b
+                  substF r = r
+                  
+              in  raise (i-1)
+                  ( substRecon (newpat, dist, xNm) recon, newExi, ctx'', substF form)
             Nothing -> error $ "can't go this high! "++show i 
                           ++ "\nDIST: "++show dist
                           ++ "\nxNm:  "++show xNm
@@ -366,13 +369,15 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
             Just (ctxt,form) -> case raise (dist' - dist) (recon , (dist',xNm',tyA') , ctxt, form) of
               (recon, _,ctxt,form) -> return $ (recon, reset ctxt form)
         gvar_gvar_diff ((dist,_,_),_) ((dist',_,_),_) | dist > dist' = nothing
-        gvar_gvar_diff ((dist,xNm,tyA),ppA) ((_,xNm',tyB),ppB) = vtrace 4 "*gvar_gvar_diff*" $ do
+        gvar_gvar_diff ((dist,xNm,tyA'),ppA) ((_,xNm',tyB'),ppB) = vtrace 4 "*gvar_gvar_diff*" $ do
           let xx'Val = len - dist
+              tyA = liftV (-xx'Val) tyA'
+              tyB = liftV (-xx'Val) tyB'
           case upI xx'Val ctxt constraint of
             Nothing -> error $ "can't go this high! "++show xx'Val
             Just (ctxt, form) -> do
               let xNm'' = "/"++xNm++"+"++xNm'++"\\"
-                  
+
                   sames = [ (var i, var j) | (a,i) <- zip ppA [0..], (b,j) <- zip ppB [0..], a == b ]
                   
                   (samesA,samesB) = unzip sames
@@ -386,17 +391,21 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                   
                   tyX' = getTyLst tyBaseA tyLstA ppA
               
-                  vlstBaseA = foldl (:+:) (Var $ Exi dist xNm'' tyX') samesA
-                  vlstBaseB = foldl (:+:) (Var $ Exi dist xNm'' tyX') samesB
+                  vlstBaseA = foldl (:+:) (Var $ Exi dist xNm'' $ liftV (length tyLstA) tyX') samesA
+                  vlstBaseB = foldl (:+:) (Var $ Exi dist xNm'' $ liftV (length tyLstB) tyX') samesB
                   
                   lA = foldr Abs (Pat vlstBaseA) tyLstA
                   lB = foldr Abs (Pat vlstBaseB) tyLstB
               
-              return $ ( substRecon (lA, tyA, dist , xNm , tyA) $  
-                         substRecon (lB, tyB, dist , xNm', tyB) $ recon
+              True <- vtrace 6 ("LA:" ++ show lA)
+                    $ vtrace 6 ("LB:" ++ show lB)
+                    $ vtrace 6 ("CONS:" ++ show constraint)
+                    $ return True
+              return $ ( substRecon (lA, dist , xNm ) $  
+                         substRecon (lB, dist , xNm') $ recon
                        , reset ctxt $ 
-                         subst ctxt (lA, tyA, Exi dist xNm tyA) $ 
-                         subst ctxt (lB,tyB, Exi dist xNm' tyA) $ form
+                         subst' (lA, Exi dist xNm  tyA) $ 
+                         subst' (lB, Exi dist xNm' tyB) $ form
                        )
 
 search :: ( Functor m, Show a, Monad m, Environment a, MonadState Int m) => (a,Form) -> MaybeT m [[(a,Form)]]
@@ -423,8 +432,8 @@ search (ctxt,a :@: b) = (fmap (reset ctxt) <$>) <$> searchR a b
                 Family s -> s == pFam
               
               makeFromConstant (c,(Axiom bl i,t)) = if sameFamily t 
-                                                then (\a -> Just ((bl,i),a)) <$> searchL (con c, t) (search,p)
-                                                else return Nothing
+                                                    then (\a -> Just ((bl,i),a)) <$> searchL (con c, t) (search,p)
+                                                    else return Nothing
               makeFromConstant (c,_) = return Nothing
               
               makeFromAnons (i,t) = if sameFamily t
@@ -434,7 +443,7 @@ search (ctxt,a :@: b) = (fmap (reset ctxt) <$>) <$> searchR a b
           cl <- mapM makeFromConstant $ M.toList constants
           rl <- mapM makeFromAnons $ zip [0..] anons
           return $ sortAndUse (catMaybes cl) ++ [ concat rl ]
-          
+
         searchL (name,attempt) tg@(target,goal) = case attempt of
           (viewForallP -> Just (av,b)) -> do
             xv <- getNewWith "@xv"
@@ -452,7 +461,7 @@ sortAndUse cl = coalate [] $ sortBy (\a b -> compare (snd $ fst a) (snd $ fst b)
                then reverse cg:[targ]:coalate [] l
                else [targ]:coalate [] l
           else coalate (targ:cg) l
-               
+                
 rebuildC a = (emptyCon $ fst $ getTypes $ fst a, uncurry rebuild a)
 
 -- modify all the time, since the only time we mention an existential 

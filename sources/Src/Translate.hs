@@ -1,5 +1,4 @@
 {-# LANGUAGE ViewPatterns #-}
-
 module Src.Translate ( consToForm
                      , toSpine
                      , fromSpine

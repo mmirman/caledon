@@ -104,7 +104,8 @@ instance Environment Ctxt where
   rebuild (Ctxt{ ctxtRecon = re, ctxtContext = seqe }) b = rebuildFromRecon re $ F.foldl reb b seqe
     where reb f (B ty re) = bind ty $ rebuildFromRecon re f
 
-  upI i (Ctxt _ h _ _) _ | i > h = Nothing -- error "context is not large enough"
+  upI i (Ctxt _ h _ _) _ | h < i = Nothing
+  -- error "context is not large enough"
   upI i (Ctxt cons h ro ctxt) b = case S.splitAt i ctxt of
     (lower, upper) -> case viewl upper of
       EmptyL -> if b == Done && reb == Done then Nothing else Just (emptyCon cons, reb)

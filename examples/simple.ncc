@@ -1,0 +1,32 @@
+
+defn testInf : type -> type
+   | testInfImp  = [A : type][F : type -> _] testInf (F A)
+
+{-
+
+∀: type .( 
+     ∀: [ type ]  (//53@xinH@r+50@fbody\+/43@tyA^1\\<1>:[ type ]  type) ( 0 )  .( 
+           ∀: type .( 1 ( 0 )  ≐ (68@fex<2>:[ type ]  (67@ftyBody<2>:[ type ]  type) ( 0 ) ) ( 0 )  ) 
+         ∧ ∀: type .( (//53@xinH@r+50@fbody\+/43@tyA^1\\<1>:[ type ]  type) ( 0 )  ≤ (67@ftyBody<2>:[ type ]  type) ( 0 )  ) 
+         ∧ 1 ≐ (70@spB<2>:type) 
+         ∧ (70@spB<2>:type) ≐ (69@tyV<2>:type) 
+         ∧ (68@fex<2>:[ type ]  (67@ftyBody<2>:[ type ]  type) ( 0 ) ) ( (69@tyV<2>:type) )  ≐ (63@spB<2>:type) 
+         ∧ (63@spB<2>:type) ≐ (62@tyV<2>:type) 
+         ∧ (67@ftyBody<2>:[ type ]  type) ( (69@tyV<2>:type) )  ≤ type 
+         ∧ testInf ( (62@tyV<2>:type) )  ≐ (56@fbody<1>:[ [ type ]  (//53@xinH@r+50@fbody\+/43@tyA^1\\<1>:[ type ]  type) ( 0 )  ]  type) ( 0 )  ∧ type ≤ type ) ∧ [ [ type ]  (//53@xinH@r+50@fbody\+/43@tyA^1\\<1>:[ type ]  type) ( 0 )  ]  (56@fbody<1>:[ [ type ]  (//53@xinH@r+50@fbody\+/43@tyA^1\\<1>:[ type ]  type) ( 0 )  ]  type) ( 0 )  ≐ (41@fbody<0>:[ type ]  type) ( 0 )  ∧ type ≤ type ) ∧ [ type ]  (41@fbody<0>:[ type ]  type) ( 0 )  ≐ (34@spB<0>:type) ∧ (34@spB<0>:type) ≐ (33@head<0>:type) ∧ type ≤ type
+
+∀: type . 
+      ∀: [ type ]  (//53@xinH@r+50@fbody\+/43@tyA^1\\<1>:[ type ]  type) ( 0 )  .( 
+            ∀: type .( 1 ( 0 )  ≐ (68@fex<2>:[ type ]  (67@ftyBody@r<1>:[ [ type ]  (//53@xinH@r+50@fbody\+/43@tyA^1\\<1>:[ type ]  type) ( 0 )  ]  [ type ]  type) ( 2 )  ( 0 ) ) ( 0 )  ) 
+          ∧ ∀: type .( (//53@xinH@r+50@fbody\+/43@tyA^1\\<1>:[ type ]  type) ( 0 )  ≤ (67@ftyBody@r<1>:[ [ type ]  (//53@xinH@r+50@fbody\+/43@tyA^1\\<1>:[ type ]  type) ( 0 )  ]  [ type ]  type) ( 1 )  ( 0 )  ) 
+          ∧ λ:type . (2 ( 0 ) ) ≐ (70@spB<2>:type) 
+          ∧ (70@spB<2>:type) ≐ (69@tyV<2>:type) 
+          ∧ (68@fex<2>:[ type ]  (67@ftyBody@r<1>:[ [ type ]  (//53@xinH@r+50@fbody\+/43@tyA^1\\<1>:[ type ]  type) ( 0 )  ]  [ type ]  type) ( 1 )  ( 0 ) ) ( (69@tyV<2>:type) )  ≐ (63@spB<2>:type) 
+          ∧ (63@spB<2>:type) ≐ (62@tyV<2>:type) 
+          ∧ (67@ftyBody@r<1>:[ [ type ]  (//53@xinH@r+50@fbody\+/43@tyA^1\\<1>:[ type ]  type) ( 0 )  ]  [ type ]  type) ( 0 )  ( (69@tyV<2>:type) )  ≤ type 
+          ∧ testInf ( (62@tyV<2>:type) )  ≐ (56@fbody<1>:[ [ type ]  (//53@xinH@r+50@fbody\+/43@tyA^1\\<1>:[ type ]  type) ( 0 )  ]  type) ( 0 ) ) 
+    ∧ [ [ type ]  (//53@xinH@r+50@fbody\+/43@tyA^1\\<1>:[ type ]  type) ( 0 )  ]  (56@fbody<1>:[ [ type ]  (//53@xinH@r+50@fbody\+/43@tyA^1\\<1>:[ type ]  type) ( 0 )  ]  type) ( 0 )  ≐ (41@fbody<0>:[ type ]  type) ( 0 ) 
+
+∧ [ type ]  (41@fbody<0>:[ type ]  type) ( 0 ) ≐ (33@head<0>:type)
+
+-}

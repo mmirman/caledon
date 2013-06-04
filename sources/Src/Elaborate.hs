@@ -32,6 +32,12 @@ getNewExists s ty = do
   nm <- getNewWith s
   depth <- height <$> ask 
   return $ Var $ Exi depth nm ty
+
+getNewExists' :: String -> Type -> TypeChecker P
+getNewExists' s ty = do
+  nm <- getNewWith s
+  depth <- height <$> ask 
+  return $ Var $ Exi (max 0 $ depth - 1) nm ty  
   
 bindForall :: Type -> TypeChecker a -> TypeChecker a  
 bindForall ty = censor (bind ty) . local (\a -> putTy a ty)
@@ -132,7 +138,7 @@ genConstraintP p p' = case p of
     
   Var (Con "#hole#") -> do
     v <- getNewWith   "@tmakeF"
-    ty <- getNewExists "@xty" $ tipemake v
+    ty <- getNewExists' "@xty" $ tipemake v
     e  <- getNewExists "@xinH" ty
     Pat e .=. Pat p'
     return ty

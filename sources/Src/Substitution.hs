@@ -212,9 +212,9 @@ class CheckExi a where
   checkExi :: Int -> a -> Bool
   
   minFreeVars :: Int -> Int -> a -> Maybe Int
-  
+
 instance CheckExi Variable where
-  minFreeVars c j (Exi a nm ty) = (if c - a + 1 > j then Just $ c - a - j + 1 else Nothing) `maybeMin` minFreeVars c j ty
+  minFreeVars c j (Exi a nm ty) = (if c - a - 1 > j then Just $ c - a - j + 1 else Nothing) `maybeMin` minFreeVars c j ty
   minFreeVars c j (DeBr i) | i < 0 = error $ "CAN NOT HAVE NEGATIVE VARS: "++show i
   minFreeVars c j (DeBr i) = if i > j then Just (i - j) else Nothing
   minFreeVars _ _ (Con _) = Nothing

@@ -1,0 +1,4 @@
+
+
+defn testInf : [ a : type ] ( (a -> a) -> a ) -> type
+   | testInfImp  = [A][F : (A -> _) -> A ]  testInf A F

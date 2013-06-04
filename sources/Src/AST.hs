@@ -5,6 +5,7 @@ import Names
 import qualified Data.Map as M
 import Control.DeepSeq
 import Data.Monoid
+import Src.Tracing
 -------------
 --- Terms ---
 -------------
@@ -22,21 +23,24 @@ data P = P :+: N
 data N = Abs Type N 
        | Pat P 
        deriving Eq
-    
+
+infixr 4 ++:
+s ++: a = s++deepAppendError ("\nFROM: "++s) a
+
 instance Show Variable where
   show (DeBr i) = show i
-  show (Exi i n ty) = "("++n++"<"++show i++">:"++show ty++")"
+  show (Exi i n ty) = "("++n++"<"++show i++">:"++: show ty++")"
   show (Con n) = n
 
 instance Show P where
-  show (viewForallP -> Just (ty,p)) = "[ "++show ty ++" ]  "++ show p
-  show (viewImpForallP -> Just (nm,ty,p)) = "{ "++nm++" : "++show ty ++" }  "++ show p
-  show (viewImpAbsP -> Just(nm,ty,a)) = "?λ"++nm++" : "++show ty ++" . ("++ show a++")"
+  show (viewForallP -> Just (ty,p)) = "[ "++show ty++" ]  " ++: show p
+  show (viewImpForallP -> Just (nm,ty,p)) = "{ "++nm++" : "++show ty ++" }  " ++: show p
+  show (viewImpAbsP -> Just(nm,ty,a)) = "?λ"++nm++" : "++show ty ++: " . ("++ show a ++ ")"
   show (tipeView -> Init _) = "type"
-  show (a :+: b) = show a ++" ( "++ show b++" ) "
+  show (a :+: b) = show a ++: " ( "++ show b++" ) "
   show (Var a) = show a
 instance Show N where
-  show (Abs ty a) = "λ:"++show ty ++" . ("++ show a++")"
+  show (Abs ty a) = "λ:"++show ty ++: " . ("++ show a++")"
 
   show (Pat p) = show p
 
@@ -51,7 +55,7 @@ viewForallN (Pat p) = viewForallP p
 viewForallN _ = Nothing
 
 viewForallP (Var (Con "#forall#") :+: Pat ty :+: Abs ty' (Pat n) ) | ty == ty' = Just (ty,n)
-viewForallP (Var (Con "#forall#") :+: a :+: b@Abs{} ) = error $ "\nNot a forall type: ["++show a ++ " ] "++show b
+viewForallP (Var (Con "#forall#") :+: a :+: b@Abs{} ) = error $ "\nNot a forall type: [ "++show a ++ " ] "++show b
 viewForallP _ = Nothing
 
 viewForallPsimp (Var (Con "#forall#") :+: ty :+: b ) = Just (ty,b)
@@ -208,7 +212,7 @@ instance Show Form where
   show (t1 :<=: t2) =show t1 ++ " ≤ "++ show t2
   show (t1 :&: t2) = show t1 ++ " ∧ "++ show t2
   show (t1 :@: t2) = show t1 ++ " ∈  "++ show t2
-  show (Bind t1 t2) = "∀: "++ show t1 ++ " .( "++show t2 ++ " )"
+  show (Bind t1 t2) = "∀: "++ show t1 ++: " .( "++show t2 ++ " )"
   show Done = " ⊤ "
 
 instance NFData Form where
