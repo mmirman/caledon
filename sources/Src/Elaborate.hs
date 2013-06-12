@@ -57,24 +57,20 @@ genConstraintN n n' ty = case n of
   Abs tyAorg sp -> do
     tyA <- getNewTyVar "@tyA"
     genConstraintTy tyAorg tyA
-    
+
     case viewForallP ty of
       Just ~(tyA',tyF') -> do
         Pat tyA .=. Pat tyA'
-        sp' <- Pat <$> getNewExists "@spA" (tyA ~> tyF')
         bindForall tyA $ 
-          genConstraintN sp (appN' sp' $ var 0) tyF'
-        sp' .=. n'
-      _ -> do
+          genConstraintN sp (appN' (liftV 1 n') $ var 0) tyF'
+      _ -> do 
         v1 <- getNewWith "@tmake1"
         e <- getNewExists "@e" (forall (liftV 1 tyA) $ tipemake v1)
         let body = e :+: var 0
         Pat (forall tyA body) .<=. Pat ty
-        
-        sp' <- Pat <$> getNewExists "@sp2" (tyA ~> body)
         bindForall tyA $ 
-          genConstraintN sp (appN' sp' $ var 0) body
-        sp' .=. n'
+          genConstraintN sp (appN' (liftV 1 n') $ var 0) body
+      
   Pat p -> do
     p' <- getNewExists "@spB" ty
     ty' <- genConstraintP p p'
