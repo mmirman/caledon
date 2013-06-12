@@ -38,11 +38,12 @@ instance Context Ctxt where
   height = ctxtHeight  
   getTy c (Con n) | isUniverse (Var $ Con n) = universe
   getTy c (Con n) = snd $ case M.lookup n $ ctxtConstants c of
-    Just i -> i
+    Just i -> i -- don't need to lift here since the types of constants shouldn't contain free variables
     Nothing -> error $ show n ++" not found in the context."
   getTy _ (Exi _ _ ty) = ty
   getTy c (DeBr i) = case i < height c of
-    True  -> liftV i $ elemType $ index (ctxtContext c) i
+    True  -> liftV (i + 1) $ elemType $ index (ctxtContext c) i 
+    -- the extra one is because we are getting the type and moving it below!
     False -> error $ "WHAT (in formulasequence)? "++show i++"\nIN: "++show c
     
   getVal c (Con n) = case fst $ ctxtConstants c M.! n of

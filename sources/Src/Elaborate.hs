@@ -13,6 +13,7 @@ import Control.Monad.RWS.Lazy (RWS, ask, local, censor, runRWS, censor, tell, ge
 import Control.Monad.State.Class (MonadState(), get, modify)
 import Control.Spoon
 import Data.Monoid
+
 type TypeChecker = RWS Ctxt Form Int
 
 typeConstraints cons tm ty = evalGen (do new <- Pat <$> getNewExists "@head" ty
@@ -32,6 +33,12 @@ getNewExists s ty = do
   depth <- height <$> ask 
   return $ Var $ Exi depth nm ty
 
+getNewExists' :: String -> Type -> TypeChecker P
+getNewExists' s ty = do
+  nm <- getNewWith s
+  depth <- height <$> ask 
+  return $ Var $ Exi (max 0 $ depth - 1) nm ty  
+  
 bindForall :: Type -> TypeChecker a -> TypeChecker a  
 bindForall ty = censor (bind ty) . local (\a -> putTy a ty)
 
@@ -56,7 +63,7 @@ genConstraintN n n' ty = case n of
         Pat tyA .=. Pat tyA'
         bindForall tyA $ 
           genConstraintN sp (appN' (liftV 1 n') $ var 0) tyF'
-      _ -> do 
+      _ -> do
         v1 <- getNewWith "@tmake1"
         e <- getNewExists "@e" (forall (liftV 1 tyA) $ tipemake v1)
         let body = e :+: var 0
@@ -65,9 +72,12 @@ genConstraintN n n' ty = case n of
           genConstraintN sp (appN' (liftV 1 n') $ var 0) body
       
   Pat p -> do
-    p' <- getNewExists "@spB" ty
-    ty' <- genConstraintP p p'
-    Pat p' .=. n'
+    ty' <- case n' of
+      Pat p' -> genConstraintP p p'
+      _ -> do
+        p' <- getNewExists "@spB" ty
+        Pat p' .=. n'
+        genConstraintP p p'
     Pat ty' .<=. Pat ty
 
 genConstraintTy :: Type -> Type -> TypeChecker ()
@@ -89,10 +99,10 @@ genConstraintP p p' = case p of
     
     tyFf' <- (getNewExists "@fbody" . forall tyA . tipemake) =<< getNewWith "@tmakeF"
     bindForall tyA $ do
-      tyFty <- genConstraintP tyF (tyFf' :+: var 0)
-      Pat tyFty .<=. Pat tyret
+      tyFty <- genConstraintP tyF (liftV 1 tyFf' :+: var 0)
+      Pat tyFty .<=. Pat (liftV 1 tyret)
       
-    Pat (forall tyA $ tyFf' :+: var 0) .=. Pat p'
+    Pat (forall tyA $ liftV 1 tyFf' :+: var 0) .=. Pat p'
     
     return tyret
   (tipeView -> Init v1) -> do
@@ -113,11 +123,11 @@ genConstraintP p p' = case p of
     tyVal <- getNewWith "@ftyValmake"
     tyBody <- getNewExists "@ftyBody" (tyArg ~> tipemake tyVal)
     
-    let tyF' = tyArg ~> (tyBody :+: var 0)
+    let tyF' = tyArg ~> (liftV 1 tyBody :+: var 0)
     f   <- getNewExists "@fex" tyF'
     
     tyF <- genConstraintP forg f
-    Pat tyF .<=. Pat tyF' 
+    Pat tyF .<=. Pat tyF'
     
     v <- Pat <$> getNewExists "@tyV" tyArg
         
@@ -136,4 +146,3 @@ genConstraintP p p' = case p of
     ctxt <- ask
     getVal ctxt a .=. Pat p'
     return $ getTy ctxt a 
-        

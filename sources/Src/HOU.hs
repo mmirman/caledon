@@ -237,11 +237,6 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
         
         gvar_fixed isIn recon (xVal, (dist,xNm,tyA'),ppA) (hB,tyB',mB) = do
           let tyA = liftV (- xVal) tyA'
-              tyB = if isIn 
-                    then case hB of
-                      DeBr hB -> lst !! (length lst - hB - 1)
-                        where lst = fst (viewP tyA)
-                    else liftV (- xVal) tyB'
               
               viewTyArgs _ (viewHead -> Exi{} ) = nothing -- always solve the type first (as much as needed), then solve the value!
               viewTyArgs [] p = return []
@@ -253,28 +248,34 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                                   
               viewTyArgs _ (viewHead -> Exi{} ) = nothing -- always solve the type first (as much as needed), then solve the value!
               viewB [] _ = return []
-              viewB (arg:l) (viewForallP -> Just ~(ty,n)) = do
+              viewB (_:l) (viewForallP -> Just ~(ty,n)) = do
                 v <- viewB l n
                 return $ Pat ty:map (Abs ty) v
-              viewB args _ = nothing
+              viewB _ _ = nothing
           tyLstA <- viewTyArgs ppA tyA
-              
-          tyLstB <- viewB mB tyB
-                      
+          
           let lenTyLstA = length tyLstA
-              uVars = reverse $ var <$> [0..(lenTyLstA - 1)]
+              tyB = if isIn 
+                    then case hB of
+                      DeBr hB -> liftV fromTop $ addAt (lenTyLstA, fromTop - 1) $ lst !! fromTop
+                        where lst = fst (viewP tyA)
+                              ll = length lst
+                              fromTop = ll - hB - 1
+                    else liftV (- xVal) tyB'
+          tyLstB <- viewB mB tyB -- need to seperate out the "outside variables (outside of the gvar)" from the inside variables, and lift only the out //63@fbody^1\^0\.  
+                      
+          let uVars = reverse $ var <$> [0..(lenTyLstA - 1)]
               
               appUVars c = foldl (:+:) c uVars
               
-              foralls base = 
-                liftV lenTyLstA $ foldr forall base tyLstA  -- we raise after quantifying because we are capturing base with tyLstA
-                  
+              foralls base = liftV lenTyLstA $ foldr forall base tyLstA  -- we raise after quantifying because we are capturing base with tyLstA
+              
               xNms = [ ("/"++xNm++"^"++show i++"\\",ty) | (i,ty) <- zip [0..] tyLstB ]
               
           case upI xVal ctxt constraint of
             Nothing -> error $ "we still have a constraint to unify "++show constraint 
             Just (ctxt, form) -> do
-              let xVars [] = []                         
+              let xVars [] = []                     
                   xVars ((xNm,bTy):xNms) = 
                     (appUVars $ Var $ Exi dist xNm $ foralls $ fromType $ foldl appP' bTy xs):xs
                     where xs = xVars xNms
@@ -296,9 +297,14 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
               
               vtrace 6 ("L: "++show l) $ 
                 vtrace 6 ("TYLSTB: "++show tyLstB) $               
-                vtrace 6 ("TYB: "++show tyB) $                               
-                vtrace 6 ("xVar: "++show xVar) $                             
-                vtrace 6 ("xNm: "++show xNm) $                                             
+                vtrace 6 ("TYB: "++show tyB) $
+                vtrace 6 ("TYB': "++show tyB') $
+                vtrace 6 ("TYA: "++show tyA) $
+                vtrace 6 ("TYA': "++show tyA') $
+                vtrace 6 ("xVar: "++show xVar) $                             -- /93@spB^0\\
+                vtrace 6 ("xNm: "++show xNm) $
+                vtrace 6 ("xVal: "++show xVal) $
+                vtrace 6 ("hB: "++show hB) $                
                 return $ ( substRecon (l , dist, xNm) recon
                        , reset ctxt 
                          $ deepAppendError (    "CTXT: "++show ctxt 
@@ -350,7 +356,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                   newpat = Pat $ (liftV 1 $ Var $ uncurriedExi newExi) :+: var 0 
                   tyA' = liftV 1 tyA
 
-                  substF (Bind ty' f) | ty == ty' = Bind ty' $ subst (putTy ctx'' ty') (newpat, tyA, Exi dist xNm tyA) f
+                  substF (Bind ty' f) | ty == ty' = Bind ty' $ subst' (newpat, Exi dist xNm tyA) f
                   substF (a :&: b) = substF a :&: substF b
                   substF r = r
                   

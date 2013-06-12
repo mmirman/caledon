@@ -1,3 +1,4 @@
+{-
 defn testInf : type -> type
    | testInfImp  = [A : type][F : type -> _] testInf (F A)
 
@@ -7,3 +8,21 @@ defn testInf2 : [a : type] a -> type
 defn testInf3 : [a : type] ((a -> a) -> a) -> type
    | testInfImp3  = [A : type][F : _ -> _] testInf3 A F
 
+defn testInf4 : [a : type] ((a -> a) -> a) -> type
+   | testInfImp4  = [A : type][F] testInf4 A F
+-}
+defn testInf5 : [a : type] a -> type
+   | testInfImp5  = [A : type][F : (A -> A) -> A ] testInf5 A (F (\ b : A . b ) )
+--   | testInfImp5s  = [A : type][F : (A -> A) -> _ ] testInf5 A (F (\ b : A . b ) )
+
+
+{-
+
+∀: type . ∀: [ [ 0 ]  1 ]  1 . ∀: 0 . 0 ≐ (lam<0>:[ type ]  [ [ [ 0 ]  1 ]  1 ]  [ 0 ]  1) ( 2 )  ( 1 )  ( 0 ) 
+∧ [ type ]  [ [ [ 0 ]  1 ]  1 ]  testInf5 ( 1 )  ( 0 ( (lam<0>:[ type ]  [ [ [ 0 ]  1 ]  1 ]  [ 0 ]  1) ( 1 )  ( 0 )  )  )  ≐ (56@head<0>:type)
+
+lam => \x : type . \y : [[0] 1] 1. \z : 0 . z
+
+
+
+-}
