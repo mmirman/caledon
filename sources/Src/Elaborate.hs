@@ -13,7 +13,6 @@ import Control.Monad.RWS.Lazy (RWS, ask, local, censor, runRWS, censor, tell, ge
 import Control.Monad.State.Class (MonadState(), get, modify)
 import Control.Spoon
 import Data.Monoid
-
 type TypeChecker = RWS Ctxt Form Int
 
 typeConstraints cons tm ty = evalGen (do new <- Pat <$> getNewExists "@head" ty
@@ -33,12 +32,6 @@ getNewExists s ty = do
   depth <- height <$> ask 
   return $ Var $ Exi depth nm ty
 
-getNewExists' :: String -> Type -> TypeChecker P
-getNewExists' s ty = do
-  nm <- getNewWith s
-  depth <- height <$> ask 
-  return $ Var $ Exi (max 0 $ depth - 1) nm ty  
-  
 bindForall :: Type -> TypeChecker a -> TypeChecker a  
 bindForall ty = censor (bind ty) . local (\a -> putTy a ty)
 
@@ -134,7 +127,7 @@ genConstraintP p p' = case p of
     
   Var (Con "#hole#") -> do
     v <- getNewWith   "@tmakeF"
-    ty <- getNewExists' "@xty" $ tipemake v
+    ty <- getNewExists "@xty" $ tipemake v
     e  <- getNewExists "@xinH" ty
     Pat e .=. Pat p'
     return ty
@@ -142,14 +135,5 @@ genConstraintP p p' = case p of
   Var a -> do
     ctxt <- ask
     getVal ctxt a .=. Pat p'
-    
-    -- what the ever loving FUCK???
-    return $ liftV 1 $ getTy ctxt a 
-    
-    -- I just need to share the graph!!!!
-    -- Then I only have to generate variable names once!
-    -- unfortunately, this means that the graph might become GIANT!
-    -- which is bad.
-    -- Fortunately, it might be the case that the graph is either
-    -- always highly disconnected or highly connected.
-
+    return $ getTy ctxt a 
+        

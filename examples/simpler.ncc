@@ -2,3 +2,8 @@
 
 defn testInf : [ a : type ] ( (a -> a) -> a ) -> type
    | testInfImp  = [A][F : (A -> _) -> A ]  testInf A F
+
+
+
+defn testInf2 : [ a : type ] ( (a -> a) -> a ) -> type
+   | testInfImp2  = [A][F ]  testInf2 A F
