@@ -350,18 +350,20 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
         raise j v | j <= 0 = v
         raise i (recon, (dist,xNm,tyA), ctx, form) = 
           case upI 1 ctx form of
-            Just (ctx'', form) ->
-              let ty = getTy ctx (DeBr 0) -- from the original context! 
+            Just (ctx'', form) -> 
+              let ty = liftV (-1) $ getTy ctx (DeBr 0) -- from the original context! 
                   newExi = (dist - 1, xNm++"@r", forall ty tyA)
                   newpat = Pat $ (liftV 1 $ Var $ uncurriedExi newExi) :+: var 0 
-                  tyA' = liftV 1 tyA
 
                   substF (Bind ty' f) | ty == ty' = Bind ty' $ subst' (newpat, Exi dist xNm tyA) f
                   substF (a :&: b) = substF a :&: substF b
                   substF r = r
-                  
-              in  raise (i-1)
-                  ( substRecon (newpat, dist, xNm) recon, newExi, ctx'', substF form)
+
+                  frm = substF form
+              in  vtrace 8 ("NEW_EXI: "++show newExi) $
+                  vtrace 8 ("NEW_PAT: "++show newpat) $
+                  vtrace 8 ("TY: "++show ty) $
+                  raise (i-1) ( substRecon (newpat, dist, xNm) recon, newExi, ctx'', frm)
             Nothing -> error $ "can't go this high! "++show i 
                           ++ "\nDIST: "++show dist
                           ++ "\nxNm:  "++show xNm
@@ -369,10 +371,10 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                           ++ "\nCTXT: "++show ctx
                           ++ "\nFORM: "++show form
           
-        gvar_gvar_diff ((dist,_,_),_) ((dist',xNm',tyA'),_) | dist < dist' = vtrace 4 "*raise*" $ 
+        gvar_gvar_diff ((dist,_,_),_) ((dist',xNm',tyA'),_) | dist < dist' = vtrace 4 ("*raise* "++xNm') $  -- THERE IS A BUG HERE!!!!
           case upI (len - dist') ctxt constraint of
             Nothing -> error "constraint shouldn't be done"
-            Just (ctxt,form) -> case raise (dist' - dist) (recon , (dist',xNm',tyA') , ctxt, form) of
+            Just (ctxt,form) -> case raise (dist' - dist) (recon , (dist',xNm', liftV (dist' - len) tyA') , ctxt, form) of
               (recon, _,ctxt,form) -> return $ (recon, reset ctxt form)
         gvar_gvar_diff ((dist,_,_),_) ((dist',_,_),_) | dist > dist' = nothing
         gvar_gvar_diff ((dist,xNm,tyA'),ppA) ((_,xNm',tyB'),ppB) = vtrace 4 "*gvar_gvar_diff*" $ do

@@ -12,17 +12,15 @@ defn testInf4 : [a : type] ((a -> a) -> a) -> type
    | testInfImp4  = [A : type][F] testInf4 A F
 -}
 defn testInf5 : [a : type] a -> type
-   | testInfImp5  = [A : type][F : (A -> A) -> A ] testInf5 A (F (\ b : A . b ) )
---   | testInfImp5s  = [A : type][F : (A -> A) -> _ ] testInf5 A (F (\ b : A . b ) )
-
+--   | testInfImp5  = [A : type][F : (A -> A) -> A ] testInf5 A (F (\ b : A . b ) )
+   | testInfImp5s  = [A : type][F : (A -> A) -> _ ] testInf5 A (F (\ b : A . b ) )
 
 {-
 
-∀: type . ∀: [ [ 0 ]  1 ]  1 . ∀: 0 . 0 ≐ (lam<0>:[ type ]  [ [ [ 0 ]  1 ]  1 ]  [ 0 ]  1) ( 2 )  ( 1 )  ( 0 ) 
-∧ [ type ]  [ [ [ 0 ]  1 ]  1 ]  testInf5 ( 1 )  ( 0 ( (lam<0>:[ type ]  [ [ [ 0 ]  1 ]  1 ]  [ 0 ]  1) ( 1 )  ( 0 )  )  )  ≐ (56@head<0>:type)
+∀: type .( ∀: [ [ 0 ]  1 ]  (duck<0>:[ type ]  [ [ 3 ]  4 ]  type) ( 1 )  ( 0 )  .( (duck<0>:[ type ]  [ [ 3 ]  4 ]  type) ( 1 )  ( λ:1 . (0) )  ≤ 1 ) ))
 
-lam => \x : type . \y : [[0] 1] 1. \z : 0 . z
+duck == /////60@fbody+63@xinH@r\+/50@tyA^1\\+82@ftyBody@r\@r+//48@fbody^0\^1\\+///41@head^1\^0\^1\\
 
-
+∀: type .( ∀: [ [ 0 ]  1 ]  (duck<0>) ( 1 )  ( 0 )  .( (duck<0>) ( 1 )  ( λ:1 . (0) )  ≤ 1 ) ))
 
 -}
