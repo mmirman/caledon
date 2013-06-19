@@ -54,8 +54,8 @@ toTerm p = Pat p
 viewForallN (Pat p) = viewForallP p
 viewForallN _ = Nothing
 
-viewForallP (Var (Con "#forall#") :+: Pat ty :+: Abs ty' (Pat n) ) | ty == ty' = Just (ty,n)
-viewForallP (Var (Con "#forall#") :+: a :+: b@Abs{} ) = error $ "\nNot a forall type: [ "++show a ++ " ] "++show b
+viewForallP (Var (Con "#forall#") :+: Pat ty :+: Abs ty' (Pat n) ) {- | ty == ty' -} = Just (ty,n)
+--viewForallP (Var (Con "#forall#") :+: a :+: b@Abs{} ) = error $ "\nNot a forall type: [ "++show a ++ " ] "++show b
 viewForallP _ = Nothing
 
 viewForallPsimp (Var (Con "#forall#") :+: ty :+: b ) = Just (ty,b)

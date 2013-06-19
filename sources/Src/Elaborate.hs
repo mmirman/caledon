@@ -130,9 +130,7 @@ genConstraintP p p' = case p of
     return $ tyBody :+: v
     
   Var (Con "#hole#") -> do
-    v <- getNewWith   "@tmakeF"
-    ty <- getNewExists "@xty" $ tipemake v
-    Pat ty .@. tipemake v
+    ty <- getType p'
     Pat p' .@. ty
     return ty
 
@@ -140,3 +138,22 @@ genConstraintP p p' = case p of
     ctxt <- ask
     getVal ctxt a .=. Pat p'
     return $ getTy ctxt a 
+
+
+getType (Var v) = do
+  ctxt <- ask
+  return $ getTy ctxt v
+getType (a :+: v) = do
+  x <- getType a
+  case viewForallP x of
+    Nothing -> do
+      l <- getNewWith   "@tmakeF"
+      l' <- getNewWith   "@tmakeF"
+      ty <- getNewExists "@xty" $ tipemake l
+      tyBody <- getNewExists "@ftyBody" (ty ~> tipemake l')
+      Pat x .=. Pat (forall ty (tyBody :+: var 0))
+      return (tyBody :+: v)
+    Just ~(ty,t') -> do
+      return $ fromType $ appN' (Abs ty $ Pat t') v
+
+    

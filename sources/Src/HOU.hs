@@ -436,7 +436,7 @@ search (ctxt,Done) = nothing
 search (_,_ :=: _)    = nothing
 search (_,_ :<: _)    = nothing
 search (_,_ :<=: _)   = nothing
-search (ctxt,a :@: b) = (fmap (reset ctxt) <$>) <$> searchR a b
+search (ctxt,a :@: b) = vtrace 5 "*searchr* " $ (fmap (reset ctxt) <$>) <$> searchR a b
   where searchR search (viewForallP -> Just (a,b)) = do
           yv <- getNewWith "@y"
           let y = evar (height ctxt + 1) yv b
@@ -447,7 +447,7 @@ search (ctxt,a :@: b) = (fmap (reset ctxt) <$>) <$> searchR a b
           return [[ a :<: Pat b ]]
         searchR (Pat (tipeView -> UniversalType)) (tipeView -> UniversalType) = do
           return [[ a :<: Pat b ]]
-        searchR (Pat (tipeView -> Init _)) (tipeView -> UniversalType) = do
+        searchR (Pat (tipeView -> Init _)) b = do
           return [[ a :<: Pat b ]] 
         searchR search p = do
           let (constants, anons) = getTypes ctxt
@@ -467,11 +467,13 @@ search (ctxt,a :@: b) = (fmap (reset ctxt) <$>) <$> searchR a b
               makeFromAnons (i,t) = if sameFamily t
                                     then (:[]) <$> searchL (var i, t) (search,p)
                                     else return []
-                
+              
           let su = do
                 cl <- mapM makeFromConstant $ M.toList constants
-                rl <- mapM makeFromAnons $ zip [0..] anons
-                return $ sortAndUse (catMaybes cl) ++ [ concat rl ]
+                rl <- concat <$> mapM makeFromAnons (zip [0..] anons)
+                return $ case concatMap isNull $ sortAndUse (catMaybes cl) of
+                  [] -> concatMap isNull $ [rl]
+                  a:l -> (rl++a):l
           case search of 
             Abs{} -> su
             Pat s -> case viewHead s of
@@ -488,11 +490,14 @@ search (ctxt,a :@: b) = (fmap (reset ctxt) <$>) <$> searchR a b
           p -> do
             return $ Pat p :=: Pat goal :&: name :=: target
 
+isNull [] = []
+isNull a = [a]
+
 sortAndUse cl = coalate [] $ sortBy (\a b -> compare (snd $ fst a) (snd $ fst b)) cl
   where coalate [] [] = []
         coalate cg [] = [reverse cg]
         coalate cg (((sequ,_),targ):l) = 
-          if sequ
+          if sequ -- if sequ is on, then run sequentially
           then if not $ null cg 
                then reverse cg:[targ]:coalate [] l
                else [targ]:coalate [] l
@@ -516,6 +521,7 @@ unifyOrSearch recon cunf = sunify (Just cunf) <|> tryUnify cunf
         tryUnify cunf =  sunify (viewLeft cunf)
                      <|> sunify (viewRight cunf)
                      <|> tryUnify (nextUp cunf)
+                     
                          
         sunify (Just cunf) = (\a -> [[a]]) <$> unify recon cunf
         sunify Nothing = nothing
@@ -528,7 +534,7 @@ interpret _ (recon, (ctxt,Done)) | isDone ctxt = return recon
 interpret cons (recon, unf) = vtrace 5 ("\nCONSTRAINTS: "++(show $ uncurry rebuild unf)) $ do
   True <- return $ checkExiForm $ uncurry rebuild unf
   
-  m <- runMaybeT $ unifyOrSearch recon unf -- (emptyCon cons :: Ctxt,unf) 
+  m <- runMaybeT $ unifyOrSearch recon unf -- (emptyCon cons :: Ctxt,unf)          
   case m of
     Nothing  -> throwTrace 1 $ "constraints are not satisfiable: "++show unf
     Just lst -> next lst
@@ -536,9 +542,9 @@ interpret cons (recon, unf) = vtrace 5 ("\nCONSTRAINTS: "++(show $ uncurry rebui
                           ++"\nCONS: "++show (uncurry rebuild unf)
                           ++"\nLIST: "++show (concatMap (snd <$>) lst)
             next ([]:l) = next l
-            next [a] = interpret cons =<< F.asum (return <$> a)
+            next [a] = interpret cons =<< (fail "" <|> F.asum (return <$> a))
             next (a:l)  = appendErr "" current <|> next l -- this will need to be tested extensively
-              where current = interpret cons =<< F.asum (return <$> a)
+              where current = interpret cons =<< (fail "" <|> F.asum (return <$> a))
 
 unifyAll :: (Alternative m, MonadError String m, MonadState Int m) =>
             ConsGraph -> Constants -> Form -> m UniContext
