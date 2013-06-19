@@ -548,4 +548,4 @@ interpret cons (recon, unf) = vtrace 5 ("\nCONSTRAINTS: "++(show $ uncurry rebui
 
 unifyAll :: (Alternative m, MonadError String m, MonadState Int m) =>
             ConsGraph -> Constants -> Form -> m UniContext
-unifyAll cg cons unf = interpret cons ((cg, mempty), (emptyCon cons :: Ctxt, unf))
+unifyAll cg cons unf = appendErr "" $ interpret cons ((cg, mempty), (emptyCon cons :: Ctxt, unf))
