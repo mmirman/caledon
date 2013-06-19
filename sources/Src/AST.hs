@@ -36,7 +36,7 @@ instance Show P where
   show (viewForallP -> Just (ty,p)) = "[ "++show ty++" ]  " ++: show p
   show (viewImpForallP -> Just (nm,ty,p)) = "{ "++nm++" : "++show ty ++" }  " ++: show p
   show (viewImpAbsP -> Just(nm,ty,a)) = "?λ"++nm++" : "++show ty ++: " . ("++ show a ++ ")"
-  show (tipeView -> Init _) = "type"
+  show (tipeView -> Init _) = "type'"
   show (a :+: b) = show a ++: " ( "++ show b++" ) "
   show (Var a) = show a
 instance Show N where
@@ -138,11 +138,13 @@ tipemake v = vcon "type" :+: (con $ "#%#"++v)
 
 data TipeView = Init Name
               | Uninit
+              | UniversalType
               | NotTipe
               deriving (Show, Eq, Read)
                          
 tipeView (Var (Con "type") :+: (Pat (Var (Con ('#':'%':'#':v))))) = Init v
 tipeView (Var (Con "type")) = Uninit
+tipeView (Var (Con "type") :+: (Pat (Var (Con ("#universe#"))))) = UniversalType
 tipeView _ = NotTipe
 
 tipeViewN (Pat p) = tipeView p
@@ -164,18 +166,18 @@ universe = vcon universeName
 
 tipeu = tipe :+: Pat universe
 
-tiperName = "#tiper#"
-tiper = vcon tiperName
-  
+ulevelName = "#ulevel#"
+ulevel = vcon ulevelName
+
 
 constant a = (Axiom False $ -1000,a)
 constants :: Constants
-constants = M.fromList [ (tipeName, constant $ universe ~> tiper )
-                       , (universeName, constant $ tiper)
-                       , (tiperName, constant $ tiper)
+constants = M.fromList [ (tipeName, constant $ ulevel ~> tipeu )
+                       , (universeName, constant $ ulevel)
+                       , (ulevelName, constant $ ulevel )
                        , ("#forall#", constant $ forall tipeu $ (vvar 0 ~> tipeu) ~> tipeu)
-                       , ("#name#", constant tipeu)
-                       , ("#imp_forall#", constant $ forall tipe $ forall iname $ (forall (vvar 1) tipe) ~> tipe)
+--                       , ("#name#", constant tipeu)
+--                       , ("#imp_forall#", constant $ forall tipe $ forall iname $ (forall (vvar 1) tipe) ~> tipe)
                        ]
             
 ---------------

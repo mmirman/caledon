@@ -163,8 +163,9 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
         identity f (universeView -> Init a) (universeView -> Init b) = do
           recon <- putGr recon f a b
           return (recon, reset ctxt Done)
-        identity f (tipeView -> Init a) (tipeView -> Init b) = do
-          recon <- putGr recon f a b
+        identity f (tipeView -> Init a) (tipeView -> UniversalType) = do
+          return (recon, reset ctxt Done)
+        identity f (tipeView -> UniversalType) (tipeView -> Init a) = do
           return (recon, reset ctxt Done)
         identity (=:=) (viewForallPsimp -> Just (a,b)) (viewForallPsimp -> Just (a',b')) = do
           return $ (recon, reset ctxt $ a :=: a' :&: b =:= b') -- implements the "switching" for atoms
@@ -392,7 +393,9 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                                     
                   getTyLst tb (ty:c) (a:lst) | elem a ppB = forall ty $
                                                          getTyLst tb c lst
-                  getTyLst tb (ty:c) (a:lst) = liftV (-1) $ getTyLst tb c lst
+                  getTyLst tb (ty:c) (a:lst) = liftV (-1) $ getTyLst tb c lst {- case liftV (-1) $ Abs ty {- should be lazy -} $ Pat $ getTyLst tb c lst of
+                    ~(Abs _ (Pat t)) -> t -}
+                    
                   getTyLst tb _ _ = tb
                   
                   (tyLstA,tyBaseA) = viewTy ppA tyA -- viewP tyA
@@ -413,13 +416,15 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
               
               True <- vtrace 6 ("LA:" ++ show lA)
                     $ vtrace 6 ("LB:" ++ show lB)
+                    $ vtrace 6 ("TYA:" ++ show tyA)
+                    $ vtrace 6 ("TYB:" ++ show tyB)                                            
                     $ vtrace 6 ("PPA:" ++ show ppA)                                            
                     $ vtrace 6 ("CONS:" ++ show constraint)
                     $ return True
               return $ ( substRecon (lA, dist , xNm ) $  
                          substRecon (lB, dist , xNm') $ recon
                        , reset ctxt $ 
-                         subst' (lA,  Exi dist xNm  tyA) $ 
+                         subst' (lA, Exi dist xNm  tyA) $ 
                          subst' (lB, Exi dist xNm' tyB) $ form
                        )
 
@@ -434,8 +439,16 @@ search (_,_ :<=: _)   = nothing
 search (ctxt,a :@: b) = (fmap (reset ctxt) <$>) <$> searchR a b
   where searchR search (viewForallP -> Just (a,b)) = do
           yv <- getNewWith "@y"
-          let y = evar (height ctxt) yv b
-          return $ [[Bind a $ y :=: appN (putTy ctxt a) search (var 0) :&: y :@: b]]
+          let y = evar (height ctxt + 1) yv b
+          return $ [[Bind a $ y :=: appN' (liftV 1 search) (var 0) :&: y :@: b]]
+        searchR (Pat (tipeView -> Init _)) (tipeView -> Init _) = do
+          return [[ a :<: Pat b ]]
+        searchR (Pat (tipeView -> UniversalType)) (tipeView -> Init _) = do
+          return [[ a :<: Pat b ]]
+        searchR (Pat (tipeView -> UniversalType)) (tipeView -> UniversalType) = do
+          return [[ a :<: Pat b ]]
+        searchR (Pat (tipeView -> Init _)) (tipeView -> UniversalType) = do
+          return [[ a :<: Pat b ]] 
         searchR search p = do
           let (constants, anons) = getTypes ctxt
               
@@ -455,10 +468,18 @@ search (ctxt,a :@: b) = (fmap (reset ctxt) <$>) <$> searchR a b
                                     then (:[]) <$> searchL (var i, t) (search,p)
                                     else return []
                 
-          cl <- mapM makeFromConstant $ M.toList constants
-          rl <- mapM makeFromAnons $ zip [0..] anons
-          return $ sortAndUse (catMaybes cl) ++ [ concat rl ]
-
+          let su = do
+                cl <- mapM makeFromConstant $ M.toList constants
+                rl <- mapM makeFromAnons $ zip [0..] anons
+                return $ sortAndUse (catMaybes cl) ++ [ concat rl ]
+          case search of 
+            Abs{} -> su
+            Pat s -> case viewHead s of
+              Exi{} -> su
+              h -> do
+                rl <- (:[]) <$> searchL (Pat $ Var h, getTy ctxt h) (search,p)
+                return $ [ rl ]
+              
         searchL (name,attempt) tg@(target,goal) = case attempt of
           (viewForallP -> Just (av,b)) -> do
             xv <- getNewWith "@xv"
