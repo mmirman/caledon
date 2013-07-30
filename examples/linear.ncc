@@ -1,12 +1,14 @@
-defn linear-prop : (prop -> prop) -> prop
-   | linear-var = linear-prop (\a . a)
+defn linear : [T : type] [ P : T -> type] ([x : T] P x) -> type
+   | linear-app1 = linear T P (\x . (F x) G)
+                <- linear T (\x : T . Q x -> P x) F
+   | linear-app2 = linear T (\x : T . P x) (\x . F (G x))
+                <- linear T (\x : T . Q x) G
+                <- [x : T] linear (Q x) (\z : Q x . P x) F
+   | linear-eta1 = linear T ([x : T] [y : A x] P x y) (\x : T. \y : A x . F x y)
+                <- linear T ([x : T] [y : A x] P x y) (\x : T . F x)
+   | linear-eta2 = linear T ([x : T] [y : A] P x y) (\x : T. \y : A . F y x)
+                <- [y :A] linear T ([x : T] P x y) (\x : T . F y x)
+   | linear-var  = linear T (\x : T . T) (\x : T . x)
 
-
-defn linear : {A} (A -> prop) -> prop
-   | linear-app2 = [M : _ -> _]
-                   linear {A = A} (\a : A . M (N a))
-                <- linear {A = A} N
-
-   | linear-app1 = [A : prop][B : prop][N : B][M : A -> B -> prop ]
-                   linear {A = A} (\a : A . M a N)
-                <- [b : B] linear {A = A} (\a : A . M a b)
+defn lolli : [T : type] (T -> type) -> type
+   | llam = [F : [x : T] TyF x] linear T TyF F => lolli T TyF

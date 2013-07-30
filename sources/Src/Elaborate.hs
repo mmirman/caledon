@@ -86,9 +86,8 @@ genConstraintP p p' = case p of
   (viewForallP -> Just ~(tyAorg,tyF)) -> do
 
     tyA <- getNewTyVar "@tyA"
+    tyret <- tipemake <$> getNewWith "@ret"
     tyAty <- genConstraintP tyAorg tyA
-    
-    tyret <- tipemake <$> getNewWith "@maketipe"
     Pat tyAty .<=. Pat tyret
     
     tyFf' <- (getNewExists "@fbody" . forall tyA . tipemake) =<< getNewWith "@tmakeF"
