@@ -168,7 +168,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
         identity f (tipeView -> UniversalType) (tipeView -> Init a) = do
           return (recon, reset ctxt Done)
         identity (=:=) (viewForallPsimp -> Just (a,b)) (viewForallPsimp -> Just (a',b')) = do
-          return $ (recon, reset ctxt $ a :=: a' :&: b =:= b') -- implements the "switching" for atoms
+          return $ (recon, reset ctxt $ Pat a :=: Pat a' :&: b =:= b') -- implements the "switching" for atoms
         identity f (viewPat -> ~(hAO,ppA)) (viewPat -> ~(hBO, ppB)) = do
           (hA,recon) <- uvarTy recon ctxt hAO
           (hB,recon) <- uvarTy recon ctxt hBO
@@ -385,7 +385,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
           case upI xx'Val ctxt constraint of
             Nothing -> error $ "can't go this high! "++show xx'Val
             Just (ctxt, form) -> do
-              let xNm'' = "/"++xNm++"+"++xNm'++"\\"
+              let xNm'' = {-"/"++ -} xNm++"+" -- ++xNm'++"\\"
 
                   sames = [ (var i, var j) | (a,i) <- zip ppA [0..], (b,j) <- zip ppB [0..], a == b ]
                   
@@ -482,14 +482,14 @@ search (ctxt,a :@: b) = vtrace 5 "*searchr* " $ (fmap (reset ctxt) <$>) <$> sear
                 rl <- (:[]) <$> searchL (Pat $ Var h, getTy ctxt h) (search,p)
                 return $ [ rl ]
               
-        searchL (name,attempt) tg@(target,goal) = case attempt of
-          (viewForallP -> Just (av,b)) -> do
+        searchL (name,attempt) tg@(target,goal) = vtrace 5 ("*searchl* "++show attempt) $ case attempt of
+          (viewForallPsimp -> Just (av,b)) -> do
             xv <- getNewWith "@xv"
             let x = evar (height ctxt) xv av
-            (:&: x :@: av) <$> searchL (appN ctxt name x, b) tg
+            (:&: x :@: av) <$> searchL (appN ctxt name x, fromType $ appN' b x) tg
           p -> do
             return $ Pat p :=: Pat goal :&: name :=: target
-
+            
 isNull [] = []
 isNull a = [a]
 
@@ -549,3 +549,4 @@ interpret cons (recon, unf) = vtrace 5 ("\nCONSTRAINTS: "++(show $ uncurry rebui
 unifyAll :: (Alternative m, MonadError String m, MonadState Int m) =>
             ConsGraph -> Constants -> Form -> m UniContext
 unifyAll cg cons unf = appendErr "" $ interpret cons ((cg, mempty), (emptyCon cons :: Ctxt, unf))
+

@@ -30,8 +30,8 @@ instance Applicative Choice where
   pure = Success
   mf <*> ma = mf >>= (<$> ma)
 
---determine a b = appendErr "" $ (:<|>:) (appendErr "" a) (appendErr "" b)
-determine = (:<|>:)
+determine a b = appendErr "" $ (:<|>:) (appendErr "" a) (appendErr "" b)
+--determine = (:<|>:)
 
 instance Alternative Choice where
   empty = Fail ""

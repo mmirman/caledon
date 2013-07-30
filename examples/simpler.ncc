@@ -1,9 +1,18 @@
-
+{-
 
 defn testInf : [ a : type ] ( (a -> a) -> a ) -> type
    | testInfImp  = [A][F : (A -> _) -> A ]  testInf A F
 
-
-
 defn testInf2 : [ a : type ] ( (a -> a) -> a ) -> type
    | testInfImp2  = [A][F ]  testInf2 A F
+-}
+
+defn testInf3 : [ a : type ] ( (a -> a) -> a ) -> type
+  >| testInfImp3  = [F : _] testInf3 A F
+{-
+
+∀: [ (///95@tyA^0\^1\+///95@tyA^0\^0\+/////109@tyV@r+A\+/103@fex^0\@r\+//100@ftyArg^0\^0\@r\+//100@ftyArg^0\^1\@r\+/100@ftyArg^1\@r\\\<0>:type') ]  (///95@tyA^0\^1\+///95@tyA^0\^0\+/////109@tyV@r+A\+/103@fex^0\@r\+//100@ftyArg^0\^0\@r\+//100@ftyArg^0\^1\@r\+/100@ftyArg^1\@r\\\<0>:type') .( (/166@xv+//165@xv^1\+//165@xv^0\+///////95@tyA^1\+///95@tyA^0\^1\+///95@tyA^0\^0\+/////109@tyV@r+A\+/103@fex^0\@r\+//100@ftyArg^0\^0\@r\+//100@ftyArg^0\^1\@r\+/100@ftyArg^1\@r\\\\+/98@fbody^0\\+///93@head^0\^0\^0\\+///93@head^0\^0\^1\\+//93@head^0\^1\\+//93@head^1\^0\\\\\<0>:type ( #universe# ) ) ≐ (/166@xv+//165@xv^1\+//165@xv^0\+///////95@tyA^1\+///95@tyA^0\^1\+///95@tyA^0\^0\+/////109@tyV@r+A\+/103@fex^0\@r\+//100@ftyArg^0\^0\@r\+//100@ftyArg^0\^1\@r\+/100@ftyArg^1\@r\\\\+/98@fbody^0\\+///93@head^0\^0\^0\\+///93@head^0\^0\^1\\+//93@head^0\^1\\+//93@head^1\^0\\\\\<0>:type ( #universe# ) ) ) 
+
+∧ λ:0 . ((/166@xv+//165@xv^1\+//165@xv^0\+///////95@tyA^1\+///95@tyA^0\^1\+///95@tyA^0\^0\+/////109@tyV@r+A\+/103@fex^0\@r\+//100@ftyArg^0\^0\@r\+//100@ftyArg^0\^1\@r\+/100@ftyArg^1\@r\\\\+/98@fbody^0\\+///93@head^0\^0\^0\\+///93@head^0\^0\^1\\+//93@head^0\^1\\+//93@head^1\^0\\\\\<0>:type ( #universe# ) )) ∈  [ 0 ]  type ( #universe# )  ∧ [ (/166@xv+//165@xv^1\+//165@xv^0\+///////95@tyA^1\+///95@tyA^0\^1\+///95@tyA^0\^0\+/////109@tyV@r+A\+/103@fex^0\@r\+//100@ftyArg^0\^0\@r\+//100@ftyArg^0\^1\@r\+/100@ftyArg^1\@r\\\\+/98@fbody^0\\+///93@head^0\^0\^0\\+///93@head^0\^0\^1\\+//93@head^0\^1\\+//93@head^1\^0\\\\\<0>:type ( #universe# ) ) ]  (/166@xv+//165@xv^1\+//165@xv^0\+///////95@tyA^1\+///95@tyA^0\^1\+///95@tyA^0\^0\+/////109@tyV@r+A\+/103@fex^0\@r\+//100@ftyArg^0\^0\@r\+//100@ftyArg^0\^1\@r\+/100@ftyArg^1\@r\\\\+/98@fbody^0\\+///93@head^0\^0\^0\\+///93@head^0\^0\^1\\+//93@head^0\^1\\+//93@head^1\^0\\\\\<0>:type ( #universe# ) ) ∈  type ( #universe# ) 
+
+-}

@@ -58,7 +58,7 @@ viewForallP (Var (Con "#forall#") :+: Pat ty :+: Abs ty' (Pat n) ) {- | ty == ty
 --viewForallP (Var (Con "#forall#") :+: a :+: b@Abs{} ) = error $ "\nNot a forall type: [ "++show a ++ " ] "++show b
 viewForallP _ = Nothing
 
-viewForallPsimp (Var (Con "#forall#") :+: ty :+: b ) = Just (ty,b)
+viewForallPsimp (Var (Con "#forall#") :+: Pat ty :+: b ) = Just (ty,b)
 viewForallPsimp _ = Nothing
 
 
@@ -93,6 +93,7 @@ viewP (viewForallP -> Just ~(ty,n)) = (ty:l,h)
   where ~(l,h) = viewP n
 viewP p = ([],p)
 
+fromType :: N -> P
 fromType (Pat p) = p
 fromType a = error $ "\nNot a type: "++show a
 
