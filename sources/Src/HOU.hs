@@ -278,7 +278,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
             Just (ctxt, form) -> do
               let xVars [] = []                     
                   xVars ((xNm,bTy):xNms) = 
-                    (appUVars $ Var $ Exi dist xNm $ foralls $ fromType $ foldl appP' bTy xs):xs
+                    (appUVars $ Var $ Exi dist xNm $ foralls $ fromType $ foldl appP' bTy $ reverse xs):xs
                     where xs = xVars xNms
 
                   xVar = reverse $ xVars $ reverse xNms

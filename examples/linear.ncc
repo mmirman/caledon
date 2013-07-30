@@ -1,6 +1,13 @@
 defn linear : [T : type] [ P : T -> type] ([x : T] P x) -> type
-   | linear-app1 = linear T P (\x . (F x) G)
-                <- linear T (\x : T . Q x -> P x) F
+
+   | linear-app1 = [T : type ]
+                   [P : T -> type]
+                   [Q : type]
+                   [F : [x : T] Q -> P x]
+                   [G : Q]
+                   linear T (\x : T . P x) (\x : T . (F x) G)
+                <- linear T (\x : T . Q -> P x) (\x : T . F x)
+{-
    | linear-app2 = linear T (\x : T . P x) (\x . F (G x))
                 <- linear T (\x : T . Q x) G
                 <- [x : T] linear (Q x) (\z : Q x . P x) F
@@ -9,6 +16,7 @@ defn linear : [T : type] [ P : T -> type] ([x : T] P x) -> type
    | linear-eta2 = linear T ([x : T] [y : A] P x y) (\x : T. \y : A . F y x)
                 <- [y :A] linear T ([x : T] P x y) (\x : T . F y x)
    | linear-var  = linear T (\x : T . T) (\x : T . x)
+-}
 
-defn lolli : [T : type] (T -> type) -> type
-   | llam = [F : [x : T] TyF x] linear T TyF F => lolli T TyF
+--defn lolli : [T : type] (T -> type) -> type
+--   | llam = [F : [x : T] TyF x] linear T TyF F => lolli T TyF
