@@ -218,8 +218,9 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
               sames = [ var i | ((a,b),i) <- zip (zip ppA ppB) [0..], a == b ]
                             
               tyB' = getTyLst tyLst (zip ppA ppB)
-                where getTyLst (ty:c) ((a,b):lst) | a == b = forall ty $ getTyLst c lst
-                      getTyLst (_:c) (_:lst) = liftV (-1) $ getTyLst c lst
+                where getTyLst (ty:c) ((a,b):lst)
+                        | a == b = forall ty $ getTyLst c lst
+                        | otherwise = liftV (-1) $ getTyLst c lst
                       getTyLst _ _ = tyBase
                             
               vlstBase = foldl (:+:) (Var $ Exi dist xNm' tyB') sames
@@ -373,7 +374,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                           ++ "\nCTXT: "++show ctx
                           ++ "\nFORM: "++show form
           
-        gvar_gvar_diff ((dist,_,_),_) ((dist',xNm',tyA'),_) | dist < dist' = vtrace 4 ("*raise* "++xNm') $  -- THERE IS A BUG HERE!!!!
+        gvar_gvar_diff ((dist,_,_),_) ((dist',xNm',tyA'),_) | dist < dist' = vtrace 4 ("*raise* "++xNm') $  -- TODO: THERE IS A BUG HERE!!!!
           case upI (len - dist') ctxt constraint of
             Nothing -> error "constraint shouldn't be done"
             Just (ctxt,form) -> case raise (dist' - dist) (recon , (dist',xNm', liftV (dist' - len) tyA') , ctxt, form) of
@@ -518,8 +519,9 @@ unifyOrSearch recon cunf = sunify (Just cunf) <|> tryUnify cunf
         -- efficient enough.  Importantly, this provides some notion of cache coherency
         -- during the search.
         tryUnify (c,Done) | isDone c = return [[(recon, (c,Done))]]
-        tryUnify cunf | isDone $ fst cunf = trySearch cunf
-        tryUnify cunf =  sunify (viewLeft cunf)
+        tryUnify cunf
+          | isDone $ fst cunf = trySearch cunf
+          | otherwise =  sunify (viewLeft cunf)
                      <|> sunify (viewRight cunf)
                      <|> tryUnify (nextUp cunf)
                      
