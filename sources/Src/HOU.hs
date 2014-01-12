@@ -105,8 +105,9 @@ type UniContext = (ConsGraph, Reconstruction)
 
 substRecon :: (Term,Int, Name) -> UniContext -> UniContext
 substRecon (s,d, x) (gr,m) = (gr, M.insert x (d,s) $ fmap substy m)
-  where substy (depth,t) | depth < d = (depth,t)
-        substy (depth,t) = (depth, suber t)
+  where substy (depth,t)
+          | depth < d = (depth,t)
+          | otherwise = (depth, suber t)
           where suber = substN' (liftV (depth - d) s, Exi d x undefined)
 
 putGr (gr,recon) foo a b = case foo (con a) (con b) of
