@@ -4,15 +4,18 @@
  UnicodeSyntax,
  BangPatterns,
  TupleSections,
- ViewPatterns
+ ViewPatterns,
+ FlexibleContexts
  #-}
 module HOU where
+
 
 import Src.Tracing
 import Names
 import Choice
 import AST
 import Substitution
+
 import Context
 import TopoSortAxioms
 import Control.Monad.State.Strict (StateT, forM_,runStateT, modify, get,put, State, runState)
@@ -33,6 +36,11 @@ import Debug.Trace
 import System.IO.Unsafe
 
 import Control.Lens hiding (Choice(..))
+
+-- No idea why I would need to redefine these here
+(.∀) :: Name -> Type -> Constraint -> Constraint
+(.∀) = Bind Forall
+      
 
 throwTrace !i s = vtrace i s $ throwError s
 
@@ -689,7 +697,7 @@ checkType b sp ty = case sp of
     t'' <- regenAbsVars t
     v'  <- checkType b v'' t
     r   <- getNewWith "@r"
-    Spine _ l' <- addToEnv (∀) r t'' $ checkType b (Spine r l) ty
+    Spine _ l' <- addToEnv (.∀) r t'' $ checkType b (Spine r l) ty
     if b 
       then return $ rebuildSpine (rebuildFromMem mem v') l'
       else return $ rebuildSpine (ascribe (rebuildFromMem mem v') t) l'
@@ -706,12 +714,12 @@ checkType b sp ty = case sp of
            
   Spine "#imp_forall#" [_, Abs x tyA tyB] -> do
     tyA <- checkType b tyA tipe
-    tyB <- addToEnv (∀) x tyA $ checkType b tyB ty
+    tyB <- addToEnv (.∀) x tyA $ checkType b tyB ty
     return $ imp_forall x tyA tyB
     
   Spine "#forall#" [_, Abs x tyA tyB] -> do
     tyA <- checkType b tyA tipe
-    forall x tyA <$> (addToEnv (∀) x tyA $ 
+    forall x tyA <$> (addToEnv (.∀) x tyA $ 
       checkType b tyB ty )
 
   -- below are the only cases where bidirectional type checking is useful 
@@ -719,7 +727,7 @@ checkType b sp ty = case sp of
     Spine "#imp_forall#" [_, Abs x' tyA' tyF'] | x == x' || "" == x' -> do
       tyA <- checkType b tyA tipe
       tyA ≐ tyA'
-      addToEnv (∀) x tyA $ do
+      addToEnv (.∀) x tyA $ do
         imp_abs x tyA <$> checkType b sp tyF'
     _ -> do
       -- here this acts like "infers" since we can always initialize a ?\ like an infers!
@@ -733,14 +741,14 @@ checkType b sp ty = case sp of
     Spine "#forall#" [_, Abs x' tyA' tyF'] -> do
       tyA <- checkType b tyA tipe
       tyA ≐ tyA'
-      addToEnv (∀) x tyA $ do
+      addToEnv (.∀) x tyA $ do
         Abs x tyA <$> checkType b sp (subst (x' |-> var x) tyF')
     _ -> do
       e <- getNewWith "@e"
       tyA <- checkType b tyA tipe
       addToEnv (∃) e (forall "" tyA tipe) $ do
         forall x tyA (Spine e [var x]) ≐ ty
-        Abs x tyA <$> addToEnv (∀) x tyA (checkType b sp $ Spine e [var x])
+        Abs x tyA <$> addToEnv (.∀) x tyA (checkType b sp $ Spine e [var x])
   Spine nm [] | isChar nm -> do
     ty ≐ Spine "char" []
     return sp

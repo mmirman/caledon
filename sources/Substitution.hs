@@ -233,7 +233,10 @@ instance Subst Constraint where
     
 subq s f e c1 c2 = e (substFree s f c1) (substFree s f c2)
 
+(∃) :: Name -> Type -> Constraint -> Constraint
 (∃) = Bind Exists
+
+(∀) :: Name -> Type -> Constraint -> Constraint
 (∀) = Bind Forall
   
 infixr 0 <<$>

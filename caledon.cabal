@@ -45,10 +45,10 @@ executable caledon
                  containers >= 0.4 && < 1.0, 
                  transformers >= 0.3 && < 1.0,
                  cpphs >= 1.0 && < 2.0,
-                 lens >= 3.0 && < 4.0,
+                 lens >= 3.0,
                  deepseq >= 1 && < 2,
                  spoon >= 0 && < 1,
-                 fgl >= 5.4 && < 5.5
+                 fgl >= 5.4
 
   Extensions: FlexibleContexts,
               FlexibleInstances,

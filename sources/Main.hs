@@ -3,10 +3,10 @@ module Main where
 
 import Options
 import AST
+import HOU
 import Substitution
 import Src.Tracing
 import Choice
-import HOU
 import qualified Src.Pipeline as Src
 import Parser
 import System.Environment

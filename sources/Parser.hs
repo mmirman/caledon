@@ -29,7 +29,7 @@ import qualified Data.Set as S
 import Debug.Trace
 import qualified Data.Foldable as F
 
-import Control.Lens 
+import Control.Lens hiding (noneOf)
 
 -----------------------------------------------------------------------
 -------------------------- PARSER -------------------------------------
