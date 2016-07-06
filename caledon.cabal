@@ -1,6 +1,6 @@
 Name: caledon
 
-Version: 3.2.1.0
+Version: 3.2.2.0
 
 Description:         a dependently typed, polymorphic, higher order logic programming language based on the calculus of constructions designed for easier metaprogramming capabilities. 
 
@@ -38,7 +38,7 @@ executable caledon
                  containers >= 0.4 && < 1.0, 
                  transformers >= 0.3 && < 1.0,
                  cpphs >= 1.0 && < 2.0,
-                 lens >= 3.0 && < 4.0
+                 lens >= 3.0
 
   Extensions: FlexibleContexts,
               FlexibleInstances,
