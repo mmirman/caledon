@@ -40,6 +40,9 @@ options =
   , Option ['h'] ["help"]
     (OptArg ((optHelp .~) . Just . fromMaybe helpMsg . fmap getMsg) "OPTION")
     "display this help message"
+  , Option ['V'] ["version"]
+    (NoArg $ optHelp .~ Just "release: caledon-3.3.0.1\nvariant: predictive universes")
+    "display the version info"
   ]
 
 helpMessage = "Usage is \"caledon [--io-only] file.ncc\""
@@ -50,11 +53,14 @@ compilerOpts argv =
     (o,n,[] ) -> return (foldl (flip id) defaultOptions o, n)
     (_,_,errs) -> ioError $ userError $ concat errs ++ helpMsg
 
+helpMsg :: String
 helpMsg = usageInfo header options
+
+getMsg :: [Char] -> String
 getMsg option = usageInfo header $ maybeToList 
                 $ find (\(Option s l _ _) -> elem option $ concat $ 
                                          [[['-',i],[i]] | i <- s ] 
                                        ++[["--"++i,i]   | i <- l ] 
                        ) options
-  
+
 header = "Usage: caledon [OPTIONS] file.ncc" 
