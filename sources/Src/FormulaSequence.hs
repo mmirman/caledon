@@ -9,6 +9,12 @@ import qualified Data.Foldable as F
 import qualified Data.List as L
 import Debug.Trace
 
+(!) :: (Show k, Show v, Ord k) => M.Map k v -> k -> v
+(!) a b = case M.lookup b a of
+  Nothing -> error $ "Couldn't find "++show b++" in "++show a
+  Just r -> r
+  
+
 type Recon = [Either Form Form]
 
 data Elem = B { elemType :: Type
@@ -46,7 +52,7 @@ instance Context Ctxt where
     -- the extra one is because we are getting the type and moving it below!
     False -> error $ "WHAT (in formulasequence)? "++show i++"\nIN: "++show c
     
-  getVal c (Con n) = case fst $ ctxtConstants c M.! n of
+  getVal c (Con n) = case fst $ ((ctxtConstants c) ! n) of
     Macro a -> a -- we shouldn't need to lift because this is coming from constants
     _ -> Pat $ Var $ Con n
   getVal c v = Pat $ Var v
