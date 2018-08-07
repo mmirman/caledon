@@ -1,3 +1,4 @@
+{-
 -------------
 -- exists  --
 -------------
@@ -27,8 +28,14 @@ defn open : {N}{F : N -> type}{A : type} ( exists a : N . F a ) -> ([a : N] F a 
 ---------------
 -- searches ---
 ---------------
+
+-}
+
 defn any : {Search : type} (Search -> type) -> type
    | is = [V : A][F : A -> type] F V -> any {Search = A} F
+
+{-
+
 
 defn openAny : [A][F : A -> type] any F -> [V : A] F V -> type
    | openAnyDef = openAny A F (is V F FV) V FV
@@ -58,3 +65,5 @@ fixity left 0 ==
 -- currently we can't do any inference inside of definitional signatures
 defn == : {q : type} (q -> type) -> q -> type 
   as ?\q . \foo : q -> type . \v : q . foo v
+
+-}

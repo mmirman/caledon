@@ -29,8 +29,9 @@ checkAndRun verbose decs = do
     putStrLn "\nFILE: "
     forM_ decs $ \s -> putStrLn $ show s++"\n"
 
+  
   when verbose $ putStrLn "\nCOMPILING: "
-  decs <- case runError $ Src.typeCheckAll verbose decs of
+  decs <- case runError $ typeCheckAll verbose decs of
     Left e -> error e
     Right e -> do when verbose $ putStrLn "DONE: compilation success!\n"
                   return e

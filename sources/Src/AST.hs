@@ -177,8 +177,10 @@ constants = M.fromList [ (tipeName, constant $ ulevel ~> tipeu )
                        , (universeName, constant $ ulevel)
                        , (ulevelName, constant $ ulevel )
                        , ("#forall#", constant $ forall tipeu $ (vvar 0 ~> tipeu) ~> tipeu)
---                       , ("#name#", constant tipeu)
---                       , ("#imp_forall#", constant $ forall tipe $ forall iname $ (forall (vvar 1) tipe) ~> tipe)
+                       , ("#ascribe#", constant $ forall tipeu $ vvar 0 ~> vvar 0)
+                       --, ("#name#", constant tipeu)
+                       --, ("#imp_forall#", constant $ forall tipeu $ (vvar 0 ~> tipeu) ~> tipeu)
+                       --, ("#tycon#", constant $ iname ~> tipeu ~> tipeu)
                        ]
             
 ---------------
