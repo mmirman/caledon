@@ -1,4 +1,3 @@
-{-
 -------------
 -- exists  --
 -------------
@@ -29,12 +28,12 @@ defn open : {N}{F : N -> type}{A : type} ( exists a : N . F a ) -> ([a : N] F a 
 -- searches ---
 ---------------
 
--}
+
 
 defn any : {Search : type} (Search -> type) -> type
    | is = [V : A][F : A -> type] F V -> any {Search = A} F
 
-{-
+
 
 
 defn openAny : [A][F : A -> type] any F -> [V : A] F V -> type
@@ -66,4 +65,3 @@ fixity left 0 ==
 defn == : {q : type} (q -> type) -> q -> type 
   as ?\q . \foo : q -> type . \v : q . foo v
 
--}
