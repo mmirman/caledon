@@ -237,7 +237,6 @@ tycon nm val = Spine "#tycon#" [Spine nm [val]]
 
 consts = [ (tipeName , tipe)
          -- atom : kind
-           
          , ("#ascribe#", forall "a" tipe $ (var "a") ~> (var "a"))
          
          , ("#forall#", forall "a" tipe $ (var "a" ~> tipe) ~> tipe)
