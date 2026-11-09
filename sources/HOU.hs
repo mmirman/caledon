@@ -18,10 +18,11 @@ import Substitution
 
 import Context
 import TopoSortAxioms
-import Control.Monad.State.Strict (StateT, forM_,runStateT, modify, get,put, State, runState)
+import Universe
+import Control.Monad.State.Strict (StateT, runStateT, modify, get,put, State, runState)
 import Control.Monad.RWS.Strict (RWST, runRWST, ask, tell, listen)
-import Control.Monad.Error (throwError, MonadError)
-import Control.Monad (unless, forM, replicateM, void, (<=<), when)
+import Control.Monad.Except (throwError, MonadError)
+import Control.Monad (unless, forM_, forM, replicateM, void, (<=<), when)
 import Control.Monad.Trans (lift)
 import Control.Applicative
 import qualified Data.Foldable as F
@@ -193,10 +194,12 @@ unifyEq cons@(a :=: b) = case (a,b) of
             b@(Spine x' y'l) -> vtraceShow 4 5 "-gs-" cons $ do
               bind' <- getElm ("gvar-blah: "++show cons) x' 
               case bind' of
-                Right ty' -> vtraceShow 1 2 "-gc-" cons $ -- gvar-const
+                Right ty' -> vtraceShow 1 2 "-gc-" cons $ do
+                  when (S.member x $ freeVariables y'l) $
+                    throwTrace 0 $ "CANT: occurs check: " ++ show cons
                   if allElementsAreVariablesNoPP fors yl
-                  then gvar_const (Spine x yl, ty) (Spine x' y'l, ty')  
-                  else return Nothing
+                    then gvar_const (Spine x yl, ty) (Spine x' y'l, ty')
+                    else return Nothing
                 Left Binding{ elmQuant = Forall } | (not $ elem (var x') yl) && S.member x' fors -> 
                   if allElementsAreVariables fors yl 
                   then throwTrace 0 $ "CANT: gvar-uvar-depends: "++show (a :=: b)
@@ -214,7 +217,7 @@ unifyEq cons@(a :=: b) = case (a,b) of
                   then gvar_uvar_outside (Spine x yl, ty) (Spine x' y'l, ty')
                   else return Nothing
                 Left bind'@Binding{ elmQuant = Exists, elmType = ty'} -> vtraceShow 4 5 "-gg-" cons $
-                  if not $ allElementsAreVariables fors yl && allElementsAreVariables fors y'l && S.member x' exis
+                  if not $ allElementsAreVariables fors yl && allElementsAreVariables fors y'l && (x == x' || S.member x' exis)
                   then return Nothing 
                   else if x == x' 
                        then vtraceShow 1 2 "-ggs-" cons $ -- gvar-gvar-same
@@ -275,7 +278,7 @@ raiseToTop top bind@Binding{ elmName = x, elmType = ty } sp m = do
   let newx_args = map (var . fst) hl
       sub = x |-> Spine x' newx_args
       
-      ty' = foldr (\(nm,ty) a -> forall nm ty a) ty hl
+      ty' = foldr (\(nm,ty) a -> forAll nm ty a) ty hl
         
       addSub Nothing = return Nothing
       addSub (Just (sub',cons,b)) = do
@@ -314,7 +317,7 @@ gvar_gvar_same (a@(Spine x yl), aty) (b@(Spine _ y'l), _) = do
       
       l = makeBind xN uNl atyl $ map fst perm
       
-      xNty = foldr (uncurry forall) (getBase n aty) perm
+      xNty = foldr (uncurry forAll) (getBase n aty) perm
       
       sub = x |-> l
       
@@ -351,7 +354,7 @@ gvar_gvar_diff'  (Spine x yl, aty) ((Spine x' y'l), bty) = do
       l = makeBind xN uNl atyl $ map (fst . fst) perm
       l' = makeBind xN vNl btyl $ map snd perm
       
-      xNty = foldr (uncurry forall) (getBase n aty) (map fst perm)
+      xNty = foldr (uncurry forAll) (getBase n aty) (map fst perm)
       
       sub = (x' |-> l') *** (x |-> l) -- M.fromList [(x , l), (x',l')]
 
@@ -409,7 +412,7 @@ gvar_fixed (a@(Spine x _), aty) (b@(Spine _ y'l), bty) action = do
       l = toLterm aty
   
       vbuild e = foldr (\((_,nm),ty) a -> case ty of
-                           Left ty -> forall nm ty a
+                           Left ty -> forAll nm ty a
                            Right ty -> imp_forall nm ty a
                        ) e untylr
                  
@@ -560,7 +563,9 @@ equiv (Abs x ty l) (Abs x' ty' l') = do
   equiv ty ty'
   v <- getNewWith "@v"
   equiv (subst (x |-> var v) l) (subst (x' |-> var v) l')  
-equiv (Spine a l) (Spine b l') | a == b = do
+equiv (Spine "type" [Spine u []]) (Spine "type" [Spine v []]) =
+  tell [u :<=: v, v :<=: u]
+equiv (Spine a l) (Spine b l') | a == b && length l == length l' = do
   mapM_ (uncurry equiv) $ zip l l'
 equiv a b = throwTrace 0 $ "Expecting type: "++show a ++ "  ==  "++show b  
 
@@ -571,7 +576,7 @@ subOf (Spine "#forall#" [t, Abs x _ l])  (Spine "#forall#" [t', Abs x' _ l']) = 
   subOf t' t
   v <- getNewWith "@v"
   subOf (subst (x |-> var v) l) (subst (x' |-> var v) l')
-subOf (Spine "#imp-forall#" [t, Abs x _ l])  (Spine "#imp-forall#" [t', Abs x' _ l']) = do
+subOf (Spine "#imp_forall#" [t, Abs x _ l])  (Spine "#imp_forall#" [t', Abs x' _ l']) = do
   subOf t t'
   subOf t' t
   v <- getNewWith "@v"
@@ -586,14 +591,12 @@ universeCheck nm env sp = case sp of
     universeCheck nm env ty
     let env' = M.insert nm ty env
     tyR <- universeCheck nm env' a
-    universeCheck nm env' tyR
-    return $ forall nm ty tyR
+    return $ forAll nm ty tyR
     
   Spine "#imp_abs#" [_, Abs nm ty a] -> do
     universeCheck nm env ty
     let env' = M.insert nm ty env
     tyR <- universeCheck nm env' a
-    universeCheck nm env' tyR
     return $ imp_forall nm ty tyR    
       
   Spine "#forall#" [_, Abs nm ty l] -> do  
@@ -605,7 +608,10 @@ universeCheck nm env sp = case sp of
     subOf k2 k3
     return k3
   Spine "#ascribe#" [ty,a] -> do
-    universeCheck nm env a
+    universeCheck nm env ty
+    actual <- universeCheck nm env a
+    subOf actual ty
+    return ty
   Spine "#imp_forall#" [_, Abs nm ty l] -> do  
     k1 <- universeCheck nm env ty
     k2 <- universeCheck nm (M.insert nm ty env) l
@@ -644,6 +650,7 @@ universeCheck nm env sp = case sp of
             return $ val `apply` a
           -- Do some local universe checking!
           Spine "#ascribe#" (t:v:l) ->  byob $ rebuildSpine v l
+          _ -> throwError $ "Cannot apply a term of type " ++ show fty
     byob fty 
 
 initTypes (Spine a []) | a == tipeName = do
@@ -651,11 +658,11 @@ initTypes (Spine a []) | a == tipeName = do
   return $ Spine a [var v]
 initTypes (Spine "#forall#" [ty,Abs x _ l]) = do 
   ty <- initTypes ty
-  forall x ty <$> initTypes l
-initTypes (Spine "#imp-forall#" [ty,Abs x _ l]) = do 
+  forAll x ty <$> initTypes l
+initTypes (Spine "#imp_forall#" [ty,Abs x _ l]) = do
   ty <- initTypes ty
   imp_forall x ty <$> initTypes l
-initTypes (Spine "#imp-abs#" [ty,Abs x _ l]) = do 
+initTypes (Spine "#imp_abs#" [ty,Abs x _ l]) = do
   ty <- initTypes ty
   imp_abs x ty <$> initTypes l
 initTypes (Spine nm l) = Spine nm <$> T.mapM initTypes l
@@ -671,10 +678,26 @@ checkU nm lst = do
 checkUniverses :: String -> M.Map Name Type -> Type -> Choice ()
 checkUniverses nm env ty = do
   (_,_,lst) <- (\a -> runRWST a () emptyState) $ do
-    env <- M.union constsMap <$> T.mapM initTypes env
+    env <- M.union constsMap <$> T.mapM initTypes (M.restrictKeys env $ freeVariables ty)
     ty  <- initTypes ty
     universeCheck nm env ty
   vtrace 1 ("UNIVERSES: "++show lst) $ checkU nm lst
+
+-- An independent structural check of an elaborated term against its type.
+-- Only initialize constants actually used here, rather than walking the
+-- entire growing environment for every declaration (quadratic in a file).
+inferUniverseLevels :: String -> M.Map Name Type -> Term -> Type -> Choice (M.Map Name Integer)
+inferUniverseLevels nm env tm expected = do
+  (_,_,constraints) <- runRWST (do
+    env' <- M.union constsMap <$> T.mapM initTypes
+      (M.restrictKeys env $ freeVariables tm `S.union` freeVariables expected)
+    tm' <- initTypes tm
+    expected' <- initTypes expected
+    actual <- universeCheck nm env' tm'
+    subOf actual expected') () emptyState
+  case solveUniverses constraints of
+    Nothing -> throwError $ "Impredicative use of type in: " ++ nm
+    Just levels -> return levels
 -----------------------------
 --- constraint generation ---
 -----------------------------
@@ -719,7 +742,7 @@ checkType b sp ty = case sp of
     
   Spine "#forall#" [_, Abs x tyA tyB] -> do
     tyA <- checkType b tyA tipe
-    forall x tyA <$> (addToEnv (.∀) x tyA $ 
+    forAll x tyA <$> (addToEnv (.∀) x tyA $
       checkType b tyB ty )
 
   -- below are the only cases where bidirectional type checking is useful 
@@ -746,8 +769,8 @@ checkType b sp ty = case sp of
     _ -> do
       e <- getNewWith "@e"
       tyA <- checkType b tyA tipe
-      addToEnv (∃) e (forall "" tyA tipe) $ do
-        forall x tyA (Spine e [var x]) ≐ ty
+      addToEnv (∃) e (forAll "" tyA tipe) $ do
+        forAll x tyA (Spine e [var x]) ≐ ty
         Abs x tyA <$> addToEnv (.∀) x tyA (checkType b sp $ Spine e [var x])
   Spine nm [] | isChar nm -> do
     ty ≐ Spine "char" []
@@ -778,11 +801,11 @@ checkType b sp ty = case sp of
             x <- getNewWith "@xin"
             z <- getNewWith "@zin"
             tybody <- getNewWith "@v"
-            let tybodyty = forall z (var x) tipe
+            let tybodyty = forAll z (var x) tipe
             addToEnv (∃) x tipe $ addToEnv (∃) tybody tybodyty $ do 
               a <- checkType b a (var x)
               v <- getNewWith "@v"
-              forall v (var x) (Spine tybody [var v]) ≐ mty
+              forAll v (var x) (Spine tybody [var v]) ≐ mty
               (a:) <$> chop (Spine tybody [a]) l
 
     mty <- (! head) <$> lift getFullCtxt
@@ -884,17 +907,20 @@ unsafeSubst s (Abs nm tp rst) = Abs nm (unsafeSubst s tp) (unsafeSubst s rst)
 --- the public interface ---
 ----------------------------
 
-typePipe verbose lt (b,nm,ty,kind) = do
+typePipe verbose lt (b,nm,ty,kind) = once $ do
   (ty,kind,lt) <- mtrace verbose ("Inferring:   " ++nm) $ 
                   typeInfer False lt (b,nm, ty,kind) -- type infer
 
   (ty,kind,lt) <- mtrace verbose ("Elaborating: " ++nm) $ 
                   typeInfer True lt (b,nm, ty,kind) -- elaborate                  
                   
-  checkUniverses nm (snd <$> lt) ty
-  
   (ty,kind,lt) <- mtrace verbose ("Checking:    " ++nm) $ 
                   typeInfer True lt (b,nm, ty,kind) -- type check
+
+  -- Validate the final reconstructed term, including its expected type,
+  -- before committing to this declaration's elaboration.
+  levels <- inferUniverseLevels nm (snd <$> lt) ty kind
+  vtrace 1 ("UNIVERSE LEVELS for " ++ nm ++ ": " ++ show levels) $ return ()
   
   return (ty,kind,lt)
   
@@ -993,9 +1019,14 @@ toSimpleAxioms l = M.fromList $ (\p -> (p^.predName, ((p^.predSequential, p^.pre
                    <$> toAxioms False l
 
 solver :: ContextMap -> Type -> Either String [(Name, Term)]
-solver axioms tp = case runError $ runRWST (search tp) (M.union envConsts axioms) emptyState of
-  Right ((_,tm),_,_) -> Right $ [("query", tm)]
+solver axioms tp = case runError checkedSearch of
+  Right tm -> Right [("query", tm)]
   Left s -> Left $ "reification not possible: "++s
+  where checkedSearch = do
+          ((_,tm),_,_) <- runRWST (search tp) (M.union envConsts axioms) emptyState
+          appendErr "Invalid proof certificate" $
+            inferUniverseLevels "query proof" (snd <$> axioms) tm tp
+          return tm
 
 reduceDecsByName :: [Decl] -> [Decl]
 reduceDecsByName decs = map snd $ M.toList $ M.fromList $ map (\a -> (a ^. declName,a)) decs

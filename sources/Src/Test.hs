@@ -2,7 +2,7 @@ module Src.Test where
 
 import Src.Substitution
 import Control.Monad.State
-import Control.Monad.Error
+import Control.Monad.Except
 import Data.Monoid
 
 import Src.HOU
@@ -107,7 +107,7 @@ test10 =  ( Bind t
           )
       :&: Pat (t ~> (evvar 0 "f" tt :+: var 0) ) :=: evar 0 "head" t
           
-test t = case fst $ runState (runErrorT $ unifyAll newGraph constants t) (0 :: Int) of
+test t = case fst $ runState (runExceptT $ unifyAll newGraph constants t) (0 :: Int) of
   Right b -> snd b
   Left b -> error $ b
 

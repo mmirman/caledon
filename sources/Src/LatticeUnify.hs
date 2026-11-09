@@ -1,56 +1,28 @@
-module Src.LatticeUnify where
+{-# LANGUAGE FlexibleContexts #-}
+module Src.LatticeUnify (ConsGraph, newGraph, insLT, insLTE, validateGraph) where
 
 import Names
-import Data.Graph.Inductive.PatriciaTree
-import Data.Graph.Inductive.Graph
-import Data.Graph.Inductive.NodeMap
-import Data.Graph.Inductive.Query.DFS
+import Universe
+import Control.Monad.Except (MonadError, throwError)
 
-import Debug.Trace
-data ConsGraph = ConsGraph { posGraph :: Gr Name () 
-                           , negGraph :: Gr Name ()
-                           , nodeMap  :: NodeMap Name
-                           } 
-                 
-connected gr s l = case lab gr (fst s) of
-  Nothing -> False
-  _ -> elem (fst l) $ reachable (fst s) gr
+newtype ConsGraph = ConsGraph [Order] deriving (Eq, Show)
 
-insertNode gr s = case lab gr (fst s) of
-  Nothing -> insNode s gr
-  _ -> gr
+newGraph :: ConsGraph
+newGraph = ConsGraph []
 
-insert gr s l = ins $ insertNode (insertNode gr s) l
-  where ins gr = if elem (fst l) $ neighbors gr (fst l)
-                 then gr
-                 else insEdge (fst s, fst l, ()) gr 
+-- Accumulate edges in O(1); validate once at the end of a candidate
+-- unification branch. Re-solving on every insertion is quadratic.
+insertConstraint :: Monad m => ConsGraph -> Order -> m ConsGraph
+insertConstraint (ConsGraph constraints) constraint =
+  return $ ConsGraph (constraint : constraints)
 
-insLTE (ConsGraph pos neg nm) s l =
-  let (s',nm')  = mkNode nm s
-      (l',nm'') = mkNode nm' l
-  in if not $ connected neg s' l' 
-     then return $ ConsGraph (insert pos s' l') neg nm''
-     else error $ "CAN NOT ADD: "++s++" ≤ "++l
-          
-insLT (ConsGraph pos neg nm) s l = 
-  let (s',nm') = mkNode nm s
-      (l',nm'') = mkNode nm' l
-  in if not $ connected pos l' s'
-     then return $ ConsGraph (insert pos s' l') (insert neg l' s') nm''
-     else error $ s++" < "++l
+validateGraph :: MonadError String m => ConsGraph -> m ()
+validateGraph (ConsGraph constraints)
+  | isUniverseGraph constraints = return ()
+  | otherwise = throwError $ "Inconsistent universe constraints: " ++ show constraints
 
-newGraph = ConsGraph empty empty new
+insLTE :: MonadError String m => ConsGraph -> Name -> Name -> m ConsGraph
+insLTE graph a b = insertConstraint graph (a :<=: b)
 
-
-testGraph = do
-  Just ()
-  let gr = newGraph
-      
-  gr <- insLT gr "a" "b"
-  gr <- insLTE gr "a" "b"
-  gr <- insLTE gr "b" "c"
-  gr <- insLTE gr "c" "b"
-  gr <- insLT gr "c" "d"
-  gr <- insLTE gr "d" "c"
-
-  Just ()
+insLT :: MonadError String m => ConsGraph -> Name -> Name -> m ConsGraph
+insLT graph a b = insertConstraint graph (a :<: b)

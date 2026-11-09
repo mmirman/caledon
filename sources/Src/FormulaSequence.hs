@@ -98,7 +98,7 @@ instance Environment Ctxt where
       (form',recon') <- bR recon 
       return (ctxt { ctxtContext = B ty recon' <| seqe } , form' )
     where bR recon = case L.partition toLeft recon of
-            ([],_) -> Nothing
+            (_,[]) -> Nothing
             (lefts,rights) -> Just (foldl mappend Done $ map (\(Right a) -> a) rights , Left form:lefts)             
             
   putLeft (c@Ctxt{ ctxtRecon = re, ctxtContext = seqe }) b = case viewl seqe of

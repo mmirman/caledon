@@ -17,6 +17,7 @@ import Src.LatticeUnify
 import Src.Tracing
 
 import Control.Monad.Trans (lift)
+import Control.Monad (unless)
 
 import Control.Monad.State.Class (MonadState())
 import Control.Monad.Error.Class (MonadError(..))
@@ -84,7 +85,7 @@ uvarTy recon ctxt (Con "#forall#") = do
   v3 <- getNewWith "@v3"
   recon <- putGr recon (:<=:) v1 v3
   recon <- putGr recon (:<=:) v2 v3
-  return $ (forall (tipemake v1) $ (vvar 0 ~> tipemake v2) ~> tipemake v3, recon)
+  return $ (forAll (tipemake v1) $ (vvar 0 ~> tipemake v2) ~> tipemake v3, recon)
 uvarTy recon ctxt hB = return $ (getTy ctxt hB, recon)
 
 
@@ -160,10 +161,12 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
           DeBr i -> all (i >) ppA && inj ppA
           _ -> inj ppA
         
-        identity _ h1 h2 | h1 == h2 = return $ (recon, reset ctxt Done)
         identity f (universeView -> Init a) (universeView -> Init b) = do
           recon <- putGr recon f a b
           return (recon, reset ctxt Done)
+        identity f h1 h2 | h1 == h2 = case f (Pat h1) (Pat h2) of
+          _ :<: _ -> lift $ throwError "A universe cannot be strictly below itself"
+          _ -> return (recon, reset ctxt Done)
         identity f (tipeView -> Init a) (tipeView -> UniversalType) = do
           return (recon, reset ctxt Done)
         identity f (tipeView -> UniversalType) (tipeView -> Init a) = do
@@ -171,11 +174,12 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
         identity (=:=) (viewForallPsimp -> Just (a,b)) (viewForallPsimp -> Just (a',b')) = do
           return $ (recon, reset ctxt $ Pat a :=: Pat a' :&: b =:= b') -- implements the "switching" for atoms
         identity f (viewPat -> ~(hAO,ppA)) (viewPat -> ~(hBO, ppB)) = do
+          onlyIf $ hAO == hBO
           (hA,recon) <- uvarTy recon ctxt hAO
           (hB,recon) <- uvarTy recon ctxt hBO
           onlyIf $ hA == hB
           if length ppA /= length ppB 
-            then error $ "universal quantifiers have different numbers of arguments: "++show constraint 
+            then lift $ throwError $ "universal quantifiers have different numbers of arguments: "++show constraint
             else return ()
           return $ ( recon 
                    , reset ctxt $ case zipWith f ppA ppB of
@@ -183,8 +187,11 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                      lst -> foldr1 (:&:) lst
                    )
         
-        gvar_uvar a (viewPat -> ~(hB,mB)) = do
+        gvar_uvar a@((dist,nm,ty),_) b@(viewPat -> ~(hB,mB)) = do
           (tyB,recon) <- uvarTy recon ctxt hB
+          if rigidP (Exi dist nm ty) b
+            then lift $ throwError "occurs check"
+            else return ()
           let b' = (hB, tyB, mB)
           gvar_uvar_outside recon a b' <|> gvar_uvar_inside recon a b'
 
@@ -219,7 +226,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                             
               tyB' = getTyLst tyLst (zip ppA ppB)
                 where getTyLst (ty:c) ((a,b):lst)
-                        | a == b = forall ty $ getTyLst c lst
+                        | a == b = forAll ty $ getTyLst c lst
                         | otherwise = liftV (-1) $ getTyLst c lst
                       getTyLst _ _ = tyBase
                             
@@ -271,7 +278,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
               
               appUVars c = foldl (:+:) c uVars
               
-              foralls base = liftV lenTyLstA $ foldr forall base tyLstA  -- we raise after quantifying because we are capturing base with tyLstA
+              foralls base = liftV lenTyLstA $ foldr forAll base tyLstA  -- we raise after quantifying because we are capturing base with tyLstA
               
               xNms = [ ("/"++xNm++"^"++show i++"\\",ty) | (i,ty) <- zip [0..] tyLstB ]
               
@@ -355,7 +362,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
           case upI 1 ctx form of
             Just (ctx'', form) -> 
               let ty = liftV (-1) $ getTy ctx (DeBr 0) -- from the original context! 
-                  newExi = (dist - 1, xNm++"@r", forall ty tyA)
+                  newExi = (dist - 1, xNm++"@r", forAll ty tyA)
                   newpat = Pat $ (liftV 1 $ Var $ uncurriedExi newExi) :+: var 0 
 
                   substF (Bind ty' f) | ty == ty' = Bind ty' $ subst' (newpat, Exi dist xNm tyA) f
@@ -393,7 +400,7 @@ unify recon (ctxt, constraint@(viewEquiv -> (f,a,b))) = ueq f (a,b) <|> ueq (fli
                   
                   (samesA,samesB) = unzip sames
                                     
-                  getTyLst tb (ty:c) (a:lst) | elem a ppB = forall ty $
+                  getTyLst tb (ty:c) (a:lst) | elem a ppB = forAll ty $
                                                          getTyLst tb c lst
                   getTyLst tb (ty:c) (a:lst) = liftV (-1) $ getTyLst tb c lst {- case liftV (-1) $ Abs ty {- should be lazy -} $ Pat $ getTyLst tb c lst of
                     ~(Abs _ (Pat t)) -> t -}
@@ -535,7 +542,7 @@ interpret :: (Show a, Alternative m, MonadError String m,Environment a, MonadSta
              Constants -> (UniContext, (a,Form)) -> m UniContext
 interpret _ (recon, (ctxt,Done)) | isDone ctxt = return recon
 interpret cons (recon, unf) = vtrace 5 ("\nCONSTRAINTS: "++(show $ uncurry rebuild unf)) $ do
-  True <- return $ checkExiForm $ uncurry rebuild unf
+  unless (checkExiForm $ uncurry rebuild unf) $ throwError "Ill-scoped constraint"
   
   m <- runMaybeT $ unifyOrSearch recon unf -- (emptyCon cons :: Ctxt,unf)          
   case m of
@@ -545,11 +552,14 @@ interpret cons (recon, unf) = vtrace 5 ("\nCONSTRAINTS: "++(show $ uncurry rebui
                           ++"\nCONS: "++show (uncurry rebuild unf)
                           ++"\nLIST: "++show (concatMap (snd <$>) lst)
             next ([]:l) = next l
-            next [a] = interpret cons =<< (fail "" <|> F.asum (return <$> a))
+            next [a] = interpret cons =<< (empty <|> F.asum (return <$> a))
             next (a:l)  = appendErr "" current <|> next l -- this will need to be tested extensively
-              where current = interpret cons =<< (fail "" <|> F.asum (return <$> a))
+              where current = interpret cons =<< (empty <|> F.asum (return <$> a))
 
 unifyAll :: (Alternative m, MonadError String m, MonadState Int m) =>
             ConsGraph -> Constants -> Form -> m UniContext
-unifyAll cg cons unf = appendErr "" $ interpret cons ((cg, mempty), (emptyCon cons :: Ctxt, unf))
+unifyAll cg cons unf = appendErr "" $ do
+  result@(graph,_) <- interpret cons ((cg, mempty), (emptyCon cons :: Ctxt, unf))
+  validateGraph graph
+  return result
 

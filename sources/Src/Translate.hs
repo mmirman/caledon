@@ -11,10 +11,10 @@ import qualified Src.AST as B
 import qualified Src.Reconstruction as B
 import qualified Src.Context as B
 import qualified Data.Map as M
-import Data.Functor
+import Data.Functor ((<$>), (<$))
 import Data.Monoid
 import qualified Data.Traversable as T
-import Control.Monad.State.Strict (forM_,modify, get,put, State, runState)
+import Control.Monad.State.Strict (modify, get,put, State, runState)
 
 ------------------------------
 --- conversion to debruijn ---

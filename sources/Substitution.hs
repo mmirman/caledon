@@ -14,7 +14,7 @@ import qualified Data.Foldable as F
 import Data.List
 import Data.Maybe
 import Data.Monoid
-import Data.Functor
+import Data.Functor ((<$>), (<$))
 import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
@@ -31,7 +31,7 @@ class ValueTracker c where
   takeValue :: c -> Integer
 
 instance ValueTracker Integer where
-  putValue _ i = i
+  putValue i _ = i
   takeValue i = i
 
 getNew :: (Functor m, MonadState c m, ValueTracker c) => m String
@@ -163,7 +163,7 @@ instance Subst Spine where
       last:r | last == var nm && not (S.member nm $ freeVariables $ Spine h $ reverse r) -> Spine h $ reverse r
       _ -> Abs nm ty (Spine h l)
     i -> Abs nm ty i  
-  etaReduce (Spine "#forall#" [t, Abs nm _ rst]) = forall nm t' rst'
+  etaReduce (Spine "#forall#" [t, Abs nm _ rst]) = forAll nm t' rst'
     where t' = etaReduce t
           rst' = etaReduce rst  
   etaReduce (Spine "#imp_forall#" [t, Abs nm _ rst]) = imp_forall nm t' rst'
@@ -180,13 +180,31 @@ instance Alpha Spine where
   alphaConvert s m (Spine "#tycon#" [Spine c [v]]) = tycon c $ alphaConvert s m v          
   alphaConvert s m (Spine a l) = Spine (fromMaybe a (m ! a)) $ alphaConvert s m l
   
-  rebuildFromMem s (Spine "#imp_forall#" [_,Abs a ty r]) = imp_forall a (rebuildFromMem s ty) $ rebuildFromMem (M.delete a s) r
-  rebuildFromMem s (Spine "#imp_abs#" [_,Abs a ty r]) = imp_abs a (rebuildFromMem s ty) $ rebuildFromMem (M.delete a s) r
-  rebuildFromMem s (Abs nm ty r) = Abs (fromMaybe nm $ M.lookup nm s) (rebuildFromMem s ty) $ rebuildFromMem s r
-  rebuildFromMem s (Spine a l) = Spine a' $ rebuildFromMem s l
-    where a' = fromMaybe a $ M.lookup a s
-                                 
-  
+  -- Restoring source names is alpha-renaming, not a global textual rename.
+  -- Fresh eta binders and restored binders must never capture each other.
+  rebuildFromMem names term = restore names reserved term
+    where
+      renamed n = M.findWithDefault n n names
+      reserved = S.map renamed (freeVariables term) `S.union` implicitNames term
+      implicitNames (Spine tag [_, Abs n ty body])
+        | tag == "#imp_forall#" || tag == "#imp_abs#" =
+          S.insert n (implicitNames ty `S.union` implicitNames body)
+      implicitNames (Abs _ ty body) = implicitNames ty `S.union` implicitNames body
+      implicitNames (Spine _ args) = S.unions (map implicitNames args)
+      restore env used (Spine tag [_, Abs n ty body])
+        | tag == "#imp_forall#" || tag == "#imp_abs#" =
+          let ty' = restore env used ty
+          in Spine tag [ty', Abs n ty' (restore (M.delete n env) (S.insert n used) body)]
+      restore env used (Abs n ty body) =
+        let wanted = M.findWithDefault n n env
+            fresh = newNameFor wanted used
+        in Abs fresh (restore env used ty)
+             (restore (M.insert n fresh env) (S.insert fresh used) body)
+      restore env used (Spine "#tycon#" [Spine label [value]]) =
+        tycon label (restore env used value)
+      restore env used (Spine n args) =
+        Spine (M.findWithDefault n n env) (map (restore env used) args)
+
 instance Subst Decl where
   substFree sub f (Predicate s nm ty cons) = Predicate s nm (substFree sub f ty) ((\(b,(nm,t)) -> (b,(nm,substFree sub f t))) <$> cons)
   substFree sub f (Query nm ty) = Query nm (substFree sub f ty)

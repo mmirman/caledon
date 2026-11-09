@@ -43,26 +43,107 @@ Philosophies
 Usage
 -----
 
-* To install from hackage:
+The restored command-line implementation is tested locally with GHC 9.14.1
+and Cabal 3.18.2.0. CI also targets GHC 9.6.7.
 
-```
-> cabal install caledon
-```
-
-* To install directly from source:
-
-```
-> git clone git://github.com/mmirman/caledon.git
-> cd caledon
-> cabal configure
-> cabal install
+```sh
+cabal update
+cabal build all
+cabal test --test-show-details=direct
+cabal run caledon -- examples/theorems.ncc
+cabal bench universes
 ```
 
-* To run:
+To install the executable, run `cabal install exe:caledon`. Parse errors,
+type errors, and unsolved queries return a nonzero exit status. `--io-only`
+suppresses successful diagnostic output; `-v2` also shows inferred universe
+level assignments for each checked declaration.
 
-```
-> caledon file.ncc
-```
+Verification and theorem demonstrations
+--------------------------------------
+
+[examples/theorems.ncc](examples/theorems.ncc) contains checked proof terms for:
+
+* Polymorphic identity: `[a : type] a -> a`.
+* Composition: `[a b c : type] (b -> c) -> (a -> b) -> a -> c`.
+* Modus ponens: `[a b : type] a -> (a -> b) -> b`.
+* Church conjunction introduction, both projections, and commutativity.
+
+Its six queries produce proof witnesses for identity, composition,
+identity computation, swapping and projecting a pair, `2 + 2 = 4`, and
+higher-order matching under a lambda. The last query infers `f = succ` in
+`lambda x . succ (f x) = lambda x . succ (succ x)`.
+Each returned query witness is structurally checked against its goal,
+including universe constraints, before it is reported as a solution.
+These examples use no `unsound` declarations; arithmetic and equality use
+the explicitly declared natural-number, addition, and reflexivity rules.
+
+The regression suite checks both unifiers by applying their reconstructed
+substitutions to the original equations. It covers projection, imitation,
+flex-flex pruning, scope raising, distinct rigid heads, occurs checks,
+variable capture, backtracking, fairness, and rejected proof certificates.
+It also runs the prelude and the inference, universes, Church-numeral,
+higher-order search, and HOAS linearity examples through the executable.
+Malformed syntax, invalid applications, false equality, and an uninhabited
+goal must fail.
+
+Universe solver theorem
+-----------------------
+
+For a finite set of constraints `u <= v` and `u < v`, a natural-number
+assignment exists **iff no strongly connected component contains a strict
+edge**. The implementation is [sources/Universe.hs](sources/Universe.hs).
+
+Proof: assign weight 0 to a non-strict edge and weight 1 to a strict edge.
+A cycle containing a strict edge would imply `level(u) >= level(u) + 1`,
+so no solution can contain one. Conversely, if there is no such cycle,
+every edge inside an SCC has weight 0. Give all its vertices one level
+and collapse it to a vertex. The resulting graph is acyclic. In topological
+order, assign each vertex the maximum of 0 and its predecessors' levels
+plus the corresponding edge weights. Every constraint is then satisfied.
+Induction over that order also proves the assignment is pointwise least:
+every solution must be at least every predecessor's level plus that weight.
+
+The SCC and longest-path passes take `O(V + E)` time and space. The current
+string-name indexing adds `O((V + E) log V)` time. Constraints are accumulated
+before solving, rather than solving the whole graph after each insertion.
+The type checker initializes only constants referenced by a declaration and
+avoids re-traversing inferred codomains at every lambda.
+
+The tests exhaust all **19,683** directed three-vertex graphs with absent,
+non-strict, or strict edges. An independent enumerator checks all assignments
+in `{0,1,2}^3`, checks the returned certificate and its leastness, and checks
+both insertion orders. This bound is sufficient because a simple path in a
+three-vertex graph contains at most two strict edges. The benchmark includes
+chains and fan-out graphs of 1,000, 10,000, and 100,000 constraints, forcing
+the entire output assignment. On the restoration machine (Apple Silicon,
+GHC 9.14.1, optimized build), the 100,000-edge chain took about 0.21 CPU
+seconds. This measures the universe solver, not all of type inference.
+
+For comparison, [Idris 1's universe solver](https://github.com/idris-lang/Idris-dev/blob/fc50b6fd9f67a0f499d08b5b81fff139a080cb2d/src/Idris/Core/Constraints.hs)
+uses bounded-domain propagation with a queue of affected constraints and
+prunes unused constraints. [Idris 2's FAQ](https://idris2.readthedocs.io/en/latest/faq/faq.html#does-idris-have-universe-polymorphism-what-is-the-type-of-type)
+states that it currently implements `Type : Type`; that does not supply
+Caledon's requested predicative hierarchy.
+
+Scope of the evidence
+---------------------
+
+The graph theorem is a mathematical proof of the constraint algorithm.
+The executable tests and checked Caledon terms are regression evidence,
+not a mechanized soundness or completeness proof of the entire language.
+Universe levels retain the historical per-elaboration inference semantics;
+this change does not introduce global universe polymorphism. General proof
+search can still diverge. Constructor declarations introduce assumptions,
+and `unsound` explicitly permits circular declarations.
+
+The CLI uses the complete named-term frontend in `sources/HOU.hs`. The
+experimental de Bruijn implementation in `sources/Src/` is compiled and its
+unifier is tested, but its frontend still has unfinished implicit support
+and is not used by the CLI. Other files in `examples/` include historical
+syntax, deliberate failures, and unfinished experiments; the regression
+suite identifies the supported working examples rather than treating every
+historical experiment as a valid program.
 
 * Unicode syntax is possible in emacs using: 
 
@@ -118,8 +199,8 @@ defn linear : (trm → trm) → prop
                                ← linear V
 ```
 
-* Calculus of Constructions:  This is now consistent, and still has similar expressive power!  Now any term must be terminating. Although term/proof search might not be
-terminating, proof search can be used to search more intelligently for theorems in the term language.
+* Calculus of Constructions: universe constraints are inferred and checked.
+Proof search can be used to find terms; see the verification scope above.
 
 ```
 defn maybe   : prop → prop

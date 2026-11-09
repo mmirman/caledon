@@ -1,0 +1,7 @@
+defn nat : type
+   | zero = nat
+   | succ = nat -> nat
+fixity none 5 =:=
+defn =:= : nat -> nat -> type
+   | refl = X =:= X
+query impossible = [x : nat] x =:= succ x

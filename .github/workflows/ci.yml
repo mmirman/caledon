@@ -1,0 +1,20 @@
+name: Build and verify
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ghc: ['9.6.7', '9.14.1']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: '3.18.2.0'
+      - run: cabal build all --enable-tests --enable-benchmarks
+      - run: cabal test --test-show-details=direct
+      - run: cabal bench universes
+      - run: cabal check

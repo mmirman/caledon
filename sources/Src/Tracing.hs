@@ -10,7 +10,7 @@ import Data.IORef
 
 import Control.Exception
 import Control.DeepSeq
-import Data.Functor
+import Data.Functor ((<$>), (<$))
 
 {-# NOINLINE levelVar #-}
 levelVar :: IORef Int
@@ -36,7 +36,6 @@ handlers = [ Handler $ \(s :: ArithException)   -> return $ Left $ show s
            , Handler $ \(s :: ArrayException)   -> return $ Left $ show s
            , Handler $ \(s :: ErrorCall)        -> return $ Left $ show s
            , Handler $ \(s :: PatternMatchFail) -> return $ Left $ show s
-           , Handler $ \(s :: SomeException)    -> return $ Left $ show s
            ]
            
 deepAppendError :: NFData a => String -> a -> a

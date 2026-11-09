@@ -7,9 +7,9 @@ import HOU
 import Substitution
 import Src.Tracing
 import Choice
-import qualified Src.Pipeline as Src
 import Parser
 import System.Environment
+import System.Exit (die)
 import Data.Foldable as F (forM_)
 import Data.List (partition)
 import Data.Monoid
@@ -17,7 +17,7 @@ import Control.Monad (when)
 
 import Data.IORef
 
-import Control.Lens ((^.), (.~), (&))
+import Control.Lens ((^.), (^?!), (.~), (&))
 import Language.Preprocessor.Cpphs
 
 -----------------------------------------------------------------------
@@ -32,7 +32,7 @@ checkAndRun verbose decs = do
   
   when verbose $ putStrLn "\nCOMPILING: "
   decs <- case runError $ typeCheckAll verbose decs of
-    Left e -> error e
+    Left e -> die e
     Right e -> do when verbose $ putStrLn "DONE: compilation success!\n"
                   return e
                   
@@ -40,7 +40,7 @@ checkAndRun verbose decs = do
         Define {} -> True
         _ -> False
       
-      sub = subst $ foldr (\a r -> r *** ((a^.declName) |-> subst r (a^.declValue))) mempty defs
+      sub = subst $ foldr (\a r -> r *** ((a^.declName) |-> subst r (a^?!declValue))) mempty defs
       (predicates, targets) = flip partition others $ \x -> case x of
         Predicate {} -> True
         _ -> False
@@ -62,7 +62,7 @@ checkAndRun verbose decs = do
   forM_ targets' $ \target -> do
     when verbose $ putStrLn $ "\nTARGET: \n"++show target
     case solver axioms $ target ^. declType of
-      Left e -> putStrLn $ "ERROR: "++e
+      Left e -> die $ "ERROR in query " ++ target ^. declName ++ ": " ++ e
       Right sub -> when verbose $ putStrLn $ "SOLVED WITH:\n"
                    ++concatMap (\(a,b) -> a++" => "++show b++"\n") sub
 
@@ -91,7 +91,7 @@ processFile options = do
   
   let mError = parseCaledon fname file 
   decs <- case mError of
-    Left e -> error $ show e
+    Left e -> die $ show e
     Right l -> return l
   checkAndRun (not $ options ^. optIO_Only) $ reduceDecsByName decs
           

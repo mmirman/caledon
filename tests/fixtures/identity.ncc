@@ -1,0 +1,3 @@
+defn myid : [a : type] a -> a
+  as \ a x . x
+query identity = [a : type] a -> a

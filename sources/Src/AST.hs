@@ -112,7 +112,7 @@ evar i n t = toTerm $ Var $ Exi i n t
 vcon = Var . Con
 con = toTerm . vcon
 
-forall ty n = vcon "#forall#" :+: toTerm ty :+: Abs ty (toTerm n)
+forAll ty n = vcon "#forall#" :+: toTerm ty :+: Abs ty (toTerm n)
 
 inameName = "#name#"
 iname = vcon inameName
@@ -128,7 +128,7 @@ imp_abs nm ty n = vcon "#imp_abs#" :+: toTerm ty :+: imp_name (Var $ Con nm) :+:
 imp_forall nm ty n = vcon "#imp_forall#" :+: toTerm ty :+: imp_name (Var $ Con nm) :+: Abs ty (toTerm n)
 
 infixr 2 ~>
-a ~> b = forall a b
+a ~> b = forAll a b
 
 tipeName = "type"
 tipe = vcon tipeName
@@ -176,10 +176,10 @@ constants :: Constants
 constants = M.fromList [ (tipeName, constant $ ulevel ~> tipeu )
                        , (universeName, constant $ ulevel)
                        , (ulevelName, constant $ ulevel )
-                       , ("#forall#", constant $ forall tipeu $ (vvar 0 ~> tipeu) ~> tipeu)
-                       , ("#ascribe#", constant $ forall tipeu $ vvar 0 ~> vvar 0)
+                       , ("#forall#", constant $ forAll tipeu $ (vvar 0 ~> tipeu) ~> tipeu)
+                       , ("#ascribe#", constant $ forAll tipeu $ vvar 0 ~> vvar 0)
                        --, ("#name#", constant tipeu)
-                       --, ("#imp_forall#", constant $ forall tipeu $ (vvar 0 ~> tipeu) ~> tipeu)
+                       --, ("#imp_forall#", constant $ forAll tipeu $ (vvar 0 ~> tipeu) ~> tipeu)
                        --, ("#tycon#", constant $ iname ~> tipeu ~> tipeu)
                        ]
             
@@ -204,11 +204,13 @@ bind ty r = case r of
   Done -> Done
   _ -> Bind ty r                   
   
+instance Semigroup Form where
+  Done <> a = a
+  a <> Done = a
+  a <> b = a :&: b
+
 instance Monoid Form where
   mempty = Done
-  mappend Done a = a
-  mappend a Done = a
-  mappend a b = a :&: b
   
   
 instance Show Form where

@@ -6,7 +6,7 @@ import TopoSortAxioms
 import Src.AST
 import Src.Substitution
 import Src.Context
-import Data.Functor
+import Data.Functor ((<$>), (<$))
 import Src.FormulaSequence (Ctxt)
 import qualified Data.Set as S
 import qualified Data.Map as M
@@ -35,7 +35,7 @@ raiseAll = ran []
             Exi i nm ty -> foldl (:+:) exi' (reverse args)
               where fromBot = length lst - i - 1
                     (args,types) = unzip $ drop fromBot $ zip (map (Pat . Var . DeBr) [0..]) lst
-                    ty' = foldr forall (rap lst ty) (reverse types)
+                    ty' = foldr forAll (rap lst ty) (reverse types)
                     exi' = Var $ Exi 0 nm ty'
                     
 quantifyExistentials :: N -> N

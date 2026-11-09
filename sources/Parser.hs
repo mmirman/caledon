@@ -14,7 +14,7 @@ import Names
 import AST
 import Substitution
 import Control.Applicative (Applicative(..))
-import Data.Functor
+import Data.Functor ((<$>), (<$))
 import Data.Functor.Identity
 import Text.Parsec
 import Control.Monad (unless)
@@ -232,14 +232,14 @@ pTipe = do
       table = [ [ altPostfix ["λ", "\\"] ["lambda"] Abs
                 , altPostfix ["?λ", "?\\"] ["?lambda"] imp_abs
                 , regPostfix angles ["??"] ["infer"] infer
-                , regPostfix brackets ["∀"] ["forall"] forall
+                , regPostfix brackets ["∀"] ["forall"] forAll
                 , regPostfix braces ["?∀"] ["?forall"] imp_forall
                 ]++[ altPostfix [op] [] (\nm t s -> Spine op [t, Abs nm ty_hole s] ) | op <- opLams ]
                 ++[ altPostfix [] [op] (\nm t s -> Spine op [t,Abs nm ty_hole s] ) | op <- strLams ]
-              , [ binary (forall) AssocRight $ reservedOp "->" <|> reservedOp "→" 
+              , [ binary (forAll) AssocRight $ reservedOp "->" <|> reservedOp "→"
                 , binary (const (~~>)) AssocRight $ reservedOp "=>" <|> reservedOp "⇒"
                 ]
-              , [ binary (flip . forall) AssocLeft $ reservedOp "<-" <|> reservedOp "←"
+              , [ binary (flip . forAll) AssocLeft $ reservedOp "<-" <|> reservedOp "←"
                 , binary (flip . const (~~>)) AssocLeft $ reservedOp "<=" <|> reservedOp "⇐" 
                 ]
               , [ binary (const ascribe) AssocNone $ reservedOp ":"
@@ -260,10 +260,23 @@ pTipe = do
         reservedOp nm
         return $ \a -> Spine nm [a])
 
-      ptipe = buildExpressionParser (reverse $ table) terminal
+      -- Parsec's expression parser accepts only one prefix at a precedence
+      -- level. Combine successive binders explicitly; recursing back to
+      -- ptipe from terminal without consuming input loops on syntax errors.
+      mergePrefixes ops = case [p | Prefix p <- ops] of
+        [] -> ops
+        ps -> Prefix (foldr (.) id <$> many1 (choice ps)) : filter nonPrefix ops
+      nonPrefix (Prefix _) = False
+      nonPrefix _ = True
+      ptipe = buildExpressionParser (map mergePrefixes $ reverse table) terminal
       -- now terms must be parsed in pattern normal form
       
-      terminal = try trm <|> (myParens "terminal" ptipe) <|> ptipe <?> "terminal"
+      terminal = try trm <|> myParens "terminal" ptipe <|> nestedPrefix <?> "terminal"
+      nestedPrefix = do
+        -- An arrow's RHS can begin with a lower-precedence binder. Consume
+        -- that binder before recursion, so malformed input still terminates.
+        f <- choice [p | ops <- table, Prefix p <- ops]
+        f <$> ptipe
       
       trm =  do t <- pHead
                 tps <- many pArg

@@ -9,10 +9,12 @@
 module Choice where
 
 import Control.Monad
-import Data.Functor
+import Data.Functor ((<$>), (<$))
+import Data.Char (isSpace)
 import Control.Applicative
 import Control.Monad.Error.Class (catchError, throwError, MonadError)
 import Control.Monad.Cont
+import Control.Monad.Trans (lift)
 
 data Choice a = Choice a :<|>: Choice a
               | Fail String
@@ -20,18 +22,27 @@ data Choice a = Choice a :<|>: Choice a
               deriving (Functor)
 
 instance Monad Choice where
-  fail = Fail
-  return = Success
   Fail a >>= _ = Fail a
   (m :<|>: m') >>= f = (m >>= f) :<|>: (m' >>= f)
   Success a >>= f = f a
+
+instance MonadFail Choice where
+  fail = Fail
 
 instance Applicative Choice where
   pure = Success
   mf <*> ma = mf >>= (<$> ma)
 
-determine a b = appendErr "" $ (:<|>:) (appendErr "" a) (appendErr "" b)
---determine = (:<|>:)
+-- Keep alternatives until their entire continuation has succeeded. Running
+-- runError here commits to a local success and destroys both backtracking
+-- and the fairness of the breadth-first interpreter.
+determine = (:<|>:)
+
+-- An explicit cut, for boundaries where a complete result has been checked.
+-- Keep this separate from Alternative and error annotation: those must not
+-- silently discard branches whose later constraints have yet to be solved.
+once :: Choice a -> Choice a
+once search = either Fail Success (runError search)
 
 instance Alternative Choice where
   empty = Fail ""
@@ -48,7 +59,7 @@ instance RunChoice Choice where
   runError chs = case dropWhile notSuccess lst of
     [] -> case dropWhile notFail lst of
       Fail a:_ -> Left a
-      _ -> error "this result makes no sense"
+      _ -> Left "No solution"
     Success a : _ -> Right a
     _ -> error "this result makes no sense"
     where lst = chs:queue lst 1
@@ -58,20 +69,22 @@ instance RunChoice Choice where
           queue ((a :<|>: b):l) q = a:b:queue l (q + 1)
           queue (_:l) q = queue l (q - 1)
 
-          notFail (Fail _) = False
+          notFail (Fail s) = all isSpace s
           notFail _ = True
 
           notSuccess (Success _) = False
           notSuccess _ = True
 
 appendErr :: (MonadError String m) => String -> m a -> m a
-appendErr s m = catchError m $ \s' -> throwError $ s' ++ "\n" ++ s
+appendErr s m = catchError m $ \s' ->
+  throwError $ if all isSpace s' then s' else s' ++ "\n" ++ s
 
 instance MonadError String Choice where
   throwError = Fail
-  catchError try1 foo_try2 = case runError try1 of
-    Left s -> foo_try2 s
-    Right a -> Success a
+  catchError (Fail s) handler = handler s
+  catchError (Success a) _ = Success a
+  catchError (a :<|>: b) handler =
+    catchError a handler :<|>: catchError b handler
 
 type CONT_T a m c = ((c -> m a) -> m a)
 
@@ -81,4 +94,4 @@ instance (Monad m, Alternative m) => Alternative (ContT a m) where
   c1 <|> c2 = ContT $ \cont -> m1f cont <|> m2f cont
     where m1f = runContT c1
           m2f = runContT c2
-    
+

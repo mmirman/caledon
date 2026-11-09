@@ -1,0 +1,52 @@
+-- Constructive proofs; all type and universe annotations are inferred
+-- except the public signatures. No unsound declarations or imports.
+
+defn identity : [a : type] a -> a
+  as \ a x . x
+
+defn compose : [a b c : type] (b -> c) -> (a -> b) -> a -> c
+  as \ a b c f g x . f (g x)
+
+defn modusPonens : [a b : type] a -> (a -> b) -> b
+  as \ a b x f . f x
+
+-- Conjunction represented by its eliminator (Church encoding).
+defn conjunction : type -> type -> type
+  as \ a b . [r : type] (a -> b -> r) -> r
+
+defn pair : [a b : type] a -> b -> conjunction a b
+  as \ a b x y r k . k x y
+
+defn first : [a b : type] conjunction a b -> a
+  as \ a b p . p a (\ x y . x)
+
+defn second : [a b : type] conjunction a b -> b
+  as \ a b p . p b (\ x y . y)
+
+defn swap : [a b : type] conjunction a b -> conjunction b a
+  as \ a b p r k . p r (\ x y . k y x)
+
+-- Definitional equality witnesses verify beta/eta computation too.
+defn nat : type
+   | zero = nat
+   | succ = nat -> nat
+
+defn equal : [a : type] a -> a -> type
+   | reflexivity = [a : type][x : a] equal a x x
+
+defn add : nat -> nat -> nat -> type
+   | addZero = [n : nat] add zero n n
+   | addSucc = [n m r : nat] add n m r -> add (succ n) m (succ r)
+
+query identityProof = [a : type] a -> a
+query compositionProof = [a b c : type] (b -> c) -> (a -> b) -> a -> c
+query swapComputation = equal nat
+  (first nat nat (swap nat nat (pair nat nat zero (succ zero))))
+  (succ zero)
+query identityComputation = equal nat (identity nat (succ zero)) (succ zero)
+query twoPlusTwo = add (succ (succ zero)) (succ (succ zero))
+                      (succ (succ (succ (succ zero))))
+-- Unification solves f under a lambda, producing f = succ.
+defn underLambda : (nat -> nat) -> type
+   | underLambdaProof = [f : nat -> nat] underLambda (\ x . succ (f x))
+query higherOrder = underLambda (\ x . succ (succ x))

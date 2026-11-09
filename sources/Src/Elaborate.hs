@@ -9,10 +9,9 @@ import Src.AST
 import Src.Context
 import Src.FormulaSequence
 import Src.Substitution
-import Data.Functor
+import Data.Functor ((<$>), (<$))
 import Control.Monad.RWS.Lazy (RWS, ask, local, censor, runRWS, censor, tell, get, put, listen, lift)
 import Control.Monad.State.Class (MonadState(), get, modify)
-import Control.Spoon
 import Data.Monoid
 
 type TypeChecker = RWS Ctxt Form Int
@@ -60,9 +59,9 @@ genConstraintN n n' ty = case n of
           genConstraintN sp (appN' (liftV 1 n') $ var 0) tyF'
       _ -> do
         v1 <- getNewWith "@tmake1"
-        e <- getNewExists "@e" (forall (liftV 1 tyA) $ tipemake v1)
+        e <- getNewExists "@e" (forAll (liftV 1 tyA) $ tipemake v1)
         let body = e :+: var 0
-        Pat (forall tyA body) .<=. Pat ty
+        Pat (forAll tyA body) .<=. Pat ty
         bindForall tyA $ 
           genConstraintN sp (appN' (liftV 1 n') $ var 0) body
       
@@ -91,12 +90,12 @@ genConstraintP p p' = case p of
     tyAty <- genConstraintP tyAorg tyA
     Pat tyAty .<=. Pat tyret
     
-    tyFf' <- (getNewExists "@fbody" . forall tyA . tipemake) =<< getNewWith "@tmakeF"
+    tyFf' <- (getNewExists "@fbody" . forAll tyA . tipemake) =<< getNewWith "@tmakeF"
     bindForall tyA $ do
       tyFty <- genConstraintP tyF (liftV 1 tyFf' :+: var 0)
       Pat tyFty .<=. Pat (liftV 1 tyret)
       
-    Pat (forall tyA $ liftV 1 tyFf' :+: var 0) .=. Pat p'
+    Pat (forAll tyA $ liftV 1 tyFf' :+: var 0) .=. Pat p'
     
     return tyret
   (tipeView -> Init v1) -> do
@@ -151,7 +150,7 @@ getType (a :+: v) = do
       l' <- getNewWith   "@tmakeF"
       ty <- getNewExists "@xty" $ tipemake l
       tyBody <- getNewExists "@ftyBody" (ty ~> tipemake l')
-      Pat x .=. Pat (forall ty (tyBody :+: var 0))
+      Pat x .=. Pat (forAll ty (tyBody :+: var 0))
       return (tyBody :+: v)
     Just ~(ty,t') -> do
       return $ fromType $ appN' (Abs ty $ Pat t') v

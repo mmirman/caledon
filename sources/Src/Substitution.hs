@@ -7,7 +7,7 @@ module Src.Substitution where
 import Src.Tracing
 import Src.AST
 import Src.Context
-import Data.Functor
+import Data.Functor ((<$>), (<$))
 
 import qualified Data.Set as S  
 import qualified Data.Map as M
@@ -240,6 +240,7 @@ instance CheckExi N where
   checkExi i e@(Abs ty v) = checkExi i ty && deepAppendError ("IN: λ : "++show ty) (checkExi (i+1) v)
   
 instance CheckExi Form where  
+  checkExi _ Done = True
   checkExi i (a :&: b) = checkExi i a && checkExi i b 
   checkExi i (a :@: b) = checkExi i a && checkExi i b 
   checkExi i (Bind ty v) = checkExi i ty && deepAppendError ("IN: ∀: "++show ty) (checkExi (i+1) v)

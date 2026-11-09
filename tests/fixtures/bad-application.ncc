@@ -1,0 +1,4 @@
+defn nat : type
+   | zero = nat
+defn bad : nat
+  as zero zero

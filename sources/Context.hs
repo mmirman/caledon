@@ -7,7 +7,7 @@ import Names
 import AST
 import Substitution
 import Data.Monoid
-import Data.Functor
+import Data.Functor ((<$>), (<$))
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
@@ -39,6 +39,7 @@ data Binding = Binding { elmQuant :: Quant
                
 instance Subst Binding where
   substFree sub f b = b { elmType = substFree sub f $! elmType b }
+  etaReduce b = b { elmType = etaReduce (elmType b) }
                     
 data Context = Context { ctxtHead :: Maybe Name
                        , ctxtMap  :: Map Name Binding
@@ -47,6 +48,7 @@ data Context = Context { ctxtHead :: Maybe Name
                                   
 instance Subst Context where               
   substFree sub f b = b { ctxtMap = substFree sub f <$> ctxtMap b }
+  etaReduce b = b { ctxtMap = etaReduce <$> ctxtMap b }
 
 lookupWith s a ctxt = case M.lookup a ctxt of
   Just r -> r
@@ -126,7 +128,7 @@ getHead (Context (Just h) ctx _) = lookupWith "getting head" h ctx
 getHead (Context Nothing _ _) = error "no head"
 
 -- gets the list of bindings after (below) a given binding
-getAfter s bind ctx = tail $ getAfterInclusive s bind ctx            
+getAfter s bind ctx = drop 1 $ getAfterInclusive s bind ctx
 getAfterInclusive s bind ctx@(Context{ ctxtMap = ctxt }) = gb bind
   where gb ~(Binding quant nm ty _ n) = (quant, (nm,ty)):case n of
           Nothing -> []
@@ -135,7 +137,7 @@ getAfterInclusive s bind ctx@(Context{ ctxtMap = ctxt }) = gb bind
             Just c -> c
 
 -- gets the list of bindings before (above) a given binding
-getBefore s bind ctx = tail $ getBeforeInclusive s bind ctx            
+getBefore s bind ctx = drop 1 $ getBeforeInclusive s bind ctx
 getBeforeInclusive s bind ctx@(Context{ ctxtMap = ctxt }) = gb bind
   where gb ~(Binding quant nm ty p _) = (quant, (nm,ty)):case p of
           Nothing -> []

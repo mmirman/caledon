@@ -9,7 +9,7 @@ module AST where
 
 import Names
 import qualified Data.Foldable as F
-import Data.Functor
+import Data.Functor ((<$>), (<$))
 import qualified Data.Set as S
 import qualified Data.Map as M
 import Data.Monoid
@@ -21,13 +21,6 @@ data Spine = Spine Name [Type]
            | Abs Name Type Spine 
            deriving (Eq)
                     
-instance Monoid Spine where 
-  mempty  = undefined
-  mappend = undefined
-instance Monoid Bool where 
-  mempty  = undefined
-  mappend = undefined
-
 type Kind = Spine
 type Type = Spine
 type Term = Spine
@@ -59,14 +52,6 @@ data FlatPred = FlatPred { _predData :: PredData
                          , _predType :: Type
                          , _predKind :: Kind
                          }
-instance Show FlatPred where
-  show (FlatPred a b c d e) = "FlatPred ("
-                              ++show a++")  ("
-                              ++show b++")  ("
-                              ++show c++")  ("
-                              ++show d++")  ("
-                              ++show e++")  ("
-                         
 $(makeLenses ''PredData)
 $(makeLenses ''FlatPred)
 $(makeLenses ''Decl)
@@ -145,6 +130,14 @@ instance Show Spine where
 
 
 
+instance Show FlatPred where
+  show (FlatPred a b c d e) = "FlatPred ("
+                              ++show a++")  ("
+                              ++show b++")  ("
+                              ++show c++")  ("
+                              ++show d++")  ("
+                              ++show e++")  ("
+
 instance Show Decl where
   show a = case a of
     Predicate s nm ty [] -> showDef s ++ nm ++ " : " ++ show ty
@@ -177,12 +170,14 @@ instance Show Constraint where
 -----------------------------
 --- Constraint Properties ---          
 -----------------------------          
+instance Semigroup Constraint where
+  SCons [] <> b = b
+  a <> SCons [] = a
+  SCons a <> SCons b = SCons $ a++b
+  a <> b = a :&: b
+
 instance Monoid Constraint where
   mempty = SCons []
-  mappend (SCons []) b = b
-  mappend a (SCons []) = a
-  mappend (SCons a) (SCons b) = SCons $ a++b
-  mappend a b = a :&: b
 
 {-# RULES
  "mappendmempty" mappend mempty = id
@@ -217,7 +212,7 @@ instance FV FlatPred where
 --------------------------------
 infixr 0 ~>
 infixr 0 ~~>
-(~>) = forall ""
+(~>) = forAll ""
 (~~>) = imp_forall ""
 
 var !nm = Spine nm []
@@ -228,7 +223,7 @@ ty_hole = var "#hole#"
 tipe = var tipeName
 ascribe a t = Spine "#ascribe#" [t, a]
 dontcheck t = Spine "#dontcheck#" [t]
-forall x tyA v = Spine "#forall#" [tyA, Abs x tyA v]
+forAll x tyA v = Spine "#forall#" [tyA, Abs x tyA v]
 infer x tyA v = Spine "#infer#" [tyA, Abs x tyA v]
 
 imp_forall x tyA v = Spine ("#imp_forall#") [tyA, Abs x tyA v]
@@ -237,13 +232,13 @@ tycon nm val = Spine "#tycon#" [Spine nm [val]]
 
 consts = [ (tipeName , tipe)
          -- atom : kind
-         , ("#ascribe#", forall "a" tipe $ (var "a") ~> (var "a"))
+         , ("#ascribe#", forAll "a" tipe $ (var "a") ~> (var "a"))
          
-         , ("#forall#", forall "a" tipe $ (var "a" ~> tipe) ~> tipe)
+         , ("#forall#", forAll "a" tipe $ (var "a" ~> tipe) ~> tipe)
            
-         , ("#imp_forall#", forall "a" tipe $ (var "a" ~> tipe) ~> tipe)
+         , ("#imp_forall#", forAll "a" tipe $ (var "a" ~> tipe) ~> tipe)
            
-         , ("#imp_abs#", forall "a" tipe $ forall "foo" (var "a" ~> tipe) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))
+         , ("#imp_abs#", forAll "a" tipe $ forAll "foo" (var "a" ~> tipe) $ imp_forall "z" (var "a") (Spine "foo" [var "z"]))
          ]
 
 
